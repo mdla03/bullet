@@ -82,9 +82,28 @@ IGNORED contracts/verifier/test_snapshots/...
 Tracked from `circuits/build`: only `verification_key.json`, `proof.json`,
 `public.json`, `input.json` (all <5KB, public). No file >1MB in the commit set.
 
+## 5. Real testnet confirmation (free — Friendbot test XLM, no real money)
+Built the bench contract to wasm32 (2.4K), deployed to testnet, invoked, and
+decoded the simulation `SorobanTransactionData` for the real instruction count.
+
+- Toolchain: `rustup` rust 1.96 + `wasm32-unknown-unknown`, `stellar-cli` 27.0.0.
+- Throwaway identity `zeekpay-bench` (stored in `~/.config/stellar/`, NOT in
+  repo), funded by Friendbot.
+- Contract: `CCNJPUHMJEIJC4IKONJHBZ2RQ4GZQ5HR7BQMLWWQW6HD4SW3IYKAVOBT`
+- Deploy tx: `ae28e8d50fa3d0287f58181e8db80756445eb431666666d03d94e2475fc613b4`
+
+| Shape | instructions (real) | % of 1e8 | resource fee | host-test est. | overhead |
+|-------|--------------------:|---------:|-------------:|---------------:|---------:|
+| Groth16 (4 pairings + MSM-2, 1 pub input) | **70,662,026** | **70.66%** | 61,898 stroops (~0.0062 XLM) | 70,205,506 | +0.65% |
+| 4 pairings + MSM-8 (7 pub inputs)         | 79,888,324 | 79.89% | 68,356 stroops | 79,158,015 | +0.92% |
+
+Both invocations returned `true`. **The host-test estimate was accurate to
+<1%** — wasm execution + dispatch overhead is negligible next to the host-fn
+pairings. Real on-chain Groth16 verify ≈ **70.7% of budget, ~29% headroom.**
+Fee is ~0.006 test XLM (zero real cost).
+
 ## What is NOT tested
-- Real snarkjs proof bytes decoded + verified **on-chain** (soroban-contract).
-- Real **testnet fee** in XLM (deferred; free via Friendbot when wanted).
-- wasm32 contract-execution overhead on top of host-fn cost (host-test measures
-  the dominant host cost; wasm glue is small relative to pairings).
+- Real snarkjs proof *bytes* decoded + verified on-chain (soroban-contract) —
+  the benchmark used the cost-shape, not byte-decoded vk/proof. G2 encoding is
+  the first thing to validate in soroban-contract.
 - PLONK comparison (not needed — Groth16 fits; see review.md).
