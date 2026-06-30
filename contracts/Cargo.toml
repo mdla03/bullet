@@ -1,0 +1,22 @@
+[workspace]
+resolver = "2"
+members = ["zeekpay", "verifier"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2021"
+license = "UNLICENSED"
+
+# Soroban SDK is added in the soroban-contract / verifier-benchmark features.
+# Kept out of the scaffold so `cargo build` stays dependency-free on day 1.
+[workspace.dependencies]
+
+[profile.release]
+opt-level = "z"
+overflow-checks = true
+debug = 0
+strip = "symbols"
+debug-assertions = false
+panic = "abort"
+codegen-units = 1
+lto = true

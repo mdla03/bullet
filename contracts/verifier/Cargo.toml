@@ -1,0 +1,11 @@
+[package]
+name = "verifier"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# soroban-sdk + Groth16 verifier deps added in the verifier-benchmark feature.

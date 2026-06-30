@@ -1,0 +1,13 @@
+{
+  "name": "@zeekpay/frontend",
+  "version": "0.0.0",
+  "private": true,
+  "description": "ZeekPay frontend — Next.js + TS + Tailwind, stellar-sdk + Freighter.",
+  "scripts": {
+    "dev": "echo \"[placeholder] Next.js dev server scaffolded in the frontend-send feature\"",
+    "build": "echo \"[placeholder] @zeekpay/frontend build wired up when Next.js app lands\""
+  },
+  "dependencies": {
+    "@zeekpay/shared": "workspace:*"
+  }
+}

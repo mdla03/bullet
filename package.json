@@ -1,0 +1,17 @@
+{
+  "name": "zeekpay",
+  "version": "0.0.0",
+  "private": true,
+  "description": "ZeekPay — ZK-private payment rail on Stellar. Pay an X handle or email without exposing the sender<->recipient link on-chain.",
+  "packageManager": "pnpm@9.7.0",
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=9"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter \"@zeekpay/backend\" --filter \"@zeekpay/frontend\" dev",
+    "build": "pnpm -r build",
+    "build:circuits": "echo \"[placeholder] wired up in the circom-circuit feature\"",
+    "deploy:testnet": "echo \"[placeholder] wired up in the soroban-contract / e2e-demo features\""
+  }
+}

@@ -1,0 +1,23 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .: {}
+
+  backend:
+    dependencies:
+      '@zeekpay/shared':
+        specifier: workspace:*
+        version: link:../shared
+
+  frontend:
+    dependencies:
+      '@zeekpay/shared':
+        specifier: workspace:*
+        version: link:../shared
+
+  shared: {}
