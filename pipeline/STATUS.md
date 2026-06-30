@@ -1,0 +1,105 @@
+# ZeekPay — Project Status (session handoff)
+
+Last updated: 2026-06-30. Demo deadline: 2026-07-07.
+ZeekPay = ZK-private payment rail on Stellar; pay an X handle / email without
+exposing the sender↔recipient link on-chain. Fixed-denomination notes (1/10/50/
+100 USDC), Tornado-style amount-unlinkability, NOT encrypted balances.
+
+## 1. Locked decisions (with rationale)
+- **Proof system: Groth16** — fits Soroban budget; PLONK/off-chain-attestation
+  fallbacks unneeded.
+- **Curve: BLS12-381** — Soroban has native `bls12_381` host functions (Protocol
+  22 / CAP-0059); BN254 has none (would run in wasm → too costly).
+- **On-chain verify cost: ~70.66% of the 100M per-tx CPU budget** (real testnet),
+  ~29% headroom. Each extra public input ≈ +1.5M instructions.
+- **Commitment model: Option B (off-chain Merkle).** On-chain Poseidon-Merkle
+  insert benchmarked at depth-20 = 401.9% = 4× over budget → Option A dead.
+  Deposit just stores commitment + emits event; a relayer/admin posts roots via
+  `post_root`; claim proves membership vs a contract-known root.
+- **Option B trust seam:** the root-poster is trusted (could admit a forged
+  tree). Documented in README honest-limits. Decentralizing it is future work.
+- **Trusted setup:** our own (non-MPC) Groth16 setup for the hackathon; intermediate
+  ptau is toxic waste and gitignored; production path = MPC ceremony.
+- **soroban-sdk pinned `=22.0.7`** — first series with bls12_381 host fns.
+- **Byte encoding (snarkjs → Soroban), PROVEN correct by a real-proof test:**
+  G1 = BE(X)||BE(Y) (96B); G2 = BE(X_c1)||BE(X_c0)||BE(Y_c1)||BE(Y_c0) (192B, note
+  c1 BEFORE c0); Fr = BE (32B). snarkjs stores Fp2 as [c0,c1] → converter swaps.
+- **Contract⇄circuit public-input interface (LOCKED):** claim public inputs =
+  `[Fr(root), Fr(nullifier), Fr(recipient_digest), Fr(denom)]` where
+  `recipient_digest = sha256(recipient.to_xdr)` with the top byte zeroed (< r),
+  and `denom` is its u32 (1/10/50/100). The circom claim circuit MUST match this
+  exactly or every real proof fails.
+
+## 2. Completed features (commit hashes)
+- `94fdf4e` **repo-scaffold** — monorepo skeleton, pnpm workspaces
+  (backend/frontend/shared/circuits), Cargo workspace, `.gitignore` (verified via
+  git check-ignore; fixed inline-comment bug that broke negations), `.env.example`,
+  README, `.vscode/settings.json`. Builds green.
+- `423a01a` **verifier-benchmark** — Groth16 fits (~70% via host budget meter);
+  real BLS12-381 proof generated + verified off-chain.
+- `02e23d7` **verifier-benchmark testnet confirm** — real testnet 70.66%; proof
+  system locked; recorded in SPEC §6 + README.
+- `24d89e7` **soroban-contract Option-A benchmark** — on-chain Poseidon-Merkle
+  insert = NO-GO (4× over). Recommended Option B.
+- `7ac0be2` **soroban-contract Plan finalized for Option B.**
+- `de99d5a` **soroban-contract** — deposit/post_root/claim/nullifier storage/fixed
+  denoms/events. Real Groth16 verifier (src/verifier.rs) proven by a real snarkjs
+  proof verifying `true` (src/test.rs `real_proof_verifies`). 9 tests pass (3
+  real-verifier + 6 adversarial: double-spend, unknown root, paused, uninit, admin
+  auth, happy path) via a cfg(test)-only verify bypass excluded from the 19K wasm.
+
+Each feature has Plan→Code→Test→Review artifacts under `pipeline/<feature>/`.
+
+## 3. Exact next feature to start
+**`circom-circuit`** — the real claim circuit: Poseidon-Merkle membership +
+nullifier derivation, exposing exactly the 4 public inputs in the LOCKED interface
+above (root, nullifier, recipient_digest, denom). Why next: it is the next P0 item
+and the soroban-contract claim path cannot be tested end-to-end (with a real
+4-input proof) until it exists. Keep the circuit minimal so in-browser proving
+stays fast. Start with `pipeline/circom-circuit/spec.md` and STOP for owner OK
+before coding (pipeline rule).
+After it: resolver-service → x-oauth-identity → frontend-send → frontend-inbox →
+frontend-claim → copy-paste-claim-link → e2e-demo (P0 order in SPEC §4).
+
+## 4. Open follow-ups / known gaps (verbatim)
+- End-to-end claim with a REAL matching proof — needs the real 4-public-input
+  claim circuit (circom-circuit). The verifier is proven real in isolation; the
+  business logic is proven with the bypass. Joined in circom-circuit / e2e-demo.
+- Nullifier TTL/rent: persistent entry has no `extend_ttl`; a reaped nullifier =
+  double-spend. MUST add extend_ttl/archival handling before any non-demo use.
+  Top follow-up.
+- `Fr::from_bytes` with root/nullifier ≥ r — caller-supplied edge; behavior
+  (panic vs reduce) to confirm; a panic would be a DoS (not fund loss).
+- vk is set post-deploy via `set_vk`; the real claim-circuit vk must replace the
+  benchmark vk.
+- Real testnet fee for the full claim deferred to e2e-demo (free via Friendbot).
+
+## 5. Environment / setup facts a fresh session needs
+- Working dir: `/Users/mark03/Developer/personal-projects/bullet` (git repo, branch
+  `master`; commit only when the user asks).
+- Node v22 (engines pin `>=20`); pnpm via `corepack pnpm` (pinned `pnpm@9.7.0`);
+  `pnpm-workspace.yaml` members: backend, frontend, shared, circuits.
+- Rust: use rustup toolchain, NOT Homebrew rust (1.83 fails edition2024 transitive
+  deps). PATH must front `$HOME/.cargo/bin`: `export PATH="$HOME/.cargo/bin:$PATH"`.
+  rustup stable = 1.96.x; `wasm32-unknown-unknown` target installed.
+- circom 2.2.3 at `~/.local/bin/circom` (macOS amd64 binary via Rosetta; arm64 host).
+- stellar-cli 27.0.0 via Homebrew (`/opt/homebrew/bin/stellar`).
+- Cargo builds: `cargo build --manifest-path contracts/Cargo.toml ...`. Tests:
+  `cargo test --manifest-path contracts/Cargo.toml -p <crate>`.
+- Circuit/proof regen: `bash circuits/scripts/run-benchmark.sh` then
+  `node circuits/scripts/convert-to-soroban.mjs` (writes groth16_soroban.json +
+  contracts/zeekpay/src/groth16_fixture.rs).
+- **Testnet = free** (Friendbot test XLM, no real money). Throwaway identity
+  `zeekpay-bench` stored in `~/.config/stellar/identity/` (OUTSIDE repo, not
+  committed). Network alias `testnet` is built into stellar-cli. **User requires
+  ZERO monetary cost** — prefer free/offline paths; never use mainnet/paid APIs.
+- Deployed bench contracts (testnet, reference only):
+  verifier `CCNJPUHMJEIJC4IKONJHBZ2RQ4GZQ5HR7BQMLWWQW6HD4SW3IYKAVOBT`;
+  Poseidon-merkle bench `CDQIYJYAVR3OWQC32V4NZOHERIIVMJEPKH32RKWUGHV6M2NQI3WYTQWV`.
+- Toxic waste: `*.ptau` (incl. final.ptau, 6.8M), `*.zkey`, `*.wtns`,
+  `**/test_snapshots/` are gitignored. Only tiny public vk/proof/public/input JSON
+  is tracked. Never commit files >1MB without asking.
+
+## 6. Source of truth
+For anything not covered here, read `SPEC.md` (binding P0 scope + design) and the
+per-feature `pipeline/<feature>/{spec,changes,test-results,review}.md` artifacts.
