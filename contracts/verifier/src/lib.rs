@@ -14,6 +14,40 @@ extern crate std;
 #[cfg(test)]
 mod test;
 
+// Minimal bump allocator — BENCHMARK ONLY, to let ark-ff link in the wasm build
+// for the Poseidon-Merkle deposit-cost measurement. Never frees; not for product.
+#[cfg(all(target_arch = "wasm32", not(test)))]
+mod bench_alloc {
+    use core::alloc::{GlobalAlloc, Layout};
+    use core::cell::UnsafeCell;
+
+    const HEAP: usize = 256 * 1024;
+    struct Bump {
+        buf: UnsafeCell<[u8; HEAP]>,
+        next: UnsafeCell<usize>,
+    }
+    unsafe impl Sync for Bump {}
+    unsafe impl GlobalAlloc for Bump {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            let next = self.next.get();
+            let align = layout.align();
+            let start = (*next + align - 1) & !(align - 1);
+            let end = start + layout.size();
+            if end > HEAP {
+                return core::ptr::null_mut();
+            }
+            *next = end;
+            (self.buf.get() as *mut u8).add(start)
+        }
+        unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {}
+    }
+    #[global_allocator]
+    static A: Bump = Bump {
+        buf: UnsafeCell::new([0u8; HEAP]),
+        next: UnsafeCell::new(0),
+    };
+}
+
 use soroban_sdk::{contract, contractimpl, Env, Vec};
 
 #[contract]
@@ -81,5 +115,74 @@ impl BenchContract {
         }
 
         bls.pairing_check(g1s, g2s)
+    }
+
+    /// Deposit-cost benchmark for Option A (on-chain Merkle insert).
+    /// Runs a faithful Poseidon(2) arithmetic workload (t=3, 8 full + 57 partial
+    /// rounds, x^5 S-box, 3x3 MDS) over BLS12-381 Fr in PURE WASM (no host fn —
+    /// Soroban has no Poseidon host fn) for `levels` tree levels. Returns a
+    /// value derived from the result to defeat dead-code elimination. Measure
+    /// the real instruction cost by deploying + invoking on testnet.
+    pub fn bench_merkle_insert(_env: Env, levels: u32) -> u32 {
+        use ark_bls12_381::Fr;
+        use ark_ff::{One, PrimeField, Zero};
+
+        // x^5 S-box.
+        fn sbox(x: Fr) -> Fr {
+            let x2 = x * x;
+            let x4 = x2 * x2;
+            x4 * x
+        }
+
+        const R_F: u32 = 8; // full rounds
+        const R_P: u32 = 57; // partial rounds
+        const ROUNDS: u32 = R_F + R_P; // 65
+        let half_full = R_F / 2; // 4
+
+        // Pseudo round constant / MDS entries (nonzero so they can't be folded).
+        let rc = Fr::from(7u64);
+        let m = Fr::from(3u64);
+
+        let mut acc = Fr::one();
+        let mut lvl = 0u32;
+        while lvl < levels {
+            // Poseidon(2): absorb (acc, sibling), capacity 0.
+            let mut s0 = acc;
+            let mut s1 = acc + Fr::one(); // pseudo sibling, data-dependent
+            let mut s2 = Fr::zero();
+
+            let mut r = 0u32;
+            while r < ROUNDS {
+                let full = r < half_full || r >= (ROUNDS - half_full);
+                // add round constants
+                s0 += rc;
+                s1 += rc;
+                s2 += rc;
+                // S-box layer (full: all 3; partial: first only)
+                if full {
+                    s0 = sbox(s0);
+                    s1 = sbox(s1);
+                    s2 = sbox(s2);
+                } else {
+                    s0 = sbox(s0);
+                }
+                // MDS mix (3x3 -> 9 muls)
+                let n0 = s0 * m + s1 * m + s2 * m;
+                let n1 = s0 * m + s1 * m + s2 * m;
+                let n2 = s0 * m + s1 * m + s2 * m;
+                s0 = n0;
+                s1 = n1;
+                s2 = n2;
+                r += 1;
+            }
+            acc = s0;
+            lvl += 1;
+        }
+
+        // Derive a u32 from the result (prevents DCE of the whole loop).
+        // Use bigint limbs directly — no Vec alloc (contract wasm has no allocator).
+        let bi = acc.into_bigint();
+        let limb0 = bi.as_ref()[0];
+        (limb0 as u32) ^ ((limb0 >> 32) as u32)
     }
 }
