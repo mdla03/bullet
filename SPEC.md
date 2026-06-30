@@ -178,6 +178,13 @@ workspace for `contracts/`. Repo layout per kickoff brief.
 
 ## 7. ZK / cryptographic design (security-sensitive)
 
+**Proof system (LOCKED, verifier-benchmark 2026-06-30):** **Groth16 over
+BLS12-381**, verified on-chain via Soroban's native `bls12_381` host functions.
+A Groth16 verify (4-pair pairing_check + IC MSM) measured **70.66% of the 100M
+per-tx CPU instruction budget on testnet** (~29% headroom; fee ~0.006 XLM). The
+PLONK / off-chain-attestation fallbacks are NOT needed. In-browser proving uses
+snarkjs over BLS12-381.
+
 Detailed design decisions are finalized in each feature's `spec.md`. The
 high-level shape:
 

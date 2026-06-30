@@ -1,12 +1,14 @@
 # verifier-benchmark — Review (review.md)
 
 ## VERDICT: GO — Groth16 on-chain via Soroban `bls12_381` host functions
+## (CONFIRMED ON TESTNET + owner-approved)
 
 A Groth16 verify (4-pair `pairing_check` + IC MSM, 1 public input) costs
-**~70.2M / 100M CPU instructions (~70%, ~30% headroom)**, and the native host
-functions are confirmed working (pairing identity verifies `true`). No need for
-the PLONK / off-chain-attestation fallbacks. **Proof system for ZeekPay:
-Groth16 over BLS12-381.**
+**70,662,026 / 100M CPU instructions (70.66%, ~29% headroom) — measured on
+testnet**, fee ~0.0062 test XLM. Native host functions confirmed working
+(verifies `true`). No need for the PLONK / off-chain-attestation fallbacks.
+**Proof system for ZeekPay: Groth16 over BLS12-381.** Owner confirmed GO
+(with the testnet-first check, now done).
 
 ### Why not the fallbacks
 - **PLONK on-chain:** unnecessary — Groth16 fits. PLONK verify is generally
@@ -15,13 +17,13 @@ Groth16 over BLS12-381.**
   on-chain didn't fit. It does. Keep verification trustless on-chain.
 
 ## Confidence / caveats (honest)
-- **Measured via host budget meter, not a testnet invoke.** Same host cost
-  model, so the instruction figure is faithful; but the real tx also pays for
-  wasm execution of the contract glue + I/O marshalling. That overhead is small
-  next to 4 pairings, but the *true* on-chain number will be somewhat **above**
-  70%. **Headroom is ~30% — comfortable but not huge.** Recommend confirming
-  with a real testnet deploy before the contract is finalized (free via
-  Friendbot). Until then, treat 70% as a lower bound.
+- **CONFIRMED ON TESTNET.** Real deploy + invoke (free, Friendbot): Groth16
+  shape = **70,662,026 instructions = 70.66% of budget** (fee ~0.0062 test XLM).
+  The host-test estimate (70.21%) was accurate to **<1%** — wasm/dispatch
+  overhead is negligible. Multi-input (7 pub) = 79.89%. **Headroom ~29% —
+  comfortable.** The earlier "treat 70% as a lower bound" caveat is resolved:
+  the real number is essentially the same.
+  Contract `CCNJPUHMJEIJC4IKONJHBZ2RQ4GZQ5HR7BQMLWWQW6HD4SW3IYKAVOBT`.
 - **Cost-shape, not byte-decoded proof.** On-chain cost is value-independent, so
   this is valid for go/no-go. Decoding snarkjs vk/proof into Soroban's G1/G2
   byte encoding (esp. G2 Fp2 component order) is unfinished and is real
@@ -53,12 +55,12 @@ privacy. No change needed from this feature. The proof-system decision (Groth16
 ## Recommended follow-ups (NOT built)
 1. **soroban-contract:** real verifier decoding snarkjs vk/proof bytes; test the
    first on-chain verify against a known snarkjs proof (catches G2 encoding).
-2. One **free testnet deploy** to confirm the real fee + true budget % with wasm
-   overhead included, before locking the design.
-3. Pin/automate the `circom` binary install in the bench script.
-4. Keep public-input count small in the claim circuit (each adds ~1.5M).
+2. Pin/automate the `circom` binary install in the bench script.
+3. Keep public-input count small in the claim circuit (each adds ~1.5M).
+4. Consider tearing down / ignoring the throwaway `zeekpay-bench` testnet key
+   when no longer needed (it holds only test XLM).
 
-## Owner decision required (HARD STOP)
-Confirm **GO: Groth16 over BLS12-381** as ZeekPay's proof system. On confirmation
-I record it in SPEC/README and proceed to `soroban-contract`. If you'd rather I
-collect the real testnet number first (free) before committing, say so.
+## Owner decision — RESOLVED
+Owner confirmed **GO: Groth16 over BLS12-381** (testnet-first). Real number
+collected (70.66%). Decision recorded in SPEC §6 + README. Proceed to
+`soroban-contract`.

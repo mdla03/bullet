@@ -44,7 +44,7 @@ ZeekPay does **not** oversell. What is and isn't private in v1:
 ## Stack
 
 - **Contracts:** Rust + Soroban SDK (Stellar testnet) — `contracts/`
-- **ZK:** Circom + snarkjs, Groth16 (PLONK / off-chain-attestation fallback) — `circuits/`
+- **ZK:** Circom + snarkjs, **Groth16 over BLS12-381** (benchmarked at ~70% of Soroban's per-tx instruction budget — verified on-chain via native `bls12_381` host functions) — `circuits/`
 - **Backend:** Node.js + TypeScript (resolver, X OAuth, SendGrid P1) — `backend/`
 - **Frontend:** Next.js + TS + Tailwind, `stellar-sdk` + Freighter — `frontend/`
 - **Shared types:** `shared/`
