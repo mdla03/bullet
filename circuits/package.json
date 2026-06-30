@@ -1,0 +1,14 @@
+{
+  "name": "@zeekpay/circuits",
+  "version": "0.0.0",
+  "private": true,
+  "description": "ZeekPay Circom circuits + snarkjs tooling.",
+  "type": "module",
+  "scripts": {
+    "bench": "bash scripts/run-benchmark.sh"
+  },
+  "devDependencies": {
+    "circomlib": "2.0.5",
+    "snarkjs": "0.7.5"
+  }
+}
