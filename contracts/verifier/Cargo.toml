@@ -8,4 +8,9 @@ license.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-# soroban-sdk + Groth16 verifier deps added in the verifier-benchmark feature.
+# Pinned to 22.0.x: MSRV 1.79 (builds on the Homebrew rust 1.83 in this env) and
+# the first series exposing the bls12_381 host functions (Protocol 22 / CAP-0059).
+soroban-sdk = "=22.0.7"
+
+[dev-dependencies]
+soroban-sdk = { version = "=22.0.7", features = ["testutils"] }
