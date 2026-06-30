@@ -1710,6 +1710,10 @@ dependencies = [
 [[package]]
 name = "zeekpay"
 version = "0.0.0"
+dependencies = [
+ "hex",
+ "soroban-sdk",
+]
 
 [[package]]
 name = "zerocopy"

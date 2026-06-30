@@ -36,6 +36,12 @@ ZeekPay does **not** oversell. What is and isn't private in v1:
   unlinkability still holds; the delivery path is trusted. Privacy-maximizing
   users can use the copy-paste link instead.
 - **X delivery is manual copy-paste by design** — no automated DMs (spam risk).
+- **Merkle root is posted by a relayer (Option B trust seam).** On-chain
+  Poseidon-Merkle insertion does not fit Soroban's instruction budget
+  (benchmarked at ~4× over), so the commitment tree is built off-chain and a
+  relayer/admin posts roots on-chain. A malicious root-poster could admit a
+  forged tree. Decentralizing this (or an on-chain incremental tree with a
+  cheaper hash) is future work.
 - **Trusted setup.** The hackathon uses **our own Groth16 setup**. That is a
   trust assumption: soundness depends on our setup randomness not leaking. The
   production path is a multi-party MPC ceremony. Intermediate `ptau`
