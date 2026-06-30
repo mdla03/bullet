@@ -69,35 +69,47 @@ I need your pick (or "benchmark A first") before finalizing the interface,
 because it changes the contract storage model, the circuit (circom-circuit),
 and the public-input count.
 
-## Provisional public interface (assuming A or B — Merkle membership)
+## Public interface — LOCKED to Option B (off-chain Merkle)
 ```rust
 // denominations as an enum -> fixed u128 amounts (7-decimal USDC on Stellar)
 enum Denom { One, Ten, Fifty, Hundred }   // 1,10,50,100 * 10^7 stroops-USDC
 
 fn initialize(env, admin: Address, usdc_sac: Address);
 
-// Pull `denom` USDC from `from` via the USDC SAC; insert commitment.
+// Pull `denom` USDC from `from` via the USDC SAC; store commitment; emit event.
+// NO on-chain tree insertion (Option B) -> cheap deposit.
 fn deposit(env, from: Address, denom: Denom, commitment: BytesN<32>);
-//   emits: Deposit { commitment, denom, leaf_index }  (NO sender in event)
+//   emits: Deposit { commitment, denom, index }   (NO sender in event)
 
-// Verify Groth16 proof; check root known; check nullifier unused; mark used;
-// pay `recipient` the denom amount.
+// Relayer/admin posts a Merkle root computed off-chain over emitted commitments.
+// The contract keeps a rolling window of recent valid roots. THIS IS THE TRUST
+// SEAM of Option B (documented in README honest-limits).
+fn post_root(env, root: BytesN<32>);          // auth: admin/relayer
+
+// Verify Groth16 proof; require `root` is a known posted root; check nullifier
+// unused; mark used (atomic); pay `recipient` the denom amount.
 fn claim(env, proof: Bytes, root: BytesN<32>, nullifier: BytesN<32>,
          recipient: Address, denom: Denom);
 //   emits: Claim { nullifier, denom }       (NO commitment / no link to deposit)
 
 fn is_nullifier_used(env, nullifier: BytesN<32>) -> bool;  // view
+fn is_known_root(env, root: BytesN<32>) -> bool;           // view
 ```
-Public inputs to the proof: `{root, nullifier, recipient, denom}` — recipient
-bound in to prevent front-running/re-targeting (resolves the §6 open item).
+Public inputs to the proof: `{root, nullifier, recipient, denom}` — recipient +
+denom bound in to prevent front-running/re-targeting and denom-mismatch drains
+(resolves the §6 open item). ~4 field public inputs -> verify ≈ the benchmarked
+~70-75% of budget (MSM grows slightly; still fits).
 
-## Storage model
-- `Nullifiers`: persistent map `BytesN<32> -> ()` (presence = used).
-- `Roots`: set of valid Merkle roots (A: just current; B: recent-N window).
+## Storage model (Option B)
+- `Nullifiers`: persistent map `BytesN<32> -> ()` (presence = used). **Never
+  expires** — a forgotten nullifier = double-spend. Test TTL/rent handling.
+- `Roots`: rolling window of recent valid roots (size N, e.g. 64) — claims may
+  prove against any root in the window (handles in-flight deposits). Posted by
+  admin/relayer.
+- `CommitmentIndex`: counter for the `Deposit { index }` event (off-chain
+  indexer ordering).
 - `Denom pools`: contract holds USDC; per-denom balance implicit in SAC balance.
 - `Admin`, `usdc_sac`: instance storage.
-- TTL/rent: bump persistent entries (nullifiers must never expire — a forgotten
-  nullifier = double-spend; **call this out, test it**).
 
 ## USDC SAC integration
 - Use the USDC Stellar Asset Contract client (`token::Client`) for
@@ -132,13 +144,21 @@ bound in to prevent front-running/re-targeting (resolves the §6 open item).
 - **Fund custody:** contract holds pooled USDC; denom of claim must match the
   proof's denom public input (else drain a big note with a small proof).
 
-## Open questions for owner
-1. **Design fork above: A, B, or C? (or "benchmark A first")** — gates
-   everything.
-2. **Test USDC on testnet:** OK to deploy our own test USDC SAC (free) for
-   tests, or use an existing testnet USDC issuer?
-3. **Admin/upgradeability:** include an admin (pause, set vk) for the demo, or
-   keep it immutable/minimal? Recommend minimal admin (pause only).
-4. Merkle tree depth (if A/B) — propose 20 (1M notes). OK?
+## Resolved decisions
+1. **Design fork: Option B** — confirmed by owner after the A benchmark NO-GO.
+2. **Test USDC:** deploy our own test USDC SAC on testnet (free, full control of
+   mint/balances for tests). *Default — override if you want a specific issuer.*
+3. **Admin:** minimal admin needed anyway for `post_root`; also gets `set_vk`
+   and `pause`. No upgradeability beyond that. *Default.*
+4. **Merkle depth: 20** (≈1M notes). Lives in the circuit (off-chain); contract
+   only stores 32-byte roots, so depth doesn't affect on-chain cost. *Default.*
+5. **Root window size: 64** recent roots. *Default.*
 
-No code until you answer Q1 (and ideally 2–4).
+## Remaining gaps handled in later features
+- The actual Merkle membership + Poseidon live in `circom-circuit` (next P0
+  feature). This contract treats the proof as opaque and only checks
+  `{root, nullifier, recipient, denom}` public inputs + Groth16 validity.
+- Real vk/proof byte decoding (G2 Fp2 order) — first thing tested here against a
+  known snarkjs proof.
+
+If the defaults (2–5) are OK, I proceed to Code. Flag any you want changed.
