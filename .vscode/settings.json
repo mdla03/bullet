@@ -1,0 +1,16 @@
+{
+  "editor.formatOnSave": true,
+  "editor.tabSize": 2,
+  "files.insertFinalNewline": true,
+  "files.trimTrailingWhitespace": true,
+  "[rust]": {
+    "editor.tabSize": 4,
+    "editor.defaultFormatter": "rust-lang.rust-analyzer"
+  },
+  "rust-analyzer.linkedProjects": ["contracts/Cargo.toml"],
+  "files.exclude": {
+    "**/target": true,
+    "**/node_modules": true,
+    "**/.next": true
+  }
+}

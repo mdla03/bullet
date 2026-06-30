@@ -1,0 +1,11 @@
+{
+  "name": "@zeekpay/shared",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Shared TypeScript types between backend and frontend.",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "build": "echo \"[placeholder] @zeekpay/shared build wired up when types land\""
+  }
+}

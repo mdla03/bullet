@@ -1,0 +1,50 @@
+# ─── Secrets (critical — never commit) ───────────────────────────────
+.env
+.env.local
+.env.*
+!.env.example
+*.secret
+stellar-keys/
+
+# ─── Trusted-setup toxic waste (critical — never commit) ──────────────
+# Intermediate Powers-of-Tau / phase-2 contributions carry private
+# randomness. Leaking them compromises soundness of EVERY proof.
+# When unsure whether a setup artifact is safe, IGNORE it and ask.
+circuits/build/*.ptau
+# only the final, public ptau is safe to commit if needed:
+!circuits/build/final.ptau
+circuits/build/contributions/
+circuits/build/*_contribution_*
+
+# ─── Build artifacts ──────────────────────────────────────────────────
+# Rust / Soroban
+contracts/target/
+**/*.rs.bk
+
+# Circom intermediates (keep final .wasm, .zkey, verification_key.json if needed for demo)
+circuits/build/*.r1cs
+circuits/build/*.sym
+circuits/build/*_js/
+
+# Node
+node_modules/
+pnpm-lock.yaml.bak
+.pnpm-store/
+
+# Next.js
+.next/
+out/
+
+# TypeScript
+dist/
+*.tsbuildinfo
+
+# ─── Tooling noise ────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.log
+pnpm-debug.log*
+.vscode/*
+# commit shared editor settings only:
+!.vscode/settings.json
+.idea/

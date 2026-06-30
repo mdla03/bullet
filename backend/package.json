@@ -1,0 +1,14 @@
+{
+  "name": "@zeekpay/backend",
+  "version": "0.0.0",
+  "private": true,
+  "description": "ZeekPay backend — resolver, X OAuth, SendGrid (P1).",
+  "type": "module",
+  "scripts": {
+    "dev": "echo \"[placeholder] backend dev server wired up in the resolver-service feature\"",
+    "build": "echo \"[placeholder] @zeekpay/backend build wired up when source lands\""
+  },
+  "dependencies": {
+    "@zeekpay/shared": "workspace:*"
+  }
+}
