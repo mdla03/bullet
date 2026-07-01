@@ -62,19 +62,25 @@ exposing the sender↔recipient link on-chain. Fixed-denomination notes (1/10/50
   authUrl; GET /auth/twitter/callback verifies X identity and writes to registry.
   Challenge = `"zeekpay-register-v1:{handle}:{stellarAddress}"`. 5-min TTL pending
   map. 33 tests pass (14 new, no regressions). Requires one-time Twitter dev app setup.
-- (pending commit) **frontend-send** — Next.js `/send` page: resolve handle → Freighter
+- `83d781e` **frontend-send** — Next.js `/send` page: resolve handle → Freighter
   connect → compute recipientDigest + commitment (via backend snarkjs child process) →
   deposit Soroban note → display shareable claim link. Backend: `POST /commitment` route +
   CORS. Frontend: new Next.js 15 app (Tailwind v4, stellar-sdk v16, Freighter API v6).
   Build: `next build` clean (33 backend tests still pass).
+- (pending commit) **frontend-inbox** — `/claim?p=...` page: decode claim link →
+  note card ($X USDC, network, contract) → connect Freighter → verify recipientDigest
+  matches connected wallet → disabled "Claim" stub (frontend-claim implements execution).
+  Build clean; 33 backend tests still pass.
 
 Each feature has Plan→Code→Test→Review artifacts under `pipeline/<feature>/`.
 
 ## 3. Exact next feature to start
-**`frontend-inbox`** — Next.js inbox page: recipient views received notes (by
-querying commitment events emitted by the contract) and can claim them.
-Start with `pipeline/frontend-inbox/spec.md` and STOP for owner OK before coding.
-After it: frontend-claim → copy-paste-claim-link → e2e-demo.
+**`frontend-claim`** — Wire up the "Claim" button on `/claim?p=...`: generate
+Groth16 proof via backend (POST /prove), build + sign + submit the Soroban
+`claim(proof_a, proof_b, proof_c, public_inputs)` transaction via Freighter,
+poll for finality, show success + tx link.
+Start with `pipeline/frontend-claim/spec.md` and STOP for owner OK before coding.
+After it: copy-paste-claim-link → e2e-demo.
 
 ## 4. Open follow-ups / known gaps (verbatim)
 - **CLOSED** End-to-end claim with a REAL 4-input proof — `real_proof_verifies`
