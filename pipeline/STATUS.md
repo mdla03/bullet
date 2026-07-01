@@ -67,20 +67,21 @@ exposing the sender↔recipient link on-chain. Fixed-denomination notes (1/10/50
   deposit Soroban note → display shareable claim link. Backend: `POST /commitment` route +
   CORS. Frontend: new Next.js 15 app (Tailwind v4, stellar-sdk v16, Freighter API v6).
   Build: `next build` clean (33 backend tests still pass).
-- (pending commit) **frontend-inbox** — `/claim?p=...` page: decode claim link →
+- `06683c2` **frontend-inbox** — `/claim?p=...` page: decode claim link →
   note card ($X USDC, network, contract) → connect Freighter → verify recipientDigest
   matches connected wallet → disabled "Claim" stub (frontend-claim implements execution).
   Build clean; 33 backend tests still pass.
+- (pending commit) **frontend-claim** — Full claim execution: `POST /prove` (snarkjs
+  Groth16 ~15 s, single-leaf Merkle path) + `POST /post-root` (admin stellar-sdk call) +
+  Soroban `claim(proof_a, proof_b, proof_c, root, nullifier, recipient, denom)` via
+  Freighter + tx polling. Backend tsc clean; `next build` clean (295 kB /claim bundle).
 
 Each feature has Plan→Code→Test→Review artifacts under `pipeline/<feature>/`.
 
 ## 3. Exact next feature to start
-**`frontend-claim`** — Wire up the "Claim" button on `/claim?p=...`: generate
-Groth16 proof via backend (POST /prove), build + sign + submit the Soroban
-`claim(proof_a, proof_b, proof_c, public_inputs)` transaction via Freighter,
-poll for finality, show success + tx link.
-Start with `pipeline/frontend-claim/spec.md` and STOP for owner OK before coding.
-After it: copy-paste-claim-link → e2e-demo.
+**`e2e-demo`** — End-to-end testnet demo: deploy contract, fund admin via Friendbot,
+set VK, run send→claim flow live. Script + README update.
+Start with `pipeline/e2e-demo/spec.md` and STOP for owner OK before coding.
 
 ## 4. Open follow-ups / known gaps (verbatim)
 - **CLOSED** End-to-end claim with a REAL 4-input proof — `real_proof_verifies`
