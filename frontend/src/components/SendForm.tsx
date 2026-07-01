@@ -61,10 +61,10 @@ export function SendForm() {
       }
 
       // 2. Connect Freighter wallet
-      const { getAddress, signTransaction } = await import(
+      const { requestAccess, signTransaction } = await import(
         "@stellar/freighter-api"
       );
-      const addrRes = await getAddress();
+      const addrRes = await requestAccess();
       if ("error" in addrRes) {
         throw new Error(`Freighter: ${addrRes.error}`);
       }

@@ -48,8 +48,8 @@ export function ClaimView({ encoded }: { encoded: string }) {
     setError("");
     setState((s) => ({ ...s, step: "connecting" }));
     try {
-      const { getAddress } = await import("@stellar/freighter-api");
-      const addrRes = await getAddress();
+      const { requestAccess } = await import("@stellar/freighter-api");
+      const addrRes = await requestAccess();
       if ("error" in addrRes) throw new Error(`Freighter: ${addrRes.error}`);
       const addr = addrRes.address;
       setConnectedAddress(addr);
