@@ -1,13 +1,16 @@
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import express, { type Request, type Response } from "express";
+import cors from "cors";
 import type { RegisterRequest, ResolveResult } from "@zeekpay/shared";
 import * as store from "./store.js";
 import * as pending from "./pending.js";
 import * as twitter from "./twitter.js";
 import { verifyRegistrationSig } from "./verify.js";
+import * as commitment from "./commitment.js";
 
 const app = express();
+app.use(cors());
 app.use(express.json());
 
 const CONTRACT_ADDRESS = process.env.ZEEKPAY_CONTRACT_ID ?? "";
@@ -83,6 +86,31 @@ app.post("/register", (req: Request, res: Response) => {
   }
 
   res.json({ ok: true });
+});
+
+// ── POST /commitment ──────────────────────────────────────────────────────────
+
+app.post("/commitment", (req: Request, res: Response) => {
+  if (!commitment.isCircuitsReady()) {
+    return void res.status(503).json({
+      error: "circuits_not_built",
+      detail: "run pnpm build:circuits first",
+    });
+  }
+  const { secret, recipientDigest, denom } = req.body as {
+    secret?: string;
+    recipientDigest?: string;
+    denom?: string;
+  };
+  if (!secret || !recipientDigest || !denom) {
+    return void badRequest(res, "secret, recipientDigest, denom required");
+  }
+  try {
+    const c = commitment.computeCommitment(secret, recipientDigest, denom);
+    res.json({ commitment: c });
+  } catch (e) {
+    res.status(400).json({ error: "compute_failed", detail: String(e) });
+  }
 });
 
 // ── POST /auth/twitter/start ──────────────────────────────────────────────────
