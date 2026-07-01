@@ -48,6 +48,10 @@ out/
 dist/
 *.tsbuildinfo
 
+# ─── Runtime data (regenerable / PII risk) ────────────────────────────
+backend/data/registry.json
+backend/data/_test_registry.json
+
 # ─── Tooling noise ────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db

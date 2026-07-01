@@ -5,10 +5,17 @@
   "description": "ZeekPay backend — resolver, X OAuth, SendGrid (P1).",
   "type": "module",
   "scripts": {
-    "dev": "echo \"[placeholder] backend dev server wired up in the resolver-service feature\"",
-    "build": "echo \"[placeholder] @zeekpay/backend build wired up when source lands\""
+    "dev": "tsx watch src/resolver.ts",
+    "build": "tsc",
+    "test": "node --import tsx/esm --test src/resolver.test.ts"
   },
   "dependencies": {
-    "@zeekpay/shared": "workspace:*"
+    "@zeekpay/shared": "workspace:*",
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3"
   }
 }
