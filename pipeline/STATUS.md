@@ -53,20 +53,23 @@ exposing the sender↔recipient link on-chain. Fixed-denomination notes (1/10/50
   zeekpay now tests a 4-input claim proof through the bls12_381 host fns —
   end-to-end gap from soroban-contract closed. WASM still 19K (verify bypass
   excluded). `pnpm build:circuits` is now the real build pipeline.
-- (pending commit) **resolver-service** — Express 5 + TypeScript handle/email → Stellar
+- `f2b07df` **resolver-service** — Express 5 + TypeScript handle/email → Stellar
   address resolver. GET /health, GET /resolve?q=, POST /register. In-memory Map +
   JSON persistence (no DB). 19 tests pass (store unit + HTTP integration). Signature
   stored but not yet verified (deferred to x-oauth-identity).
+- (pending commit) **x-oauth-identity** — Ed25519 Freighter sig verification + Twitter
+  OAuth 2.0 PKCE registration gate. POST /auth/twitter/start verifies sig and returns
+  authUrl; GET /auth/twitter/callback verifies X identity and writes to registry.
+  Challenge = `"zeekpay-register-v1:{handle}:{stellarAddress}"`. 5-min TTL pending
+  map. 33 tests pass (14 new, no regressions). Requires one-time Twitter dev app setup.
 
 Each feature has Plan→Code→Test→Review artifacts under `pipeline/<feature>/`.
 
 ## 3. Exact next feature to start
-**`x-oauth-identity`** — verify X (Twitter) OAuth + Freighter signature before
-writing to the resolver registry.
-Why next: P0 order in SPEC §4; completes the trust model for POST /register.
-Start with `pipeline/x-oauth-identity/spec.md` and STOP for owner OK before coding.
-After it: frontend-send → frontend-inbox → frontend-claim →
-copy-paste-claim-link → e2e-demo (P0 order in SPEC §4).
+**`frontend-send`** — Next.js send form: resolve handle → deposit USDC into the
+ZeekPay contract, emitting a commitment event. First frontend feature.
+Start with `pipeline/frontend-send/spec.md` and STOP for owner OK before coding.
+After it: frontend-inbox → frontend-claim → copy-paste-claim-link → e2e-demo.
 
 ## 4. Open follow-ups / known gaps (verbatim)
 - **CLOSED** End-to-end claim with a REAL 4-input proof — `real_proof_verifies`

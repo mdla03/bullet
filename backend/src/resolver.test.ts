@@ -17,10 +17,20 @@ process.env.REGISTRY_FILE_OVERRIDE = TMP_DATA;
 process.env.ZEEKPAY_CONTRACT_ID = "CTEST_CONTRACT";
 process.env.USDC_SAC_ID = "CTEST_USDC";
 process.env.RESOLVER_PORT = "0"; // OS assigns a free port
+process.env.X_CLIENT_ID = "test_client_id";
+process.env.X_CLIENT_SECRET = "test_client_secret";
+process.env.X_OAUTH_CALLBACK_URL = "http://localhost:9999/auth/twitter/callback";
+process.env.FRONTEND_URL = "http://localhost:3000";
 
 // Import AFTER env is set.
 const { app } = await import("./resolver.js");
 const { normalizeKey, lookup, register } = await import("./store.js");
+const { Keypair } = await import("@stellar/stellar-base");
+const { buildChallenge, verifyRegistrationSig } = await import("./verify.js");
+
+// Stable test keypair shared across twitter/verify tests.
+const TEST_KP = Keypair.random();
+const TEST_ADDR = TEST_KP.publicKey();
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 
@@ -227,5 +237,125 @@ describe("POST /register", () => {
       signature: VALID_SIG,
     });
     assert.equal(r.status, 400);
+  });
+});
+
+// ── verify helpers ────────────────────────────────────────────────────────────
+
+describe("verify.buildChallenge", () => {
+  it("canonical UTF-8 form", () => {
+    const buf = buildChallenge("@alice", "GADDR");
+    assert.equal(buf.toString("utf8"), "zeekpay-register-v1:@alice:GADDR");
+  });
+});
+
+describe("verify.verifyRegistrationSig", () => {
+  it("accepts valid Ed25519 sig", () => {
+    const challenge = buildChallenge("@testuser", TEST_ADDR);
+    const sig = TEST_KP.sign(challenge).toString("hex");
+    assert.ok(verifyRegistrationSig("@testuser", TEST_ADDR, sig));
+  });
+
+  it("rejects mutated sig (one bit flipped)", () => {
+    const challenge = buildChallenge("@testuser", TEST_ADDR);
+    const sigBuf = Buffer.from(TEST_KP.sign(challenge));
+    sigBuf[0] ^= 0xff;
+    assert.ok(!verifyRegistrationSig("@testuser", TEST_ADDR, sigBuf.toString("hex")));
+  });
+
+  it("rejects sig from different keypair", () => {
+    const otherKp = Keypair.random();
+    const challenge = buildChallenge("@testuser", TEST_ADDR);
+    const sig = otherKp.sign(challenge).toString("hex");
+    assert.ok(!verifyRegistrationSig("@testuser", TEST_ADDR, sig));
+  });
+
+  it("rejects invalid stellarAddress without throwing", () => {
+    assert.ok(!verifyRegistrationSig("@testuser", "notakey", "f".repeat(128)));
+  });
+});
+
+// ── POST /auth/twitter/start ──────────────────────────────────────────────────
+
+function validStartBody(handle = "@testuser") {
+  const challenge = buildChallenge(handle, TEST_ADDR);
+  const sig = TEST_KP.sign(challenge).toString("hex");
+  return { handle, stellarAddress: TEST_ADDR, zeekPayPubKey: "e".repeat(64), signature: sig };
+}
+
+describe("POST /auth/twitter/start", () => {
+  it("200 returns authUrl for valid request", async () => {
+    const r = await req("POST", "/auth/twitter/start", validStartBody());
+    assert.equal(r.status, 200);
+    const b = r.body as Record<string, unknown>;
+    assert.ok(typeof b.authUrl === "string", "authUrl should be string");
+    assert.ok(
+      (b.authUrl as string).startsWith("https://twitter.com/i/oauth2/authorize"),
+      `unexpected authUrl: ${b.authUrl}`
+    );
+  });
+
+  it("400 — wrong signature (all f's)", async () => {
+    const body = { ...validStartBody(), signature: "f".repeat(128) };
+    const r = await req("POST", "/auth/twitter/start", body);
+    assert.equal(r.status, 400);
+    assert.equal((r.body as Record<string, unknown>).error, "invalid_signature");
+  });
+
+  it("400 — signature wrong length (not 128 hex chars)", async () => {
+    const body = { ...validStartBody(), signature: "abcd" };
+    const r = await req("POST", "/auth/twitter/start", body);
+    assert.equal(r.status, 400);
+  });
+
+  it("400 — invalid stellarAddress", async () => {
+    const body = { ...validStartBody(), stellarAddress: "notakey" };
+    const r = await req("POST", "/auth/twitter/start", body);
+    assert.equal(r.status, 400);
+  });
+
+  it("400 — handle missing @", async () => {
+    const body = { ...validStartBody(), handle: "alice" };
+    const r = await req("POST", "/auth/twitter/start", body);
+    assert.equal(r.status, 400);
+  });
+
+  it("503 — X_CLIENT_ID unset", async () => {
+    const saved = process.env.X_CLIENT_ID;
+    delete process.env.X_CLIENT_ID;
+    const r = await req("POST", "/auth/twitter/start", validStartBody());
+    process.env.X_CLIENT_ID = saved;
+    assert.equal(r.status, 503);
+  });
+});
+
+// ── GET /auth/twitter/callback ────────────────────────────────────────────────
+
+async function getCallback(qs: string) {
+  return fetch(`http://localhost:${port}/auth/twitter/callback?${qs}`, {
+    redirect: "manual",
+  });
+}
+
+describe("GET /auth/twitter/callback", () => {
+  it("302 error=expired for unknown state", async () => {
+    const res = await getCallback("code=abc&state=nonexistent_state");
+    assert.equal(res.status, 302);
+    assert.ok(
+      (res.headers.get("location") ?? "").includes("error=expired"),
+      `location: ${res.headers.get("location")}`
+    );
+  });
+
+  it("302 error=cancelled when ?error param present", async () => {
+    const res = await getCallback("error=access_denied&state=x");
+    assert.equal(res.status, 302);
+    assert.ok((res.headers.get("location") ?? "").includes("error=cancelled"));
+  });
+
+  it("302 error=invalid_request when state or code missing", async () => {
+    const res = await getCallback("code=abc");
+    assert.equal(res.status, 302);
+    assert.ok((res.headers.get("location") ?? "").includes("error=invalid_request"));
   });
 });
