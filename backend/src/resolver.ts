@@ -1,6 +1,11 @@
+import crypto from "node:crypto";
+import { fileURLToPath } from "node:url";
 import express, { type Request, type Response } from "express";
 import type { RegisterRequest, ResolveResult } from "@zeekpay/shared";
 import * as store from "./store.js";
+import * as pending from "./pending.js";
+import * as twitter from "./twitter.js";
+import { verifyRegistrationSig } from "./verify.js";
 
 const app = express();
 app.use(express.json());
@@ -14,6 +19,8 @@ const PORT = parseInt(process.env.RESOLVER_PORT ?? "3001", 10);
 const STELLAR_RE = /^G[A-Z2-7]{55}$/;
 const ZEEKPAY_KEY_RE = /^[0-9a-f]{64}$/;
 const EMAIL_RE = /^[^@]+@[^@]+\.[^@]+$/;
+const SIG_RE = /^[0-9a-f]{128}$/;
+const HANDLE_BODY_RE = /^[a-zA-Z0-9_]{1,15}$/;
 
 function badRequest(res: Response, detail: string): void {
   res.status(400).json({ error: "invalid_input", detail });
@@ -48,7 +55,7 @@ app.get("/resolve", (req: Request, res: Response) => {
 });
 
 app.post("/register", (req: Request, res: Response) => {
-  const body = req.body as Partial<RegisterRequest & { signature: string }>;
+  const body = req.body as Partial<RegisterRequest>;
 
   if (!body.handle && !body.email) {
     return void badRequest(res, "at least one of handle or email is required");
@@ -78,10 +85,95 @@ app.post("/register", (req: Request, res: Response) => {
   res.json({ ok: true });
 });
 
-// ── start ─────────────────────────────────────────────────────────────────────
-// Only auto-start when run directly (not imported for testing).
+// ── POST /auth/twitter/start ──────────────────────────────────────────────────
 
-import { fileURLToPath } from "node:url";
+app.post("/auth/twitter/start", async (req: Request, res: Response) => {
+  if (!twitter.isConfigured()) {
+    return void res.status(503).json({ error: "oauth_not_configured" });
+  }
+
+  const body = req.body as Partial<RegisterRequest>;
+
+  if (!body.handle || !body.handle.startsWith("@")) {
+    return void badRequest(res, "handle is required and must start with @");
+  }
+  if (!HANDLE_BODY_RE.test(body.handle.slice(1))) {
+    return void badRequest(res, "handle must be 1-15 alphanumeric/underscore chars after @");
+  }
+  if (!body.stellarAddress || !STELLAR_RE.test(body.stellarAddress)) {
+    return void badRequest(res, "stellarAddress must be a valid Stellar public key (G…)");
+  }
+  if (!body.zeekPayPubKey || !ZEEKPAY_KEY_RE.test(body.zeekPayPubKey)) {
+    return void badRequest(res, "zeekPayPubKey must be a 64-char lowercase hex string");
+  }
+  if (!body.signature || !SIG_RE.test(body.signature)) {
+    return void badRequest(res, "signature must be a 128-char lowercase hex string");
+  }
+
+  if (!verifyRegistrationSig(body.handle, body.stellarAddress, body.signature)) {
+    return void res
+      .status(400)
+      .json({ error: "invalid_signature", detail: "Ed25519 verification failed" });
+  }
+
+  const { codeVerifier, codeChallenge } = twitter.generatePKCE();
+  const state = crypto.randomUUID();
+
+  pending.set(state, {
+    handle: body.handle,
+    stellarAddress: body.stellarAddress,
+    zeekPayPubKey: body.zeekPayPubKey,
+    signature: body.signature,
+    codeVerifier,
+  });
+
+  res.json({ authUrl: twitter.buildAuthUrl(state, codeChallenge) });
+});
+
+// ── GET /auth/twitter/callback ────────────────────────────────────────────────
+
+app.get("/auth/twitter/callback", async (req: Request, res: Response) => {
+  const frontendUrl = process.env.FRONTEND_URL ?? "http://localhost:3000";
+  const redirectErr = (e: string) =>
+    res.redirect(`${frontendUrl}/register?error=${e}`);
+
+  const q = req.query as Record<string, string | undefined>;
+  const { code, state, error } = q;
+
+  if (error) return void redirectErr("cancelled");
+  if (!state || !code) return void redirectErr("invalid_request");
+
+  const entry = pending.get(state);
+  if (!entry) return void redirectErr("expired");
+
+  try {
+    const accessToken = await twitter.exchangeCode(code, entry.codeVerifier);
+    const twitterUsername = await twitter.fetchUsername(accessToken);
+
+    if (twitterUsername.toLowerCase() !== entry.handle.slice(1).toLowerCase()) {
+      return void redirectErr("handle_mismatch");
+    }
+
+    const result = store.register({
+      handle: entry.handle,
+      stellarAddress: entry.stellarAddress,
+      zeekPayPubKey: entry.zeekPayPubKey,
+      signature: entry.signature,
+    });
+
+    pending.del(state);
+
+    if ("conflict" in result) return void redirectErr("conflict");
+
+    res.redirect(
+      `${frontendUrl}/register?success=1&handle=${encodeURIComponent(entry.handle)}`
+    );
+  } catch {
+    redirectErr("oauth_error");
+  }
+});
+
+// ── start ─────────────────────────────────────────────────────────────────────
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   app.listen(PORT, () => {

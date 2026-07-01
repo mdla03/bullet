@@ -10,6 +10,7 @@
     "test": "node --import tsx/esm --test src/resolver.test.ts"
   },
   "dependencies": {
+    "@stellar/stellar-base": "^15.0.0",
     "@zeekpay/shared": "workspace:*",
     "express": "^5.2.1"
   },
