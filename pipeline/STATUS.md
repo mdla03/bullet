@@ -1,6 +1,6 @@
 # ZeekPay — Project Status (session handoff)
 
-Last updated: 2026-06-30. Demo deadline: 2026-07-07.
+Last updated: 2026-07-01. Demo deadline: 2026-07-07.
 ZeekPay = ZK-private payment rail on Stellar; pay an X handle / email without
 exposing the sender↔recipient link on-chain. Fixed-denomination notes (1/10/50/
 100 USDC), Tornado-style amount-unlinkability, NOT encrypted balances.
@@ -90,9 +90,12 @@ copy-paste-claim-link → e2e-demo (P0 order in SPEC §4).
 - stellar-cli 27.0.0 via Homebrew (`/opt/homebrew/bin/stellar`).
 - Cargo builds: `cargo build --manifest-path contracts/Cargo.toml ...`. Tests:
   `cargo test --manifest-path contracts/Cargo.toml -p <crate>`.
-- Circuit/proof regen: `bash circuits/scripts/run-benchmark.sh` then
-  `node circuits/scripts/convert-to-soroban.mjs` (writes groth16_soroban.json +
-  contracts/zeekpay/src/groth16_fixture.rs).
+- Circuit/proof regen: `bash circuits/scripts/build-claim.sh` (compiles
+  claim.circom, generates pot14 if missing, runs Groth16 setup, exports
+  claim_vk.json, generates test proof, runs convert-to-soroban.mjs →
+  groth16_soroban.json + contracts/zeekpay/src/groth16_fixture.rs).
+  Or `pnpm build:circuits` from repo root (same thing).
+  Legacy benchmark: `bash circuits/scripts/run-benchmark.sh` (preimage circuit only).
 - **Testnet = free** (Friendbot test XLM, no real money). Throwaway identity
   `zeekpay-bench` stored in `~/.config/stellar/identity/` (OUTSIDE repo, not
   committed). Network alias `testnet` is built into stellar-cli. **User requires
@@ -100,9 +103,12 @@ copy-paste-claim-link → e2e-demo (P0 order in SPEC §4).
 - Deployed bench contracts (testnet, reference only):
   verifier `CCNJPUHMJEIJC4IKONJHBZ2RQ4GZQ5HR7BQMLWWQW6HD4SW3IYKAVOBT`;
   Poseidon-merkle bench `CDQIYJYAVR3OWQC32V4NZOHERIIVMJEPKH32RKWUGHV6M2NQI3WYTQWV`.
-- Toxic waste: `*.ptau` (incl. final.ptau, 6.8M), `*.zkey`, `*.wtns`,
-  `**/test_snapshots/` are gitignored. Only tiny public vk/proof/public/input JSON
-  is tracked. Never commit files >1MB without asking.
+- Toxic waste: `*.ptau` (incl. final.ptau 6.8M, pot14_final.ptau 27M), `*.zkey`,
+  `*.wtns`, `**/test_snapshots/` are gitignored. Tracked artifacts: tiny JSON
+  (claim_vk.json, claim_proof.json, claim_public.json, claim_input.json,
+  groth16_soroban.json). Never commit files >1MB without asking.
+- GitHub: private repo `https://github.com/mdla03/bullet` (origin/master).
+  Push with `git push`.
 
 ## 6. Source of truth
 For anything not covered here, read `SPEC.md` (binding P0 scope + design) and the
