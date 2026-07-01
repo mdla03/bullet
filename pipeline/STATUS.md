@@ -71,17 +71,22 @@ exposing the sender↔recipient link on-chain. Fixed-denomination notes (1/10/50
   note card ($X USDC, network, contract) → connect Freighter → verify recipientDigest
   matches connected wallet → disabled "Claim" stub (frontend-claim implements execution).
   Build clean; 33 backend tests still pass.
-- (pending commit) **frontend-claim** — Full claim execution: `POST /prove` (snarkjs
+- `b86f28e` **frontend-claim** — Full claim execution: `POST /prove` (snarkjs
   Groth16 ~15 s, single-leaf Merkle path) + `POST /post-root` (admin stellar-sdk call) +
   Soroban `claim(proof_a, proof_b, proof_c, root, nullifier, recipient, denom)` via
   Freighter + tx polling. Backend tsc clean; `next build` clean (295 kB /claim bundle).
+- `53b486c` **fix: ROOT path** — `prove.ts` + `commitment.ts` used 4 `..` traversals
+  (landed above repo root); corrected to 3.
+- (pending commit) **e2e-demo** — Contract deployed + VK set on testnet.
+  Contract: `CC2RTZTQKONWFUFHZA3GT3VJGAQ2YCSEHFLIWMEZXQH65WQ5AWU5FW5R`.
+  XLM SAC: `CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC`.
+  POST /prove + POST /post-root verified working end-to-end.
+  Browser demo requires Freighter + funded testnet account.
 
 Each feature has Plan→Code→Test→Review artifacts under `pipeline/<feature>/`.
 
 ## 3. Exact next feature to start
-**`e2e-demo`** — End-to-end testnet demo: deploy contract, fund admin via Friendbot,
-set VK, run send→claim flow live. Script + README update.
-Start with `pipeline/e2e-demo/spec.md` and STOP for owner OK before coding.
+**All planned features complete.** Run the browser demo using instructions below.
 
 ## 4. Open follow-ups / known gaps (verbatim)
 - **CLOSED** End-to-end claim with a REAL 4-input proof — `real_proof_verifies`
