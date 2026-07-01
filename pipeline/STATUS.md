@@ -47,31 +47,35 @@ exposing the sender↔recipient link on-chain. Fixed-denomination notes (1/10/50
   proof verifying `true` (src/test.rs `real_proof_verifies`). 9 tests pass (3
   real-verifier + 6 adversarial: double-spend, unknown root, paused, uninit, admin
   auth, happy path) via a cfg(test)-only verify bypass excluded from the 19K wasm.
+- `25e205f` **circom-circuit** — real Poseidon-Merkle claim circuit (depth-20,
+  BLS12-381, 11,420 constraints). Public inputs = [root, nullifier, recipientDigest,
+  denom] matching soroban-contract LOCKED interface. `real_proof_verifies` in
+  zeekpay now tests a 4-input claim proof through the bls12_381 host fns —
+  end-to-end gap from soroban-contract closed. WASM still 19K (verify bypass
+  excluded). `pnpm build:circuits` is now the real build pipeline.
 
 Each feature has Plan→Code→Test→Review artifacts under `pipeline/<feature>/`.
 
 ## 3. Exact next feature to start
-**`circom-circuit`** — the real claim circuit: Poseidon-Merkle membership +
-nullifier derivation, exposing exactly the 4 public inputs in the LOCKED interface
-above (root, nullifier, recipient_digest, denom). Why next: it is the next P0 item
-and the soroban-contract claim path cannot be tested end-to-end (with a real
-4-input proof) until it exists. Keep the circuit minimal so in-browser proving
-stays fast. Start with `pipeline/circom-circuit/spec.md` and STOP for owner OK
-before coding (pipeline rule).
-After it: resolver-service → x-oauth-identity → frontend-send → frontend-inbox →
-frontend-claim → copy-paste-claim-link → e2e-demo (P0 order in SPEC §4).
+**`resolver-service`** — handle/email → `{contract address, asset, recipient public key}`.
+Why next: P0 order in SPEC §4; frontend-send depends on it.
+Start with `pipeline/resolver-service/spec.md` and STOP for owner OK before coding.
+After it: x-oauth-identity → frontend-send → frontend-inbox → frontend-claim →
+copy-paste-claim-link → e2e-demo (P0 order in SPEC §4).
 
 ## 4. Open follow-ups / known gaps (verbatim)
-- End-to-end claim with a REAL matching proof — needs the real 4-public-input
-  claim circuit (circom-circuit). The verifier is proven real in isolation; the
-  business logic is proven with the bypass. Joined in circom-circuit / e2e-demo.
+- **CLOSED** End-to-end claim with a REAL 4-input proof — `real_proof_verifies`
+  now validates a real Groth16 claim proof through bls12_381 host fns. ✓
 - Nullifier TTL/rent: persistent entry has no `extend_ttl`; a reaped nullifier =
   double-spend. MUST add extend_ttl/archival handling before any non-demo use.
   Top follow-up.
 - `Fr::from_bytes` with root/nullifier ≥ r — caller-supplied edge; behavior
   (panic vs reduce) to confirm; a panic would be a DoS (not fund loss).
-- vk is set post-deploy via `set_vk`; the real claim-circuit vk must replace the
-  benchmark vk.
+- vk is set post-deploy via `set_vk`; the real claim-circuit vk (claim_vk.json,
+  4 public inputs) must replace the benchmark vk during e2e-demo.
+- BN254 Poseidon constants used over BLS12-381 field — acceptable for hackathon;
+  production path: native BLS12-381 Poseidon (documented in circom-circuit review).
+- Trusted setup is single-contributor (pot14). Production path: MPC ceremony.
 - Real testnet fee for the full claim deferred to e2e-demo (free via Friendbot).
 
 ## 5. Environment / setup facts a fresh session needs
