@@ -8,6 +8,8 @@ import * as pending from "./pending.js";
 import * as twitter from "./twitter.js";
 import { verifyRegistrationSig } from "./verify.js";
 import * as commitment from "./commitment.js";
+import * as prove from "./prove.js";
+import * as StellarSdk from "@stellar/stellar-sdk";
 
 const app = express();
 app.use(cors());
@@ -112,6 +114,93 @@ app.post("/commitment", (req: Request, res: Response) => {
     res.status(400).json({ error: "compute_failed", detail: String(e) });
   }
 });
+
+// ── POST /prove ───────────────────────────────────────────────────────────────
+
+app.post("/prove", (req: Request, res: Response) => {
+  if (!prove.isProveReady()) {
+    return void res.status(503).json({
+      error: "circuits_not_built",
+      detail: "run pnpm build:circuits first",
+    });
+  }
+  const { secret, recipientDigest, denom } = req.body as {
+    secret?: string;
+    recipientDigest?: string;
+    denom?: string;
+  };
+  if (!secret || !recipientDigest || !denom) {
+    return void badRequest(res, "secret, recipientDigest, denom required");
+  }
+  try {
+    const result = prove.generateProof(secret, recipientDigest, denom);
+    res.json(result);
+  } catch (e) {
+    res.status(400).json({ error: "prove_failed", detail: String(e) });
+  }
+});
+
+// ── POST /post-root ───────────────────────────────────────────────────────────
+
+const ROOT_HEX_RE = /^[0-9a-f]{64}$/i;
+
+app.post("/post-root", async (req: Request, res: Response) => {
+  const adminKey = process.env.ZEEKPAY_ADMIN_KEY;
+  const contractId = process.env.ZEEKPAY_CONTRACT_ID ?? "";
+  if (!adminKey) {
+    return void res.status(503).json({ error: "admin_key_not_configured" });
+  }
+  const { root } = req.body as { root?: string };
+  if (!root || !ROOT_HEX_RE.test(root)) {
+    return void badRequest(res, "root must be 64 lowercase hex chars");
+  }
+  try {
+    const hash = await postRootOnChain(adminKey, contractId, root);
+    res.json({ ok: true, hash });
+  } catch (e) {
+    res.status(500).json({ error: "post_root_failed", detail: String(e) });
+  }
+});
+
+async function postRootOnChain(
+  adminSecretKey: string,
+  contractId: string,
+  rootHex: string
+): Promise<string> {
+  const rpcUrl =
+    process.env.SOROBAN_RPC_URL ?? "https://soroban-testnet.stellar.org";
+  const networkPassphrase =
+    process.env.NETWORK_PASSPHRASE ?? StellarSdk.Networks.TESTNET;
+
+  const keypair = StellarSdk.Keypair.fromSecret(adminSecretKey);
+  const rpc = new StellarSdk.rpc.Server(rpcUrl);
+  const contract = new StellarSdk.Contract(contractId);
+
+  const rootVal = StellarSdk.xdr.ScVal.scvBytes(Buffer.from(rootHex, "hex"));
+  const operation = contract.call("post_root", rootVal);
+
+  const account = await rpc.getAccount(keypair.publicKey());
+  const tx = new StellarSdk.TransactionBuilder(account, {
+    fee: "1000000",
+    networkPassphrase,
+  })
+    .addOperation(operation)
+    .setTimeout(60)
+    .build();
+
+  const prepared = await rpc.prepareTransaction(tx);
+  prepared.sign(keypair);
+  const result = await rpc.sendTransaction(prepared);
+  if (result.status === "ERROR") {
+    throw new Error(`sendTransaction: ${JSON.stringify(result.errorResult)}`);
+  }
+
+  const final = await rpc.pollTransaction(result.hash, { attempts: 20 });
+  if (final.status !== "SUCCESS") {
+    throw new Error(`post_root tx ${final.status}`);
+  }
+  return result.hash;
+}
 
 // ── POST /auth/twitter/start ──────────────────────────────────────────────────
 
