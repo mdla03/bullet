@@ -6,10 +6,15 @@
 // snarkjs stores Fp2 as [c0, c1], so we swap to c1,c0.
 import fs from "fs";
 
+// claim circuit build uses claim_vk/claim_proof/claim_public;
+// fall back to the benchmark names for backward compatibility.
 const dir = "circuits/build";
-const vk = JSON.parse(fs.readFileSync(`${dir}/verification_key.json`));
-const proof = JSON.parse(fs.readFileSync(`${dir}/proof.json`));
-const pub = JSON.parse(fs.readFileSync(`${dir}/public.json`));
+const vkFile = fs.existsSync(`${dir}/claim_vk.json`) ? "claim_vk" : "verification_key";
+const proofFile = fs.existsSync(`${dir}/claim_proof.json`) ? "claim_proof" : "proof";
+const pubFile = fs.existsSync(`${dir}/claim_public.json`) ? "claim_public" : "public";
+const vk = JSON.parse(fs.readFileSync(`${dir}/${vkFile}.json`));
+const proof = JSON.parse(fs.readFileSync(`${dir}/${proofFile}.json`));
+const pub = JSON.parse(fs.readFileSync(`${dir}/${pubFile}.json`));
 
 const be = (dec, bytes) => {
   const h = BigInt(dec).toString(16);
