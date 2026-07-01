@@ -53,14 +53,19 @@ exposing the sender↔recipient link on-chain. Fixed-denomination notes (1/10/50
   zeekpay now tests a 4-input claim proof through the bls12_381 host fns —
   end-to-end gap from soroban-contract closed. WASM still 19K (verify bypass
   excluded). `pnpm build:circuits` is now the real build pipeline.
+- (pending commit) **resolver-service** — Express 5 + TypeScript handle/email → Stellar
+  address resolver. GET /health, GET /resolve?q=, POST /register. In-memory Map +
+  JSON persistence (no DB). 19 tests pass (store unit + HTTP integration). Signature
+  stored but not yet verified (deferred to x-oauth-identity).
 
 Each feature has Plan→Code→Test→Review artifacts under `pipeline/<feature>/`.
 
 ## 3. Exact next feature to start
-**`resolver-service`** — handle/email → `{contract address, asset, recipient public key}`.
-Why next: P0 order in SPEC §4; frontend-send depends on it.
-Start with `pipeline/resolver-service/spec.md` and STOP for owner OK before coding.
-After it: x-oauth-identity → frontend-send → frontend-inbox → frontend-claim →
+**`x-oauth-identity`** — verify X (Twitter) OAuth + Freighter signature before
+writing to the resolver registry.
+Why next: P0 order in SPEC §4; completes the trust model for POST /register.
+Start with `pipeline/x-oauth-identity/spec.md` and STOP for owner OK before coding.
+After it: frontend-send → frontend-inbox → frontend-claim →
 copy-paste-claim-link → e2e-demo (P0 order in SPEC §4).
 
 ## 4. Open follow-ups / known gaps (verbatim)
