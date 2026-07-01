@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const ROOT = path.resolve(fileURLToPath(import.meta.url), "../../../../");
+const ROOT = path.resolve(fileURLToPath(import.meta.url), "../../../");
 const SNARKJS = path.join(ROOT, "circuits/node_modules/.bin/snarkjs");
 const CLAIM_WASM = path.join(ROOT, "circuits/build/claim_js/claim.wasm");
 const CLAIM_ZKEY = path.join(ROOT, "circuits/build/claim.zkey");

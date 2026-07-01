@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 
-const ROOT = path.resolve(fileURLToPath(import.meta.url), "../../../../");
+const ROOT = path.resolve(fileURLToPath(import.meta.url), "../../../");
 const SNARKJS = path.join(ROOT, "circuits/node_modules/.bin/snarkjs");
 const WASM = path.join(
   ROOT,
