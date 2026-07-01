@@ -11,7 +11,7 @@
   "scripts": {
     "dev": "pnpm --parallel --filter \"@zeekpay/backend\" --filter \"@zeekpay/frontend\" dev",
     "build": "pnpm -r build",
-    "build:circuits": "echo \"[placeholder] wired up in the circom-circuit feature\"",
+    "build:circuits": "bash circuits/scripts/build-claim.sh",
     "deploy:testnet": "echo \"[placeholder] wired up in the soroban-contract / e2e-demo features\""
   }
 }
