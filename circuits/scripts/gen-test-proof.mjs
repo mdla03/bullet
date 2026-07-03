@@ -11,9 +11,10 @@
 import {execSync} from "child_process";
 import fs from "fs";
 import path from "path";
+import {fileURLToPath} from "url";
 
 const CIRCOM = process.env.CIRCOM || `${process.env.HOME}/.local/bin/circom`;
-const HERE = new URL(".", import.meta.url).pathname.replace(/\/$/, "");
+const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BUILD = path.join(HERE, "../build");
 const SNJ = path.join(HERE, "../node_modules/.bin/snarkjs");
 const CLAIM_WASM = path.join(BUILD, "claim_js/claim.wasm");
