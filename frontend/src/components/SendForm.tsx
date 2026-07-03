@@ -5,6 +5,7 @@ import type { ResolveResult } from "@zeekpay/shared";
 import { computeRecipientDigest } from "@/lib/recipient";
 import { depositNote } from "@/lib/deposit";
 import { encodeClaimLink, type ClaimPayload } from "@/lib/claim_link";
+import { postNote } from "@/lib/notes";
 import {
   CheckIcon,
   CopyIcon,
@@ -59,6 +60,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
   const [denom, setDenom] = useState<Denom>(10);
   const [step, setStep] = useState<Step>("idle");
   const [claimLink, setClaimLink] = useState("");
+  const [notePosted, setNotePosted] = useState(false);
   const [txHash, setTxHash] = useState("");
   const [error, setError] = useState("");
 
@@ -105,6 +107,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
     setResolved(null);
     setStep("idle");
     setClaimLink("");
+    setNotePosted(false);
     setTxHash("");
     setError("");
   }
@@ -187,6 +190,17 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
         network: "testnet",
       };
       setClaimLink(encodeClaimLink(payload, FRONTEND_URL));
+
+      // 7. Deliver to their Bullet inbox (encrypted to their published key).
+      // Best-effort: the claim link above works even if this fails.
+      if (resolved.zeekPayPubKey) {
+        try {
+          await postNote(payload, resolved.zeekPayPubKey);
+          setNotePosted(true);
+        } catch {
+          setNotePosted(false);
+        }
+      }
       setStep("done");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -207,14 +221,19 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
           </p>
           <p className="mt-1 text-sm text-graphite">
             Nothing on-chain connects your deposit to their claim.
+            {notePosted &&
+              " The note is waiting in their Bullet inbox the next time they open the app."}
           </p>
         </div>
 
         <div className="space-y-3 rounded-2xl border border-fog bg-white p-5">
-          <p className="text-sm font-medium">Deliver the claim link</p>
+          <p className="text-sm font-medium">
+            {notePosted ? "Backup claim link" : "Deliver the claim link"}
+          </p>
           <p className="text-xs text-graphite">
-            Bullet never sends DMs. Deliver the link yourself, from an account
-            they already trust.
+            {notePosted
+              ? "Already delivered to their inbox. Share this link only if they can't sign in."
+              : "Bullet never sends DMs. Deliver the link yourself, from an account they already trust."}
           </p>
           <div className="break-all rounded-lg bg-paper px-3 py-2 font-mono text-xs text-graphite">
             {claimLink}

@@ -19,9 +19,10 @@ import {
   signatureToHex,
 } from "@/lib/register";
 
+// ponytail: X (Twitter) waits on the Supabase Twitter provider being configured.
 const PROVIDERS = [
-  { key: "google", label: "Google", icon: GoogleIcon },
-  { key: "twitter", label: "X (Twitter)", icon: XBrandIcon },
+  { key: "google", label: "Google", icon: GoogleIcon, enabled: true },
+  { key: "twitter", label: "X (Twitter)", icon: XBrandIcon, enabled: false },
 ] as const;
 
 const OAUTH_ERRORS: Record<string, string> = {
@@ -45,7 +46,6 @@ export function RegisterFlow({ oauthError }: { oauthError?: string }) {
     oauthError ? (OAUTH_ERRORS[oauthError] ?? "Sign-in failed. Start again.") : ""
   );
 
-  // Track auth state.
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
     const { data: sub } = supabase.auth.onAuthStateChange((_e, s) =>
@@ -55,7 +55,6 @@ export function RegisterFlow({ oauthError }: { oauthError?: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Once signed in, load the backend profile (identities + wallet).
   const refreshMe = useCallback(async () => {
     try {
       setMe(await getMe());
@@ -110,7 +109,6 @@ export function RegisterFlow({ oauthError }: { oauthError?: string }) {
     try {
       const { signMessage } = await import("@stellar/freighter-api");
 
-      // 1. Derive Bullet keys from a signature over the fixed domain message.
       const domainRes = await signMessage(KEY_DOMAIN_MESSAGE, { address });
       if (domainRes.error || !domainRes.signedMessage)
         throw new Error(
@@ -120,7 +118,6 @@ export function RegisterFlow({ oauthError }: { oauthError?: string }) {
         signatureToHex(domainRes.signedMessage)
       );
 
-      // 2. Sign the wallet-link challenge binding this wallet to the user id.
       const challenge = buildLinkWalletChallenge(me.userId);
       const linkRes = await signMessage(challenge, { address });
       if (linkRes.error || !linkRes.signedMessage)
@@ -129,7 +126,6 @@ export function RegisterFlow({ oauthError }: { oauthError?: string }) {
         );
       const signature = signatureToHex(linkRes.signedMessage);
 
-      // 3. Attach the wallet server-side (Bearer JWT via apiFetch).
       const res = await apiFetch("/wallet/link", {
         method: "POST",
         body: JSON.stringify({ stellarAddress: address, zeekPayPubKey, signature }),
@@ -157,100 +153,110 @@ export function RegisterFlow({ oauthError }: { oauthError?: string }) {
     );
   }
 
-  // ---- Signed out: pick a provider ----
-  if (!session) {
-    return (
-      <div className="space-y-2">
-        {PROVIDERS.map((p) => (
-          <button
-            key={p.key}
-            onClick={() => signIn(p.key)}
-            disabled={working === "oauth"}
-            className="flex w-full items-center gap-3 rounded-full border border-fog bg-white px-5 py-3 text-left font-medium transition-colors hover:border-graphite disabled:opacity-50"
-          >
-            <p.icon className="h-5 w-5" />
-            <span className="flex-1">Continue with {p.label}</span>
-            {working === "oauth" && <LoaderIcon className="h-4 w-4 animate-spin" />}
-          </button>
-        ))}
-        <p className="pt-1 text-xs text-graphite">
-          Your handle is only used to receive payments. Bullet never posts or
-          reads your account.
-        </p>
-        {error && (
-          <div className="mt-2 rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
-            {error}
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  // ---- Signed in: show handles + wallet-link ----
-  const handles = me?.identities ?? [];
   const linkedWallet = me?.wallet ?? null;
+  const handles = me?.identities ?? [];
+  const primaryHandle = handles[0]?.handle ?? session?.user.email ?? "";
+  const stepIndex = !session ? 0 : !linkedWallet ? 1 : 2;
+  const steps = ["Account", "Wallet", "Done"];
 
   return (
-    <div className="space-y-5">
-      {/* Linked identities */}
-      <div className="rounded-2xl border border-fog bg-white p-5">
-        <p className="text-sm font-medium">Signed in</p>
-        <div className="mt-3 space-y-2">
-          {handles.length === 0 ? (
-            <p className="text-sm text-graphite">Loading your handle…</p>
-          ) : (
-            handles.map((h) => (
-              <p
-                key={`${h.provider}:${h.handle}`}
-                className="flex items-center gap-2 text-sm"
-              >
-                <CheckIcon className="h-4 w-4 text-signal" />
-                <span className="text-graphite">{providerLabel(h.provider)}</span>
-                <span className="font-medium">{h.handle}</span>
-              </p>
-            ))
-          )}
-        </div>
-        <button
-          onClick={signOut}
-          className="mt-4 text-xs text-graphite underline-offset-2 hover:text-ink hover:underline"
-        >
-          Sign out
-        </button>
-      </div>
+    <div className="space-y-6">
+      {/* Step indicator */}
+      <ol className="flex items-center gap-2 text-xs">
+        {steps.map((s, i) => (
+          <li key={s} className="flex items-center gap-2">
+            <span
+              className={`flex h-5 w-5 items-center justify-center rounded-full border text-[10px] font-semibold ${
+                i < stepIndex
+                  ? "border-ink bg-ink text-paper"
+                  : i === stepIndex
+                    ? "border-ink text-ink"
+                    : "border-fog text-graphite"
+              }`}
+            >
+              {i < stepIndex ? <CheckIcon className="h-3 w-3" /> : i + 1}
+            </span>
+            <span className={i === stepIndex ? "text-ink" : "text-graphite"}>
+              {s}
+            </span>
+            {i < steps.length - 1 && <span className="w-4 border-t border-fog" />}
+          </li>
+        ))}
+      </ol>
 
-      {/* Wallet state */}
-      {linkedWallet ? (
-        <div className="space-y-5">
-          <div className="rounded-2xl border border-signal/30 bg-white p-5">
-            <p className="flex items-center gap-2 font-semibold text-signal">
-              <CheckIcon className="h-5 w-5" />
-              Wallet linked
-            </p>
-            <p className="mt-1 font-mono text-sm text-graphite">
-              {linkedWallet.stellar_address.slice(0, 6)}…
-              {linkedWallet.stellar_address.slice(-6)}
-            </p>
-            <p className="mt-2 text-sm text-graphite">
-              Anyone can now pay your handle on Bullet. Payments arrive as
-              private notes only your wallet can claim.
-            </p>
-          </div>
-          <Link
-            href="/send"
-            className="block w-full rounded-full bg-ink px-4 py-3 text-center font-semibold text-paper transition-colors hover:bg-ink/85"
-          >
-            Send money
-          </Link>
+      {/* Step 1: sign in */}
+      {!session && (
+        <div className="space-y-2">
+          {PROVIDERS.map((p) => (
+            <button
+              key={p.key}
+              onClick={() => p.enabled && signIn(p.key)}
+              disabled={!p.enabled || working === "oauth"}
+              className={`flex w-full items-center gap-3 rounded-full border px-5 py-3 text-left font-medium transition-colors ${
+                p.enabled
+                  ? "border-fog bg-white hover:border-graphite disabled:opacity-50"
+                  : "cursor-not-allowed border-fog bg-paper text-graphite/70"
+              }`}
+            >
+              {working === "oauth" && p.enabled ? (
+                <LoaderIcon className="h-5 w-5 animate-spin" />
+              ) : (
+                <p.icon className="h-5 w-5" />
+              )}
+              <span className="flex-1">Continue with {p.label}</span>
+              {!p.enabled && (
+                <span className="rounded-full border border-fog bg-white px-2 py-0.5 text-[10px] text-graphite">
+                  Soon
+                </span>
+              )}
+            </button>
+          ))}
+          <p className="pt-1 text-xs text-graphite">
+            Your handle is only used to receive payments. Bullet never posts or
+            reads your account.
+          </p>
         </div>
-      ) : (
-        <div className="space-y-3 rounded-2xl border border-fog bg-white p-5">
-          <p className="text-sm font-medium">Link your wallet</p>
+      )}
+
+      {/* Step 2: attach a wallet */}
+      {session && !linkedWallet && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-3 rounded-xl border border-fog bg-white px-4 py-3">
+            <CheckIcon className="h-4 w-4 shrink-0 text-signal" />
+            <span className="min-w-0 flex-1 truncate text-sm">
+              Signed in as{" "}
+              <span className="font-medium">{primaryHandle || "…"}</span>
+            </span>
+            <button
+              onClick={signOut}
+              className="shrink-0 text-xs text-graphite underline-offset-2 hover:text-ink hover:underline"
+            >
+              Sign out
+            </button>
+          </div>
+
+          {handles.length > 1 && (
+            <div className="space-y-1 rounded-xl border border-fog bg-white px-4 py-3 text-sm">
+              {handles.map((h) => (
+                <p
+                  key={`${h.provider}:${h.handle}`}
+                  className="flex items-center gap-2"
+                >
+                  <CheckIcon className="h-4 w-4 text-signal" />
+                  <span className="text-graphite">
+                    {providerLabel(h.provider)}
+                  </span>
+                  <span className="font-medium">{h.handle}</span>
+                </p>
+              ))}
+            </div>
+          )}
+
           {!address ? (
             <>
               <p className="text-sm text-graphite">
-                Connect the Stellar wallet that will claim payments sent to your
-                handle.
+                Connect the Stellar wallet that will claim payments sent to{" "}
+                <span className="text-ink">{primaryHandle || "you"}</span>.
               </p>
               <button
                 onClick={connectWallet}
@@ -276,19 +282,67 @@ export function RegisterFlow({ oauthError }: { oauthError?: string }) {
               </div>
               <p className="text-xs text-graphite">
                 Two Freighter signatures follow: one derives your Bullet keys,
-                one proves this wallet is yours. No transaction is submitted and
-                nothing is spent.
+                one proves this wallet is yours. No transaction is submitted
+                and nothing is spent.
               </p>
               <button
                 onClick={linkWallet}
                 disabled={working === "link"}
                 className="flex w-full items-center justify-center gap-2 rounded-full bg-ink px-4 py-3 font-semibold text-paper transition-colors hover:bg-ink/85 disabled:opacity-50"
               >
-                {working === "link" && <LoaderIcon className="h-5 w-5 animate-spin" />}
+                {working === "link" && (
+                  <LoaderIcon className="h-5 w-5 animate-spin" />
+                )}
                 {working === "link" ? "Waiting for Freighter…" : "Sign and link wallet"}
+              </button>
+              <button
+                onClick={() => setAddress("")}
+                className="w-full text-center text-xs text-graphite underline-offset-2 hover:text-ink hover:underline"
+              >
+                Use a different wallet
               </button>
             </>
           )}
+        </div>
+      )}
+
+      {/* Step 3: done */}
+      {session && linkedWallet && (
+        <div className="space-y-5">
+          <div className="rounded-2xl border border-signal/30 bg-white p-5">
+            <p className="flex items-center gap-2 font-semibold text-signal">
+              <CheckIcon className="h-5 w-5" />
+              {primaryHandle || "You"} can now get paid on Bullet
+            </p>
+            <p className="mt-1 text-sm text-graphite">
+              Payments arrive as private notes in your inbox. Only the wallet{" "}
+              <span className="font-mono">
+                {linkedWallet.stellar_address.slice(0, 4)}…
+                {linkedWallet.stellar_address.slice(-4)}
+              </span>{" "}
+              can claim them.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <Link
+              href="/inbox"
+              className="flex-1 rounded-full bg-ink px-4 py-3 text-center font-semibold text-paper transition-colors hover:bg-ink/85"
+            >
+              Open inbox
+            </Link>
+            <Link
+              href="/send"
+              className="flex-1 rounded-full border border-fog bg-white px-4 py-3 text-center font-medium transition-colors hover:border-graphite"
+            >
+              Send money
+            </Link>
+          </div>
+          <button
+            onClick={signOut}
+            className="w-full text-center text-xs text-graphite underline-offset-2 hover:text-ink hover:underline"
+          >
+            Sign out
+          </button>
         </div>
       )}
 
