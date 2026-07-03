@@ -16,9 +16,9 @@ const SAMPLE_NOTES = [
 
 export default function Home() {
   return (
-    <div className="flex flex-col items-center gap-20 py-12 text-center">
-      {/* Hero */}
-      <div className="w-full max-w-3xl space-y-8">
+    <div className="flex flex-col items-center gap-20 text-center">
+      {/* Hero: fills the first screen (minus the fixed nav offset) and centers */}
+      <div className="flex min-h-[calc(100svh-7rem)] w-full max-w-3xl flex-col justify-center space-y-8">
         <h1 className="animate-rise text-6xl font-extrabold leading-[0.95] tracking-tighter sm:text-8xl">
           send money.
           <br />
@@ -50,26 +50,28 @@ export default function Home() {
       <HowItWorks />
 
       {/* What the chain sees */}
-      <Reveal className="w-full max-w-4xl">
-        <h2 className="text-2xl font-bold tracking-tight">
+      <Reveal className="w-full max-w-4xl pb-24">
+        <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">
           what the chain sees.
         </h2>
-        <div className="relative mt-8 overflow-hidden">
+        <div className="relative mt-10 overflow-hidden">
           <div className="animate-drift flex w-max motion-reduce:animate-none">
             {[...SAMPLE_NOTES, ...SAMPLE_NOTES].map((hash, i) => (
-              <span
+              <div
                 key={i}
-                className="mr-3 shrink-0 rounded-xl border border-fog bg-white px-4 py-3 font-mono text-sm"
+                className="mr-4 w-60 shrink-0 rounded-2xl border border-fog bg-white p-6 text-left"
               >
-                10 USDC{" "}
-                <span className="text-graphite">· 0x{hash}</span>
-              </span>
+                <p className="text-2xl font-bold tracking-tight">10 USDC</p>
+                <p className="mt-2 truncate font-mono text-sm text-graphite">
+                  0x{hash}
+                </p>
+              </div>
             ))}
           </div>
           <div className="pointer-events-none absolute inset-y-0 left-0 w-16 bg-gradient-to-r from-paper to-transparent" />
           <div className="pointer-events-none absolute inset-y-0 right-0 w-16 bg-gradient-to-l from-paper to-transparent" />
         </div>
-        <p className="mx-auto mt-4 max-w-xl text-sm text-graphite">
+        <p className="mx-auto mt-8 max-w-xl text-graphite">
           Every deposit is a fixed-size note and a commitment hash. One of
           these could be yours. Nothing connects a deposit to the claim that
           spends it.
