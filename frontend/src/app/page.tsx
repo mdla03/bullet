@@ -34,10 +34,7 @@ export default function Home() {
         <p className="text-sm font-bold tracking-tight">bullet</p>
         <p className="mt-5 text-5xl font-bold tracking-tight">50 USDC</p>
         <p className="mt-1 text-graphite">to @kyle</p>
-        <p className="mt-6 flex items-center gap-2 font-mono text-sm text-signal">
-          <span className="inline-block h-2 w-2 rounded-full bg-signal" />
-          sent silently
-        </p>
+        <p className="mt-6 font-mono text-sm text-signal">sent silently</p>
       </div>
 
       {/* How it stays private */}

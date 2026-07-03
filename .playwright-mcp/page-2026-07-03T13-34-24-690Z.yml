@@ -1,0 +1,36 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - generic [ref=e3]:
+      - link "bullet" [ref=e4] [cursor=pointer]:
+        - /url: /
+        - img "bullet" [ref=e5]
+      - navigation [ref=e6]:
+        - link "Send money" [ref=e7] [cursor=pointer]:
+          - /url: /send
+        - link "Sign up" [ref=e8] [cursor=pointer]:
+          - /url: /register
+  - main [ref=e9]:
+    - generic [ref=e10]:
+      - generic [ref=e11]:
+        - heading "payments without a trace." [level=1] [ref=e12]
+        - paragraph [ref=e13]: Send USDC to any X handle or email. Fixed-size notes and zero-knowledge proofs mean nothing on-chain connects you to the recipient.
+        - generic [ref=e14]:
+          - link "Get paid with your handle" [ref=e15] [cursor=pointer]:
+            - /url: /register
+          - link "Send money" [ref=e16] [cursor=pointer]:
+            - /url: /send
+      - generic [ref=e17]:
+        - paragraph [ref=e18]: bullet
+        - paragraph [ref=e19]: 50 USDC
+        - paragraph [ref=e20]: to @kyle
+        - paragraph [ref=e21]: sent silently
+      - generic [ref=e22]:
+        - generic [ref=e23]:
+          - paragraph [ref=e24]: fast.
+          - paragraph [ref=e25]: Type a handle, pick an amount, sign once. No wallet addresses exchanged.
+        - generic [ref=e26]:
+          - paragraph [ref=e27]: small.
+          - paragraph [ref=e28]: Every payment is a fixed-size note of 1, 10, 50 or 100 USDC, so no amount stands out.
+        - generic [ref=e29]:
+          - paragraph [ref=e30]: silent.
+          - paragraph [ref=e31]: The recipient claims with a zero-knowledge proof. No on-chain field links their claim to your deposit.

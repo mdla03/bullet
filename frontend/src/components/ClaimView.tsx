@@ -268,8 +268,7 @@ export function ClaimView({ encoded }: { encoded: string }) {
       {/* Done */}
       {step === "done" && (
         <div className="space-y-3 rounded-2xl border border-signal/30 bg-white px-4 py-4">
-          <p className="flex items-center gap-2 text-sm font-medium text-signal">
-            <span className="inline-block h-2 w-2 rounded-full bg-signal" />
+          <p className="text-sm font-medium text-signal">
             ${payload.denom} USDC claimed
           </p>
           {txHash && (

@@ -187,8 +187,8 @@ export function SendForm() {
       <div className="space-y-5">
         <div className="rounded-2xl border border-signal/30 bg-white p-5">
           <p className="flex items-center gap-2 font-semibold text-signal">
-            <span className="inline-block h-2 w-2 rounded-full bg-signal" />
-            ${denom} USDC sent silently to {recipient.trim()}
+            <CheckIcon className="h-5 w-5" />${denom} USDC sent silently to{" "}
+            {recipient.trim()}
           </p>
           <p className="mt-1 text-sm text-graphite">
             Nothing on-chain connects your deposit to their claim.
