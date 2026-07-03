@@ -5,11 +5,15 @@
 
 ---
 
-## 1. What ZeekPay is
+## 1. What Bullet is
 
-ZeekPay is a **ZK-private payment rail on Stellar**. It lets a sender pay
+Bullet is a **ZK-private payment rail on Stellar**. It lets a sender pay
 USDC/XLM to a **social handle (X) or email** instead of a wallet address, while
 hiding the **sender↔recipient link** on-chain.
+
+The name is the product: **fast** (send in seconds to a handle, no address
+exchange), **small** (payments travel as small fixed-denomination notes), and
+**silent** (no on-chain trace connecting sender to recipient).
 
 Privacy model (v1, stated plainly — do not oversell):
 
@@ -110,7 +114,7 @@ Build order; each is its own pipeline feature (Plan→Code→Test→Review).
 2. `circom-circuit` — Poseidon preimage + nullifier proof, minimal so in-browser
    proving stays fast.
 3. `resolver-service` — handle/email → `{contract address, asset, recipient public key}`.
-4. `x-oauth-identity` — X OAuth login; derive ZeekPay keys from a Freighter
+4. `x-oauth-identity` — X OAuth login; derive Bullet keys from a Freighter
    signature; publish identifier + key.
 5. `frontend-send` — send form (Next.js).
 6. `frontend-inbox` — registered private inbox: scan contract with viewing key,
@@ -165,7 +169,7 @@ Reaching for any of these = stop and ask.
 
 | Layer | Tech | Notes |
 |-------|------|-------|
-| Contracts | Rust + Soroban SDK, Stellar testnet | `zeekpay/` main, `verifier/` Groth16 verifier (or day-1 benchmark stub) |
+| Contracts | Rust + Soroban SDK, Stellar testnet | `bullet/` main (currently `zeekpay/` on disk — rename pending), `verifier/` Groth16 verifier (or day-1 benchmark stub) |
 | ZK | Circom + snarkjs, Groth16 (PLONK or off-chain attestation as immediate fallback if benchmark fails) | in-browser proving via WASM |
 | Backend | Node.js + TypeScript | resolver, X OAuth, SendGrid (P1) |
 | Frontend | Next.js + TS + Tailwind, `stellar-sdk`, Freighter | wallet integration |
@@ -199,7 +203,7 @@ high-level shape:
   binding (e.g. whether the recipient address is bound into the proof to
   prevent front-running/re-targeting) is decided in `circom-circuit` spec, not
   assumed here.
-- **Key derivation:** ZeekPay viewing/spending keys derived from a Freighter
+- **Key derivation:** Bullet viewing/spending keys derived from a Freighter
   signature over a fixed domain-separated message. Finalized in
   `x-oauth-identity`.
 - **Trusted setup:** own Groth16 ceremony for the hackathon; `final.ptau` /
