@@ -127,6 +127,18 @@ export function RegisterFlow({ oauthError }: { oauthError?: string }) {
           `Freighter: ${linkRes.error?.message ?? "signature rejected"}`
         );
       const signature = signatureToHex(linkRes.signedMessage);
+      // ponytail: temporary debug — remove once /wallet/link succeeds once.
+      // eslint-disable-next-line no-console
+      console.log("BULLET_LINK_DEBUG " + JSON.stringify({
+        address,
+        challenge,
+        challengeB64: b64(challenge),
+        signature,
+        signedMessageRaw:
+          typeof linkRes.signedMessage === "string"
+            ? linkRes.signedMessage
+            : "<buffer>",
+      }));
 
       const res = await apiFetch("/wallet/link", {
         method: "POST",
