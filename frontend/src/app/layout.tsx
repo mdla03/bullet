@@ -19,6 +19,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <span className="text-xs text-zinc-500">
               Private payments on Stellar
             </span>
+            <nav className="ml-auto flex items-baseline gap-4 text-sm">
+              <a href="/send" className="text-zinc-400 hover:text-zinc-100">
+                Send
+              </a>
+              <a href="/register" className="text-amber-400 hover:text-amber-300">
+                Create account
+              </a>
+            </nav>
           </div>
         </header>
         <main className="mx-auto max-w-lg px-4 py-12">{children}</main>
