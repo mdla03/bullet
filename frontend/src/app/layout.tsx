@@ -1,8 +1,13 @@
 import type { Metadata } from "next";
+import { Geist_Mono, Inter } from "next/font/google";
+import Link from "next/link";
 import "./globals.css";
 
+const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
+const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono" });
+
 export const metadata: Metadata = {
-  title: "Bullet · Private payments on Stellar",
+  title: "bullet · payments without a trace",
   description:
     "Send USDC privately to any X handle or email on Stellar. Zero-knowledge proofs keep sender and recipient unlinkable on-chain.",
 };
@@ -10,26 +15,33 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className="min-h-screen bg-zinc-950 text-zinc-100 antialiased">
-        <header className="border-b border-zinc-800/80 px-6 py-4">
-          <div className="mx-auto flex max-w-lg items-baseline gap-3">
-            <span className="text-lg font-bold tracking-tight">
-              <span className="text-amber-400">●</span> Bullet
-            </span>
-            <span className="text-xs text-zinc-500">
-              Private payments on Stellar
-            </span>
-            <nav className="ml-auto flex items-baseline gap-4 text-sm">
-              <a href="/send" className="text-zinc-400 hover:text-zinc-100">
-                Send
-              </a>
-              <a href="/register" className="text-amber-400 hover:text-amber-300">
-                Create account
-              </a>
+      <body
+        className={`${inter.variable} ${geistMono.variable} min-h-screen bg-paper font-sans text-ink antialiased`}
+      >
+        <header className="border-b border-fog px-6 py-4">
+          <div className="mx-auto flex max-w-5xl items-center gap-2">
+            <Link href="/" className="flex items-center gap-2">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/logomark.svg" alt="" className="h-6 w-6" />
+              <span className="text-xl font-bold tracking-tight">bullet</span>
+            </Link>
+            <nav className="ml-auto flex items-center gap-3 text-sm">
+              <Link
+                href="/send"
+                className="rounded-full border border-fog bg-white px-4 py-2 font-medium transition-colors hover:border-graphite"
+              >
+                Send money
+              </Link>
+              <Link
+                href="/register"
+                className="rounded-full bg-ink px-4 py-2 font-medium text-paper transition-colors hover:bg-ink/85"
+              >
+                Sign up
+              </Link>
             </nav>
           </div>
         </header>
-        <main className="mx-auto max-w-lg px-4 py-12">{children}</main>
+        <main className="mx-auto max-w-5xl px-4 py-12">{children}</main>
       </body>
     </html>
   );
