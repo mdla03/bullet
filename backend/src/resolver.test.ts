@@ -14,11 +14,20 @@ process.env.SUPABASE_ANON_KEY ??= "placeholder_anon_key";
 process.env.SUPABASE_SERVICE_ROLE_KEY ??= "placeholder_service_role_key";
 
 const { app } = await import("./resolver.js");
-const { Keypair } = await import("@stellar/stellar-base");
+const { Keypair, hash } = await import("@stellar/stellar-base");
 const { buildLinkWalletChallenge, verifyLinkWalletSig } = await import("./verify.js");
 
 const TEST_KP = Keypair.random();
 const TEST_ADDR = TEST_KP.publicKey();
+
+// Mirror Freighter's SEP-53 signMessage: ed25519 over SHA-256(prefix ‖ message).
+function sep53Sign(kp: InstanceType<typeof Keypair>, msg: Buffer): string {
+  const prefix = Buffer.from("Stellar Signed Message:\n", "utf8");
+  const payload = new Uint8Array(prefix.length + msg.length);
+  payload.set(prefix, 0);
+  payload.set(msg, prefix.length);
+  return kp.sign(hash(Buffer.from(payload))).toString("hex");
+}
 
 async function req(
   method: string,
@@ -53,15 +62,15 @@ after(() => {
 // ── verify (unit) ─────────────────────────────────────────────────────────────
 
 describe("verify.verifyLinkWalletSig", () => {
-  it("accepts a valid Ed25519 sig over the canonical challenge", () => {
+  it("accepts a valid SEP-53 sig over the canonical challenge", () => {
     const userId = "usr_" + "a".repeat(16);
-    const sig = TEST_KP.sign(buildLinkWalletChallenge(userId)).toString("hex");
+    const sig = sep53Sign(TEST_KP, buildLinkWalletChallenge(userId));
     assert.ok(verifyLinkWalletSig(userId, TEST_ADDR, sig));
   });
 
   it("rejects a sig from a different keypair", () => {
     const userId = "usr_" + "a".repeat(16);
-    const bad = Keypair.random().sign(buildLinkWalletChallenge(userId)).toString("hex");
+    const bad = sep53Sign(Keypair.random(), buildLinkWalletChallenge(userId));
     assert.ok(!verifyLinkWalletSig(userId, TEST_ADDR, bad));
   });
 
