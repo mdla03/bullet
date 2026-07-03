@@ -18,6 +18,9 @@ const STEPS = [
   },
 ];
 
+const CARD =
+  "w-[340px] rounded-2xl border border-fog bg-white p-7 text-left shadow-sm sm:w-[420px] sm:p-8";
+
 // Scroll-driven story: the section is 3 screens tall, the panel is sticky,
 // and scroll progress picks which step is on stage.
 export default function HowItWorks() {
@@ -37,43 +40,64 @@ export default function HowItWorks() {
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
+  /* eslint-disable @next/next/no-img-element */
   const visuals = [
-    <div key="pay" className="flex items-center gap-2">
-      <span className="rounded-full border border-fog bg-white px-6 py-3.5 font-mono text-lg">
-        @maria
-      </span>
-      <span className="rounded-full bg-ink px-6 py-3.5 text-lg font-semibold text-paper">
-        Pay
-      </span>
+    // 01: the note card from the brand sheet
+    <div key="send" className={CARD}>
+      <img src="/wordmark.svg" alt="bullet" className="h-4 w-auto" />
+      <p className="mt-7 text-5xl font-bold tracking-tight sm:text-6xl">
+        50 USDC
+      </p>
+      <p className="mt-2 text-lg text-graphite">to @maria</p>
+      <div className="mt-7 border-t border-fog pt-5">
+        <p className="font-mono text-sm text-graphite">sent silently</p>
+      </div>
     </div>,
-    <span
-      key="note"
-      className="rounded-xl border border-fog bg-white px-6 py-4 font-mono text-lg"
-    >
-      10 USDC <span className="text-graphite">· 0x9f3a41c7…c41d</span>
-    </span>,
-    <span
-      key="claim"
-      className="flex items-center gap-2 rounded-full border border-fog bg-white px-6 py-3.5 text-lg font-semibold"
-    >
-      <CheckIcon className="h-5 w-5 text-signal" />
-      claimed. no link back.
-    </span>,
+    // 02: the same payment as the chain records it
+    <div key="note" className={CARD}>
+      <p className="font-mono text-sm text-graphite">on-chain record</p>
+      <p className="mt-7 break-all font-mono text-3xl text-ink sm:text-4xl">
+        0x9f3a41c7…c41d
+      </p>
+      <p className="mt-2 text-lg text-graphite">
+        a 50 USDC note, identical to every other
+      </p>
+      <div className="mt-7 border-t border-fog pt-5">
+        <p className="font-mono text-sm text-graphite">
+          no sender. no recipient.
+        </p>
+      </div>
+    </div>,
+    // 03: claimed on the other side
+    <div key="claim" className={CARD}>
+      <img src="/wordmark.svg" alt="bullet" className="h-4 w-auto" />
+      <p className="mt-7 flex items-center gap-4 text-5xl font-bold tracking-tight sm:text-6xl">
+        50 USDC
+        <CheckIcon className="h-9 w-9 shrink-0 text-signal" />
+      </p>
+      <p className="mt-2 text-lg text-graphite">claimed by @maria</p>
+      <div className="mt-7 border-t border-fog pt-5">
+        <p className="font-mono text-sm text-graphite">no link back</p>
+      </div>
+    </div>,
   ];
+  /* eslint-enable @next/next/no-img-element */
 
   const stage = (i: number) =>
     i === active
       ? "translate-y-0 opacity-100"
       : i < active
-        ? "-translate-y-8 opacity-0"
-        : "translate-y-8 opacity-0";
+        ? "-translate-y-10 opacity-0"
+        : "translate-y-10 opacity-0";
 
   return (
     <section ref={ref} className="relative h-[300vh] w-full">
-      <div className="sticky top-0 flex h-screen flex-col items-center justify-center gap-12">
-        <h2 className="text-2xl font-bold tracking-tight">how it works.</h2>
+      <div className="sticky top-0 flex h-screen flex-col items-center justify-center gap-10">
+        <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">
+          how it works.
+        </h2>
 
-        <div className="relative h-20 w-full">
+        <div className="relative h-[280px] w-full sm:h-[310px]">
           {visuals.map((visual, i) => (
             <div
               key={i}
@@ -84,7 +108,7 @@ export default function HowItWorks() {
           ))}
         </div>
 
-        <div className="relative h-32 w-full max-w-md">
+        <div className="relative h-36 w-full max-w-lg">
           {STEPS.map((step, i) => (
             <div
               key={step.title}
@@ -93,8 +117,8 @@ export default function HowItWorks() {
               <p className="font-mono text-sm text-graphite">
                 0{i + 1} <span className="text-graphite/40">/ 03</span>
               </p>
-              <p className="mt-2 font-semibold">{step.title}</p>
-              <p className="mt-1 text-sm text-graphite">{step.body}</p>
+              <p className="mt-2 text-xl font-semibold">{step.title}</p>
+              <p className="mt-2 text-graphite">{step.body}</p>
             </div>
           ))}
         </div>
