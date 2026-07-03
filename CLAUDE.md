@@ -18,11 +18,28 @@ old name until a coordinated rename).
 - Be honest about privacy. Never claim more anonymity than the design gives
   (see SPEC.md threat model).
 
-## UI rules
+## Design system (brand sheet, 2026-07-03; follow exactly)
 
-- Dark theme: zinc-950 background, amber-400 accent, Tailwind utility classes
-  only (no custom CSS unless unavoidable).
-- Icons: Lucide path data copied verbatim into `frontend/src/components/icons.tsx`.
-  Never hand-draw SVG paths, never add an icon dependency.
+Light "paper" theme. Minimal, terminal-adjacent, trust through restraint.
+
+- **Colors** (Tailwind tokens in `frontend/src/app/globals.css`, use by name):
+  - `ink` #0A0A0A: text, primary buttons (bg-ink text-paper).
+  - `paper` #F5F3EE: page background.
+  - `fog` #E5E0DE: borders, dividers. Cards are `bg-white border-fog`.
+  - `graphite` #6B6B6B: secondary text.
+  - `signal` #00A676: action/status color. Success states use a static signal
+    dot + text ("sent silently"). Never pulse it.
+  - `amber` #E8B54A: warnings only, sparingly.
+- **Type**: Inter 400/500 body (font-sans), Geist Mono for addresses, hashes
+  and status lines (font-mono). Amounts and headlines: Inter bold,
+  tracking-tight. Taglines are lowercase with a period ("send silently.").
+- **Logo**: wordmark is lowercase "bullet"; logomark is the b in
+  `frontend/public/logomark.svg` (also the favicon at `frontend/src/app/icon.svg`).
+  Do not redraw either.
+- **Shapes**: pill buttons (rounded-full), rounded-2xl cards, rounded-xl
+  inputs. Tailwind utilities only, no custom CSS unless unavoidable.
+- Icons: Lucide path data copied verbatim into `frontend/src/components/icons.tsx`
+  (brand logos from Simple Icons). Never hand-draw SVG paths, never add an
+  icon dependency.
 - Before designing a new screen, check Refero (MCP) for real-app references
   first. Do not invent layouts from scratch when a proven pattern exists.
