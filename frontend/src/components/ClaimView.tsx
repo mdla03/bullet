@@ -176,7 +176,7 @@ export function ClaimView({ encoded }: { encoded: string }) {
       {/* Note card */}
       <div className="rounded-lg border border-purple-800 bg-purple-950 px-6 py-6">
         <p className="text-xs font-medium uppercase tracking-widest text-purple-400">
-          ZeekPay Note
+          Bullet Note
         </p>
         <p className="mt-3 text-4xl font-bold text-white">${payload.denom} USDC</p>
         <div className="mt-4 space-y-1 text-sm text-gray-400">
