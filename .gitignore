@@ -62,3 +62,6 @@ pnpm-debug.log*
 !.vscode/settings.json
 .idea/
 .playwright-mcp/
+
+# Local Claude settings may hold secret placeholders
+.claude/settings.local.json
