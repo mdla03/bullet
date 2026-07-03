@@ -177,66 +177,13 @@ describe("GET /resolve", () => {
 });
 
 describe("POST /register", () => {
-  const NEW_ADDR = "G" + "D".repeat(55);
-
-  it("registers new handle successfully", async () => {
-    const r = await req("POST", "/register", {
-      handle: "@carol",
-      stellarAddress: NEW_ADDR,
-      zeekPayPubKey: "c".repeat(64),
-      signature: VALID_SIG,
+  it("404 — endpoint removed (only /auth/twitter/start writes to registry)", async () => {
+    const res = await fetch(`http://localhost:${port}/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ handle: "@carol" }),
     });
-    assert.equal(r.status, 200);
-    assert.deepEqual(r.body, { ok: true });
-  });
-
-  it("409 conflict — same handle, different address", async () => {
-    const r = await req("POST", "/register", {
-      handle: "@carol",
-      stellarAddress: "G" + "E".repeat(55),
-      zeekPayPubKey: "c".repeat(64),
-      signature: VALID_SIG,
-    });
-    assert.equal(r.status, 409);
-  });
-
-  it("400 — missing handle and email", async () => {
-    const r = await req("POST", "/register", {
-      stellarAddress: NEW_ADDR,
-      zeekPayPubKey: "c".repeat(64),
-      signature: VALID_SIG,
-    });
-    assert.equal(r.status, 400);
-  });
-
-  it("400 — invalid stellarAddress", async () => {
-    const r = await req("POST", "/register", {
-      handle: "@dave",
-      stellarAddress: "notakey",
-      zeekPayPubKey: "d".repeat(64),
-      signature: VALID_SIG,
-    });
-    assert.equal(r.status, 400);
-  });
-
-  it("400 — invalid zeekPayPubKey (not 64 hex chars)", async () => {
-    const r = await req("POST", "/register", {
-      handle: "@dave",
-      stellarAddress: NEW_ADDR,
-      zeekPayPubKey: "zzzz",
-      signature: VALID_SIG,
-    });
-    assert.equal(r.status, 400);
-  });
-
-  it("400 — invalid email format", async () => {
-    const r = await req("POST", "/register", {
-      email: "notanemail",
-      stellarAddress: NEW_ADDR,
-      zeekPayPubKey: "d".repeat(64),
-      signature: VALID_SIG,
-    });
-    assert.equal(r.status, 400);
+    assert.equal(res.status, 404);
   });
 });
 

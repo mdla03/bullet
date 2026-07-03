@@ -8,7 +8,9 @@ import * as pending from "./pending.js";
 import * as twitter from "./twitter.js";
 import { verifyRegistrationSig } from "./verify.js";
 import * as commitment from "./commitment.js";
+import * as leaves from "./leaves.js";
 import * as prove from "./prove.js";
+import * as tree from "./tree.js";
 import * as StellarSdk from "@stellar/stellar-sdk";
 
 const app = express();
@@ -59,46 +61,11 @@ app.get("/resolve", (req: Request, res: Response) => {
   } satisfies ResolveResult);
 });
 
-app.post("/register", (req: Request, res: Response) => {
-  const body = req.body as Partial<RegisterRequest>;
-
-  if (!body.handle && !body.email) {
-    return void badRequest(res, "at least one of handle or email is required");
-  }
-  if (!body.stellarAddress || !STELLAR_RE.test(body.stellarAddress)) {
-    return void badRequest(res, "stellarAddress must be a valid Stellar public key (G…)");
-  }
-  if (!body.zeekPayPubKey || !ZEEKPAY_KEY_RE.test(body.zeekPayPubKey)) {
-    return void badRequest(res, "zeekPayPubKey must be a 64-char lowercase hex string");
-  }
-  if (body.email && !EMAIL_RE.test(body.email)) {
-    return void badRequest(res, "invalid email format");
-  }
-
-  const result = store.register({
-    handle: body.handle,
-    email: body.email,
-    stellarAddress: body.stellarAddress,
-    zeekPayPubKey: body.zeekPayPubKey,
-    signature: body.signature ?? "",
-  });
-
-  if ("conflict" in result) {
-    return void res.status(409).json({ error: "conflict", detail: result.detail });
-  }
-
-  res.json({ ok: true });
-});
+// POST /register removed: only /auth/twitter/start (sig-verified + OAuth-gated) may write to the registry.
 
 // ── POST /commitment ──────────────────────────────────────────────────────────
 
 app.post("/commitment", (req: Request, res: Response) => {
-  if (!commitment.isCircuitsReady()) {
-    return void res.status(503).json({
-      error: "circuits_not_built",
-      detail: "run pnpm build:circuits first",
-    });
-  }
   const { secret, recipientDigest, denom } = req.body as {
     secret?: string;
     recipientDigest?: string;
@@ -109,7 +76,9 @@ app.post("/commitment", (req: Request, res: Response) => {
   }
   try {
     const c = commitment.computeCommitment(secret, recipientDigest, denom);
-    res.json({ commitment: c });
+    const leafIndex = leaves.insert(c);
+    tree.onLeafInserted(c, leafIndex);
+    res.json({ commitment: c, leafIndex, root: tree.root() });
   } catch (e) {
     res.status(400).json({ error: "compute_failed", detail: String(e) });
   }
@@ -117,12 +86,17 @@ app.post("/commitment", (req: Request, res: Response) => {
 
 // ── POST /prove ───────────────────────────────────────────────────────────────
 
-app.post("/prove", (req: Request, res: Response) => {
+app.post("/prove", async (req: Request, res: Response) => {
   if (!prove.isProveReady()) {
     return void res.status(503).json({
       error: "circuits_not_built",
       detail: "run pnpm build:circuits first",
     });
+  }
+  const adminKey = process.env.ZEEKPAY_ADMIN_KEY;
+  const contractId = process.env.ZEEKPAY_CONTRACT_ID ?? "";
+  if (!adminKey || !contractId) {
+    return void res.status(503).json({ error: "admin_not_configured" });
   }
   const { secret, recipientDigest, denom } = req.body as {
     secret?: string;
@@ -134,31 +108,10 @@ app.post("/prove", (req: Request, res: Response) => {
   }
   try {
     const result = prove.generateProof(secret, recipientDigest, denom);
-    res.json(result);
+    const postRootHash = await postRootOnChain(adminKey, contractId, result.root);
+    res.json({ ...result, postRootHash });
   } catch (e) {
     res.status(400).json({ error: "prove_failed", detail: String(e) });
-  }
-});
-
-// ── POST /post-root ───────────────────────────────────────────────────────────
-
-const ROOT_HEX_RE = /^[0-9a-f]{64}$/i;
-
-app.post("/post-root", async (req: Request, res: Response) => {
-  const adminKey = process.env.ZEEKPAY_ADMIN_KEY;
-  const contractId = process.env.ZEEKPAY_CONTRACT_ID ?? "";
-  if (!adminKey) {
-    return void res.status(503).json({ error: "admin_key_not_configured" });
-  }
-  const { root } = req.body as { root?: string };
-  if (!root || !ROOT_HEX_RE.test(root)) {
-    return void badRequest(res, "root must be 64 lowercase hex chars");
-  }
-  try {
-    const hash = await postRootOnChain(adminKey, contractId, root);
-    res.json({ ok: true, hash });
-  } catch (e) {
-    res.status(500).json({ error: "post_root_failed", detail: String(e) });
   }
 });
 
