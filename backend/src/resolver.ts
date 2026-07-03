@@ -12,17 +12,14 @@ import { verifyLinkWalletSig } from "./verify.js";
 import * as StellarSdk from "@stellar/stellar-sdk";
 
 const app = express();
-app.use(
-  cors({
-    origin: process.env.FRONTEND_URL ?? "http://localhost:3000",
-    credentials: true,
-  })
-);
+// ponytail: demo, reflect any origin. Bearer-token auth means no CSRF surface.
+// Tighten to an allowlist post-demo.
+app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 
 const CONTRACT_ADDRESS = process.env.ZEEKPAY_CONTRACT_ID ?? "";
 const USDC_SAC = process.env.USDC_SAC_ID ?? "";
-const PORT = parseInt(process.env.RESOLVER_PORT ?? "3001", 10);
+const PORT = parseInt(process.env.PORT ?? process.env.RESOLVER_PORT ?? "3001", 10);
 
 // ── validation helpers ────────────────────────────────────────────────────────
 

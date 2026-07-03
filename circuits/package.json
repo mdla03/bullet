@@ -7,8 +7,10 @@
   "scripts": {
     "bench": "bash scripts/run-benchmark.sh"
   },
-  "devDependencies": {
-    "circomlib": "2.0.5",
+  "dependencies": {
     "snarkjs": "0.7.5"
+  },
+  "devDependencies": {
+    "circomlib": "2.0.5"
   }
 }
