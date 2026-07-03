@@ -1,8 +1,12 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
+const SUPABASE_URL =
+  process.env.NEXT_PUBLIC_SUPABASE_URL ??
+  "https://fxtxvierohxvvusmhkoa.supabase.co";
+const SUPABASE_ANON_KEY =
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ??
+  "sb_publishable_elD3mcadGqiWcYZlUxE1sg_vqOh_Hq8";
 
 /** Refresh the Supabase session on every request so Server Components see fresh cookies. */
 export async function middleware(request: NextRequest) {
