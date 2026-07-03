@@ -20,10 +20,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       >
         <header className="border-b border-fog px-6 py-4">
           <div className="mx-auto flex max-w-5xl items-center gap-2">
-            <Link href="/" className="flex items-center gap-2">
+            <Link href="/" className="flex items-center">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/logomark.svg" alt="" className="h-6 w-6" />
-              <span className="text-xl font-bold tracking-tight">bullet</span>
+              <img src="/wordmark.svg" alt="bullet" className="h-7 w-auto" />
             </Link>
             <nav className="ml-auto flex items-center gap-3 text-sm">
               <Link

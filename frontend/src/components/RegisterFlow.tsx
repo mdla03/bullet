@@ -58,7 +58,7 @@ export function RegisterFlow({
       <div className="space-y-5">
         <div className="rounded-2xl border border-signal/30 bg-white p-5">
           <p className="flex items-center gap-2 font-semibold text-signal">
-            <span className="inline-block h-2 w-2 rounded-full bg-signal" />
+            <CheckIcon className="h-5 w-5" />
             {successHandle} is linked to your wallet
           </p>
           <p className="mt-1 text-sm text-graphite">

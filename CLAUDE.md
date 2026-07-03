@@ -27,15 +27,16 @@ Light "paper" theme. Minimal, terminal-adjacent, trust through restraint.
   - `paper` #F5F3EE: page background.
   - `fog` #E5E0DE: borders, dividers. Cards are `bg-white border-fog`.
   - `graphite` #6B6B6B: secondary text.
-  - `signal` #00A676: action/status color. Success states use a static signal
-    dot + text ("sent silently"). Never pulse it.
+  - `signal` #00A676: action/status color, as text or a check icon. NO status
+    dots, ever, not even static ones. They read as LIVE indicators.
   - `amber` #E8B54A: warnings only, sparingly.
 - **Type**: Inter 400/500 body (font-sans), Geist Mono for addresses, hashes
   and status lines (font-mono). Amounts and headlines: Inter bold,
   tracking-tight. Taglines are lowercase with a period ("send silently.").
-- **Logo**: wordmark is lowercase "bullet"; logomark is the b in
-  `frontend/public/logomark.svg` (also the favicon at `frontend/src/app/icon.svg`).
-  Do not redraw either.
+- **Logo**: the combined wordmark `frontend/public/wordmark.svg` is one unit;
+  never place the logomark next to text spelling "bullet". Logomark
+  `frontend/public/logomark.svg` is for square contexts only (favicon at
+  `frontend/src/app/icon.svg`). Do not redraw either.
 - **Shapes**: pill buttons (rounded-full), rounded-2xl cards, rounded-xl
   inputs. Tailwind utilities only, no custom CSS unless unavoidable.
 - Icons: Lucide path data copied verbatim into `frontend/src/components/icons.tsx`
