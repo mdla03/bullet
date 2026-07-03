@@ -19,10 +19,9 @@ import {
   signatureToHex,
 } from "@/lib/register";
 
-// ponytail: X (Twitter) waits on the Supabase Twitter provider being configured.
 const PROVIDERS = [
   { key: "google", label: "Google", icon: GoogleIcon, enabled: true },
-  { key: "twitter", label: "X (Twitter)", icon: XBrandIcon, enabled: false },
+  { key: "twitter", label: "X (Twitter)", icon: XBrandIcon, enabled: true },
 ] as const;
 
 const OAUTH_ERRORS: Record<string, string> = {
