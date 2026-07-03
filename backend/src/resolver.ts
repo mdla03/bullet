@@ -12,12 +12,9 @@ import { verifyLinkWalletSig } from "./verify.js";
 import * as StellarSdk from "@stellar/stellar-sdk";
 
 const app = express();
-app.use(
-  cors({
-    origin: process.env.FRONTEND_URL ?? "https://bullet-frontend.vercel.app",
-    credentials: true,
-  })
-);
+// ponytail: demo, reflect any origin. Bearer-token auth means no CSRF surface.
+// Tighten to an allowlist post-demo.
+app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 
 const CONTRACT_ADDRESS = process.env.ZEEKPAY_CONTRACT_ID ?? "";
