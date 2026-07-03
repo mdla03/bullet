@@ -1,6 +1,6 @@
 import { SendForm } from "@/components/SendForm";
 
-export const metadata = { title: "Send — Bullet" };
+export const metadata = { title: "Send · Bullet" };
 
 export default function SendPage() {
   return (
@@ -9,8 +9,8 @@ export default function SendPage() {
         Send money to a handle
       </h1>
       <p className="mb-8 text-sm text-zinc-400">
-        Pay any X handle or email in USDC. On-chain, nothing links you to the
-        recipient — the payment lands as an anonymous note only they can claim.
+        Pay any X handle or email in USDC. Nothing on-chain links you to the
+        recipient. The payment lands as an anonymous note only they can claim.
       </p>
       <SendForm />
     </div>

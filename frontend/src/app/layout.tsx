@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Bullet — fast, small, silent payments",
+  title: "Bullet · Private payments on Stellar",
   description:
     "Send USDC privately to any X handle or email on Stellar. Zero-knowledge proofs keep sender and recipient unlinkable on-chain.",
 };
@@ -16,8 +16,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <span className="text-lg font-bold tracking-tight">
               <span className="text-amber-400">●</span> Bullet
             </span>
-            <span className="text-xs tracking-widest text-zinc-500">
-              FAST · SMALL · SILENT
+            <span className="text-xs text-zinc-500">
+              Private payments on Stellar
             </span>
           </div>
         </header>
