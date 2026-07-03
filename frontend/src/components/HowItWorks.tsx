@@ -1,126 +1,197 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { CheckIcon } from "@/components/icons";
+
+const HANDLE = "@maria";
 
 const STEPS = [
   {
     title: "Type a handle.",
-    body: "Pay @maria or an email address. Bullet resolves it to their keys. No wallet addresses exchanged.",
+    body: "@maria or an email. Bullet resolves it to their keys. No wallet addresses exchanged.",
   },
   {
-    title: "A note goes on-chain.",
-    body: "Your USDC becomes a fixed-size note of 1, 10, 50 or 100. To anyone watching, it is only a commitment hash.",
+    title: "Pay.",
+    body: "Sign once. Your USDC becomes a fixed-size note of 1, 10, 50 or 100.",
   },
   {
-    title: "They claim with a proof.",
-    body: "The recipient proves a note is theirs with a zero-knowledge proof. Nothing on-chain links their claim to your deposit.",
+    title: "A note appears on-chain.",
+    body: "Only a commitment hash. The recipient claims it later with a zero-knowledge proof. No link back to you.",
   },
 ];
 
-const CARD =
-  "w-[340px] rounded-2xl border border-fog bg-white p-7 text-left shadow-sm sm:w-[420px] sm:p-8";
-
-// Scroll-driven story: the section is 3 screens tall, the panel is sticky,
-// and scroll progress picks which step is on stage.
+// Autoplays once when scrolled into view: types the handle, presses Pay,
+// slides the tx card in. Clicking a rail step replays from that step.
 export default function HowItWorks() {
   const ref = useRef<HTMLElement>(null);
+  const [chars, setChars] = useState(0);
+  const [pressed, setPressed] = useState(false);
+  const [cardIn, setCardIn] = useState(false);
   const [active, setActive] = useState(0);
+  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const started = useRef(false);
+
+  const clear = () => {
+    timers.current.forEach(clearTimeout);
+    timers.current = [];
+  };
+  const at = (ms: number, fn: () => void) =>
+    timers.current.push(setTimeout(fn, ms));
+
+  const play = (from: 0 | 1 | 2) => {
+    clear();
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setChars(HANDLE.length);
+      setPressed(false);
+      setCardIn(true);
+      setActive(2);
+      return;
+    }
+    const payThenCard = (t: number) => {
+      at(t, () => {
+        setActive(1);
+        setPressed(true);
+      });
+      at(t + 250, () => setPressed(false));
+      at(t + 900, () => {
+        setActive(2);
+        setCardIn(true);
+      });
+    };
+    setPressed(false);
+    if (from === 0) {
+      setChars(0);
+      setCardIn(false);
+      setActive(0);
+      for (let i = 1; i <= HANDLE.length; i++) {
+        at(400 + i * 130, () => setChars(i));
+      }
+      payThenCard(400 + HANDLE.length * 130 + 600);
+    } else if (from === 1) {
+      setChars(HANDLE.length);
+      setCardIn(false);
+      setActive(1);
+      payThenCard(300);
+    } else {
+      setChars(HANDLE.length);
+      setCardIn(false);
+      setActive(2);
+      at(150, () => setCardIn(true));
+    }
+  };
 
   useEffect(() => {
-    const onScroll = () => {
-      const el = ref.current;
-      if (!el) return;
-      const total = el.offsetHeight - window.innerHeight;
-      const p = Math.min(0.999, Math.max(0, -el.getBoundingClientRect().top / total));
-      setActive(Math.floor(p * STEPS.length));
+    const el = ref.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && !started.current) {
+          started.current = true;
+          play(0);
+        }
+      },
+      { threshold: 0.4 },
+    );
+    io.observe(el);
+    return () => {
+      io.disconnect();
+      clear();
     };
-    onScroll();
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* eslint-disable @next/next/no-img-element */
-  const visuals = [
-    // 01: the note card from the brand sheet
-    <div key="send" className={CARD}>
-      <img src="/wordmark.svg" alt="bullet" className="h-4 w-auto" />
-      <p className="mt-7 text-5xl font-bold tracking-tight sm:text-6xl">
-        50 USDC
-      </p>
-      <p className="mt-2 text-lg text-graphite">to @maria</p>
-      <div className="mt-7 border-t border-fog pt-5">
-        <p className="font-mono text-sm text-graphite">sent silently</p>
-      </div>
-    </div>,
-    // 02: the same payment as the chain records it
-    <div key="note" className={CARD}>
-      <p className="font-mono text-sm text-graphite">on-chain record</p>
-      <p className="mt-7 break-all font-mono text-3xl text-ink sm:text-4xl">
-        0x9f3a41c7…c41d
-      </p>
-      <p className="mt-2 text-lg text-graphite">
-        a 50 USDC note, identical to every other
-      </p>
-      <div className="mt-7 border-t border-fog pt-5">
-        <p className="font-mono text-sm text-graphite">
-          no sender. no recipient.
-        </p>
-      </div>
-    </div>,
-    // 03: claimed on the other side
-    <div key="claim" className={CARD}>
-      <img src="/wordmark.svg" alt="bullet" className="h-4 w-auto" />
-      <p className="mt-7 flex items-center gap-4 text-5xl font-bold tracking-tight sm:text-6xl">
-        50 USDC
-        <CheckIcon className="h-9 w-9 shrink-0 text-signal" />
-      </p>
-      <p className="mt-2 text-lg text-graphite">claimed by @maria</p>
-      <div className="mt-7 border-t border-fog pt-5">
-        <p className="font-mono text-sm text-graphite">no link back</p>
-      </div>
-    </div>,
-  ];
-  /* eslint-enable @next/next/no-img-element */
-
-  const stage = (i: number) =>
-    i === active
-      ? "translate-y-0 opacity-100"
-      : i < active
-        ? "-translate-y-10 opacity-0"
-        : "translate-y-10 opacity-0";
+  const typed = HANDLE.slice(0, chars);
 
   return (
-    <section ref={ref} className="relative h-[300vh] w-full">
-      <div className="sticky top-0 flex h-screen flex-col items-center justify-center gap-10">
-        <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">
-          how it works.
-        </h2>
+    <section
+      ref={ref}
+      className="flex min-h-screen w-full flex-col justify-center"
+    >
+      <h2 className="text-left text-3xl font-bold tracking-tight sm:text-4xl">
+        how it works.
+      </h2>
 
-        <div className="relative h-[280px] w-full sm:h-[310px]">
-          {visuals.map((visual, i) => (
-            <div
-              key={i}
-              className={`absolute inset-0 flex items-center justify-center transition-all duration-500 ease-out motion-reduce:transition-none ${stage(i)}`}
-            >
-              {visual}
-            </div>
-          ))}
+      <div className="mt-12 grid gap-12 text-left md:grid-cols-[300px_1fr] md:items-center">
+        {/* Step rail; click a step to replay from there */}
+        <div className="relative pl-6">
+          <div className="absolute left-0 top-0 h-full w-px bg-fog" />
+          <div
+            className="absolute left-0 top-0 w-px bg-ink transition-all duration-500"
+            style={{ height: `${((active + 1) / STEPS.length) * 100}%` }}
+          />
+          <ol className="space-y-10">
+            {STEPS.map((step, i) => (
+              <li key={step.title}>
+                <button
+                  type="button"
+                  onClick={() => play(i as 0 | 1 | 2)}
+                  className={`text-left transition-opacity duration-300 hover:opacity-100 ${
+                    i === active ? "opacity-100" : "opacity-40"
+                  }`}
+                >
+                  <p className="font-mono text-sm text-graphite">0{i + 1}</p>
+                  <p className="mt-1 text-xl font-semibold">{step.title}</p>
+                  <p className="mt-2 text-graphite">{step.body}</p>
+                </button>
+              </li>
+            ))}
+          </ol>
         </div>
 
-        <div className="relative h-36 w-full max-w-lg">
-          {STEPS.map((step, i) => (
-            <div
-              key={step.title}
-              className={`absolute inset-0 transition-all duration-500 ease-out motion-reduce:transition-none ${stage(i)}`}
+        {/* Stage */}
+        <div
+          className="flex flex-col items-center justify-center gap-10"
+          aria-hidden
+        >
+          {/* Send box being driven by the demo */}
+          <div
+            className={`flex items-center gap-2 transition-opacity duration-300 ${
+              active === 2 ? "opacity-40" : "opacity-100"
+            }`}
+          >
+            <span className="flex min-w-[260px] items-center rounded-full border border-fog bg-white px-6 py-4 text-xl sm:min-w-[340px]">
+              {typed ? (
+                <span>{typed}</span>
+              ) : (
+                <span className="text-graphite/60">@handle or email</span>
+              )}
+              <span
+                className={`ml-0.5 inline-block h-6 w-0.5 bg-ink ${
+                  active === 2 ? "opacity-0" : "animate-pulse"
+                }`}
+              />
+            </span>
+            <span
+              className={`rounded-full bg-ink px-7 py-4 text-xl font-semibold text-paper transition-transform duration-200 ${
+                pressed ? "scale-90" : "scale-100"
+              }`}
             >
+              Pay
+            </span>
+          </div>
+
+          {/* The tx: brand note card sliding in */}
+          <div
+            className={`w-[340px] rounded-2xl border border-fog bg-white p-7 shadow-sm transition-all duration-700 ease-out sm:w-[480px] sm:p-9 ${
+              cardIn ? "translate-y-0 opacity-100" : "translate-y-12 opacity-0"
+            }`}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/wordmark.svg"
+              alt="bullet"
+              className="h-5 w-auto sm:h-6"
+            />
+            <p className="mt-8 text-5xl font-bold tracking-tight sm:text-6xl">
+              50 USDC
+            </p>
+            <p className="mt-2 text-xl text-graphite">to @maria</p>
+            <div className="mt-8 flex items-center justify-between gap-4 border-t border-fog pt-5">
+              <p className="font-mono text-sm text-graphite">sent silently</p>
               <p className="font-mono text-sm text-graphite">
-                0{i + 1} <span className="text-graphite/40">/ 03</span>
+                0x9f3a41c7…c41d
               </p>
-              <p className="mt-2 text-xl font-semibold">{step.title}</p>
-              <p className="mt-2 text-graphite">{step.body}</p>
             </div>
-          ))}
+          </div>
         </div>
       </div>
     </section>
