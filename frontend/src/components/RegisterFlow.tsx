@@ -107,8 +107,11 @@ export function RegisterFlow({ oauthError }: { oauthError?: string }) {
     setWorking("link");
     try {
       const { signMessage } = await import("@stellar/freighter-api");
+      // ponytail: Freighter signMessage signs base64-decoded bytes, so we
+      // base64-encode the utf-8 challenge; backend verifies against the raw utf-8.
+      const b64 = (s: string) => btoa(s);
 
-      const domainRes = await signMessage(KEY_DOMAIN_MESSAGE, { address });
+      const domainRes = await signMessage(b64(KEY_DOMAIN_MESSAGE), { address });
       if (domainRes.error || !domainRes.signedMessage)
         throw new Error(
           `Freighter: ${domainRes.error?.message ?? "signature rejected"}`
@@ -118,7 +121,7 @@ export function RegisterFlow({ oauthError }: { oauthError?: string }) {
       );
 
       const challenge = buildLinkWalletChallenge(me.userId);
-      const linkRes = await signMessage(challenge, { address });
+      const linkRes = await signMessage(b64(challenge), { address });
       if (linkRes.error || !linkRes.signedMessage)
         throw new Error(
           `Freighter: ${linkRes.error?.message ?? "signature rejected"}`
