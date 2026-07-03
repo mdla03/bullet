@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 
 const HANDLE = "@maria";
+const DENOMS = [1, 10, 50, 100];
+const PICKED = 50;
 
 const STEPS = [
   {
@@ -10,8 +12,8 @@ const STEPS = [
     body: "@maria or an email. Bullet resolves it to their keys. No wallet addresses exchanged.",
   },
   {
-    title: "Pay.",
-    body: "Sign once. Your USDC becomes a fixed-size note of 1, 10, 50 or 100.",
+    title: "Pick an amount. Pay.",
+    body: "Fixed sizes only: 1, 10, 50 or 100 USDC, so no amount stands out. Sign once.",
   },
   {
     title: "A note appears on-chain.",
@@ -19,11 +21,12 @@ const STEPS = [
   },
 ];
 
-// Autoplays once when scrolled into view: types the handle, presses Pay,
-// slides the tx card in. Clicking a rail step replays from that step.
+// Autoplays once when scrolled into view: types the handle, picks 50 USDC,
+// presses Pay, slides the tx card in. Clicking a rail step replays from it.
 export default function HowItWorks() {
   const ref = useRef<HTMLElement>(null);
   const [chars, setChars] = useState(0);
+  const [denom, setDenom] = useState(false);
   const [pressed, setPressed] = useState(false);
   const [cardIn, setCardIn] = useState(false);
   const [active, setActive] = useState(0);
@@ -41,18 +44,18 @@ export default function HowItWorks() {
     clear();
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       setChars(HANDLE.length);
+      setDenom(true);
       setPressed(false);
       setCardIn(true);
       setActive(2);
       return;
     }
-    const payThenCard = (t: number) => {
-      at(t, () => {
-        setActive(1);
-        setPressed(true);
-      });
-      at(t + 250, () => setPressed(false));
-      at(t + 900, () => {
+    const amountThenPay = (t: number) => {
+      at(t, () => setActive(1));
+      at(t + 300, () => setDenom(true));
+      at(t + 1100, () => setPressed(true));
+      at(t + 1350, () => setPressed(false));
+      at(t + 1900, () => {
         setActive(2);
         setCardIn(true);
       });
@@ -60,19 +63,21 @@ export default function HowItWorks() {
     setPressed(false);
     if (from === 0) {
       setChars(0);
+      setDenom(false);
       setCardIn(false);
       setActive(0);
       for (let i = 1; i <= HANDLE.length; i++) {
         at(400 + i * 130, () => setChars(i));
       }
-      payThenCard(400 + HANDLE.length * 130 + 600);
+      amountThenPay(400 + HANDLE.length * 130 + 500);
     } else if (from === 1) {
       setChars(HANDLE.length);
+      setDenom(false);
       setCardIn(false);
-      setActive(1);
-      payThenCard(300);
+      amountThenPay(200);
     } else {
       setChars(HANDLE.length);
+      setDenom(true);
       setCardIn(false);
       setActive(2);
       at(150, () => setCardIn(true));
@@ -142,31 +147,47 @@ export default function HowItWorks() {
           className="flex flex-col items-center justify-center gap-10"
           aria-hidden
         >
-          {/* Send box being driven by the demo */}
+          {/* Send box + denomination pills being driven by the demo */}
           <div
-            className={`flex items-center gap-2 transition-opacity duration-300 ${
+            className={`flex flex-col items-center gap-5 transition-opacity duration-300 ${
               active === 2 ? "opacity-40" : "opacity-100"
             }`}
           >
-            <span className="flex min-w-[260px] items-center rounded-full border border-fog bg-white px-6 py-4 text-xl sm:min-w-[340px]">
-              {typed ? (
-                <span>{typed}</span>
-              ) : (
-                <span className="text-graphite/60">@handle or email</span>
-              )}
+            <div className="flex items-center gap-2">
+              <span className="flex min-w-[260px] items-center rounded-full border border-fog bg-white px-6 py-4 text-xl sm:min-w-[340px]">
+                {typed ? (
+                  <span>{typed}</span>
+                ) : (
+                  <span className="text-graphite/60">@handle or email</span>
+                )}
+                <span
+                  className={`ml-0.5 inline-block h-6 w-0.5 bg-ink ${
+                    active === 2 ? "opacity-0" : "animate-pulse"
+                  }`}
+                />
+              </span>
               <span
-                className={`ml-0.5 inline-block h-6 w-0.5 bg-ink ${
-                  active === 2 ? "opacity-0" : "animate-pulse"
+                className={`rounded-full bg-ink px-7 py-4 text-xl font-semibold text-paper transition-transform duration-200 ${
+                  pressed ? "scale-90" : "scale-100"
                 }`}
-              />
-            </span>
-            <span
-              className={`rounded-full bg-ink px-7 py-4 text-xl font-semibold text-paper transition-transform duration-200 ${
-                pressed ? "scale-90" : "scale-100"
-              }`}
-            >
-              Pay
-            </span>
+              >
+                Pay
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              {DENOMS.map((d) => (
+                <span
+                  key={d}
+                  className={`rounded-full border px-5 py-2.5 font-medium transition-all duration-300 ${
+                    denom && d === PICKED
+                      ? "scale-105 border-ink bg-ink text-paper"
+                      : "border-fog bg-white text-graphite"
+                  }`}
+                >
+                  {d} USDC
+                </span>
+              ))}
+            </div>
           </div>
 
           {/* The tx: brand note card sliding in */}
