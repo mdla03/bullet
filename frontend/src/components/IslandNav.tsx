@@ -34,7 +34,7 @@ export default function IslandNav() {
             : "px-4 py-2.5 shadow-md shadow-ink/10"
         }`}
       >
-        <Link href="/" className="flex items-center pl-1 pr-3">
+        <Link href="/" className="flex items-center pl-2 pr-8">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src="/wordmark.svg"
