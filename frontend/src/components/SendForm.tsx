@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ResolveResult } from "@zeekpay/shared";
 import { computeRecipientDigest } from "@/lib/recipient";
 import { depositNote } from "@/lib/deposit";
@@ -52,8 +52,8 @@ function CopyButton({ text, label }: { text: string; label: string }) {
   );
 }
 
-export function SendForm() {
-  const [recipient, setRecipient] = useState("");
+export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
+  const [recipient, setRecipient] = useState(initialRecipient ?? "");
   const [resolved, setResolved] = useState<ResolveResult | null>(null);
   const [resolving, setResolving] = useState(false);
   const [denom, setDenom] = useState<Denom>(10);
@@ -64,6 +64,16 @@ export function SendForm() {
 
   const busy = step === "computing" || step === "signing" || step === "submitting";
   const stepIndex = SEND_STEPS.findIndex((s) => s.key === step);
+
+  // Arriving from the hero send box: resolve the prefilled handle right away.
+  const autoResolved = useRef(false);
+  useEffect(() => {
+    if (initialRecipient?.trim() && !autoResolved.current) {
+      autoResolved.current = true;
+      handleResolve();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function handleResolve() {
     setError("");
@@ -80,7 +90,12 @@ export function SendForm() {
       }
       setResolved(result);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(
+        msg === "Failed to fetch"
+          ? "Can't reach the Bullet resolver. Check that the backend is running, then try again."
+          : msg
+      );
     } finally {
       setResolving(false);
     }
