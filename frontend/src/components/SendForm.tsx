@@ -26,7 +26,7 @@ type Denom = (typeof DENOMS)[number];
 type Step = "idle" | "computing" | "signing" | "submitting" | "done" | "error";
 
 const SEND_STEPS: { key: Step; label: string }[] = [
-  { key: "computing", label: "Sealing the note (one-time commitment)" },
+  { key: "computing", label: "Creating the one-time commitment" },
   { key: "signing", label: "Sign in Freighter" },
   { key: "submitting", label: "Submitting to Stellar" },
 ];
@@ -179,7 +179,7 @@ export function SendForm() {
     }
   }
 
-  const shareMessage = `I sent you $${denom} USDC on Bullet (private payments on Stellar). Claim it here: ${claimLink} — the link contains your claim secret, don't share it.`;
+  const shareMessage = `I sent you $${denom} USDC on Bullet (private payments on Stellar). Claim it here: ${claimLink}. Keep this link private, it contains your claim secret.`;
 
   // ---- Success state ----
   if (step === "done") {
@@ -191,8 +191,7 @@ export function SendForm() {
             {recipient.trim()}
           </p>
           <p className="mt-1 text-sm text-zinc-400">
-            The note is on-chain. Nothing on-chain connects your deposit to
-            their claim.
+            Nothing on-chain connects your deposit to their claim.
           </p>
         </div>
 
@@ -201,8 +200,8 @@ export function SendForm() {
             Deliver the claim link
           </p>
           <p className="text-xs text-zinc-500">
-            Bullet never DMs anyone — you deliver the link yourself, from an
-            account they already trust.
+            Bullet never sends DMs. Deliver the link yourself, from an account
+            they already trust.
           </p>
           <div className="break-all rounded-lg bg-zinc-950 px-3 py-2 font-mono text-xs text-zinc-400">
             {claimLink}
@@ -221,7 +220,7 @@ export function SendForm() {
             className="inline-flex items-center gap-1.5 text-xs text-zinc-500 underline-offset-2 hover:text-zinc-300 hover:underline"
           >
             <ExternalLinkIcon className="h-3.5 w-3.5" />
-            View deposit on stellar.expert — {txHash.slice(0, 12)}…
+            View deposit on stellar.expert ({txHash.slice(0, 12)}…)
           </a>
         )}
 
@@ -272,7 +271,7 @@ export function SendForm() {
             </button>
           </div>
           <p className="mt-2 text-xs text-zinc-600">
-            No wallet address needed — Bullet resolves the handle for you.
+            No wallet address needed. Bullet resolves the handle for you.
           </p>
         </div>
       ) : (
@@ -331,8 +330,8 @@ export function SendForm() {
             </div>
             <p className="mt-2 flex items-start gap-1.5 text-xs text-zinc-600">
               <EyeOffIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              Fixed sizes are the disguise: every Bullet note is one of these
-              amounts, so yours doesn&apos;t stand out.
+              Every Bullet payment uses one of these fixed amounts, so no
+              single payment stands out on-chain.
             </p>
           </div>
 

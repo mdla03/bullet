@@ -163,7 +163,7 @@ export function ClaimView({ encoded }: { encoded: string }) {
 
   const shortContract = payload.contractId
     ? `${payload.contractId.slice(0, 8)}…${payload.contractId.slice(-4)}`
-    : "—";
+    : "unknown";
 
   const busy =
     step === "connecting" ||
