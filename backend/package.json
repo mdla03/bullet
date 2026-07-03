@@ -13,8 +13,10 @@
     "@stellar/stellar-base": "^15.0.0",
     "@stellar/stellar-sdk": "^16.0.1",
     "@zeekpay/shared": "workspace:*",
+    "circomlibjs": "^0.1.7",
     "cors": "^2.8.6",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "ffjavascript": "0.3.1"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
