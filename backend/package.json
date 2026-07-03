@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/resolver.ts",
+    "start": "tsx src/resolver.ts",
     "build": "tsc",
     "test": "node --import tsx/esm --test src/resolver.test.ts"
   },
@@ -17,12 +18,12 @@
     "circomlibjs": "^0.1.7",
     "cors": "^2.8.6",
     "express": "^5.2.1",
-    "ffjavascript": "0.3.1"
+    "ffjavascript": "0.3.1",
+    "tsx": "^4.22.4"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
-    "tsx": "^4.22.4",
     "typescript": "^6.0.3"
   }
 }
