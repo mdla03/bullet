@@ -34,6 +34,20 @@ use verifier::{Proof, VerifyingKey};
 const USDC_DECIMALS: i128 = 10_000_000; // 7 decimals on Stellar
 const ROOT_WINDOW: u32 = 64; // recent valid roots kept
 
+// Persistent-entry TTL management (~5s per ledger on Stellar). `extend_to` must
+// stay under the network `max_entry_ttl` (3,110,400 on mainnet) or `extend_ttl`
+// traps, so these are chosen to be valid on both testnet and mainnet. Persistent
+// entries archive rather than delete (a restore preserves the stored value), but
+// a reaped nullifier read would still trap the claim tx; bumping on every write
+// keeps nullifiers and in-window roots live so honest claims never hit that path.
+const LEDGERS_PER_DAY: u32 = 17_280;
+// Nullifiers gate double-spends: bump the hardest.
+const NULLIFIER_BUMP_THRESHOLD: u32 = 60 * LEDGERS_PER_DAY; // ~60 days
+const NULLIFIER_BUMP_TO: u32 = 3_000_000; // ~173 days, < mainnet max_entry_ttl
+// Roots must outlive their ring-buffer window so in-window claims never fail.
+const ROOT_BUMP_THRESHOLD: u32 = 14 * LEDGERS_PER_DAY; // ~14 days
+const ROOT_BUMP_TO: u32 = 60 * LEDGERS_PER_DAY; // ~60 days
+
 #[contracttype]
 #[derive(Clone, Copy, PartialEq)]
 pub enum Denom {
@@ -150,6 +164,17 @@ impl ZeekPay {
         env.storage()
             .persistent()
             .set(&DataKey::Root(root.clone()), &true);
+        // Keep the root (and its ring slot) live at least as long as its window.
+        env.storage().persistent().extend_ttl(
+            &DataKey::Root(root.clone()),
+            ROOT_BUMP_THRESHOLD,
+            ROOT_BUMP_TO,
+        );
+        env.storage().persistent().extend_ttl(
+            &DataKey::RootRing(slot),
+            ROOT_BUMP_THRESHOLD,
+            ROOT_BUMP_TO,
+        );
         env.storage()
             .instance()
             .set(&DataKey::RootHead, &head.wrapping_add(1));
@@ -230,10 +255,16 @@ impl ZeekPay {
                 return Err(Error::InvalidProof);
             }
         }
-        // 4. Mark nullifier used (after verify, before payout).
+        // 4. Mark nullifier used (after verify, before payout). Bump its TTL so
+        //    it is never reaped while unattended: a reaped nullifier = double-spend.
         env.storage()
             .persistent()
             .set(&DataKey::Nullifier(nullifier.clone()), &true);
+        env.storage().persistent().extend_ttl(
+            &DataKey::Nullifier(nullifier.clone()),
+            NULLIFIER_BUMP_THRESHOLD,
+            NULLIFIER_BUMP_TO,
+        );
         // 5. Pay recipient.
         let usdc: Address = env.storage().instance().get(&DataKey::Usdc).unwrap();
         let client = token::Client::new(&env, &usdc);
