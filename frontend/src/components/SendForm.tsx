@@ -1,10 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ResolveResult } from "@zeekpay/shared";
 import { computeRecipientDigest } from "@/lib/recipient";
 import { depositNote } from "@/lib/deposit";
 import { encodeClaimLink, type ClaimPayload } from "@/lib/claim_link";
+import {
+  CheckIcon,
+  CopyIcon,
+  ExternalLinkIcon,
+  EyeOffIcon,
+  LoaderIcon,
+  ShieldCheckIcon,
+} from "@/components/icons";
 
 const RESOLVER_URL =
   process.env.NEXT_PUBLIC_RESOLVER_URL ?? "http://localhost:3001";
@@ -15,52 +23,100 @@ const FRONTEND_URL =
 const DENOMS = [1, 10, 50, 100] as const;
 type Denom = (typeof DENOMS)[number];
 
-type Step =
-  | "idle"
-  | "resolving"
-  | "computing"
-  | "signing"
-  | "submitting"
-  | "done"
-  | "error";
+type Step = "idle" | "computing" | "signing" | "submitting" | "done" | "error";
 
-const STEP_LABELS: Record<Step, string> = {
-  idle: "Send",
-  resolving: "Resolving recipient…",
-  computing: "Computing commitment…",
-  signing: "Sign in Freighter…",
-  submitting: "Submitting…",
-  done: "Sent!",
-  error: "Send",
-};
+const SEND_STEPS: { key: Step; label: string }[] = [
+  { key: "computing", label: "Creating the one-time commitment" },
+  { key: "signing", label: "Sign in Freighter" },
+  { key: "submitting", label: "Submitting to Stellar" },
+];
 
-export function SendForm() {
-  const [recipient, setRecipient] = useState("");
+function CopyButton({ text, label }: { text: string; label: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      onClick={() => {
+        navigator.clipboard.writeText(text);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      }}
+      className="inline-flex items-center gap-1.5 rounded-md border border-fog bg-white px-2.5 py-1.5 text-xs font-medium transition-colors hover:border-graphite"
+    >
+      {copied ? (
+        <CheckIcon className="h-3.5 w-3.5 text-signal" />
+      ) : (
+        <CopyIcon className="h-3.5 w-3.5" />
+      )}
+      {copied ? "Copied" : label}
+    </button>
+  );
+}
+
+export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
+  const [recipient, setRecipient] = useState(initialRecipient ?? "");
+  const [resolved, setResolved] = useState<ResolveResult | null>(null);
+  const [resolving, setResolving] = useState(false);
   const [denom, setDenom] = useState<Denom>(10);
   const [step, setStep] = useState<Step>("idle");
   const [claimLink, setClaimLink] = useState("");
   const [txHash, setTxHash] = useState("");
   const [error, setError] = useState("");
 
-  const busy = step !== "idle" && step !== "done" && step !== "error";
+  const busy = step === "computing" || step === "signing" || step === "submitting";
+  const stepIndex = SEND_STEPS.findIndex((s) => s.key === step);
+
+  // Arriving from the hero send box: resolve the prefilled handle right away.
+  const autoResolved = useRef(false);
+  useEffect(() => {
+    if (initialRecipient?.trim() && !autoResolved.current) {
+      autoResolved.current = true;
+      handleResolve();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function handleResolve() {
+    setError("");
+    setResolving(true);
+    try {
+      const res = await fetch(
+        `${RESOLVER_URL}/resolve?q=${encodeURIComponent(recipient.trim())}`
+      );
+      const result: ResolveResult = await res.json();
+      if (!result.found || !result.stellarAddress) {
+        throw new Error(
+          `"${recipient.trim()}" isn't registered on Bullet yet. Ask them to sign up, then try again.`
+        );
+      }
+      setResolved(result);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(
+        msg === "Failed to fetch"
+          ? "Can't reach the Bullet resolver. Check that the backend is running, then try again."
+          : msg
+      );
+    } finally {
+      setResolving(false);
+    }
+  }
+
+  function reset() {
+    setResolved(null);
+    setStep("idle");
+    setClaimLink("");
+    setTxHash("");
+    setError("");
+  }
 
   async function handleSend() {
+    if (!resolved?.stellarAddress) return;
     setError("");
     setClaimLink("");
     setTxHash("");
 
     try {
-      // 1. Resolve recipient
-      setStep("resolving");
-      const resolveRes = await fetch(
-        `${RESOLVER_URL}/resolve?q=${encodeURIComponent(recipient.trim())}`
-      );
-      const resolved: ResolveResult = await resolveRes.json();
-      if (!resolved.found || !resolved.stellarAddress) {
-        throw new Error(`Recipient "${recipient}" not found in ZeekPay registry.`);
-      }
-
-      // 2. Connect Freighter wallet
+      // 1. Connect Freighter wallet
       const { requestAccess, signTransaction } = await import(
         "@stellar/freighter-api"
       );
@@ -70,13 +126,13 @@ export function SendForm() {
       }
       const senderAddress = addrRes.address;
 
-      // 3. Compute recipientDigest from resolved Stellar address
+      // 2. Compute recipientDigest from resolved Stellar address
       setStep("computing");
       const recipientDigest = await computeRecipientDigest(
         resolved.stellarAddress
       );
 
-      // 4. Generate random 32-byte secret
+      // 3. Generate random 32-byte secret
       const secretBytes = new Uint8Array(32);
       crypto.getRandomValues(secretBytes);
       const secret = Array.from(secretBytes)
@@ -84,7 +140,7 @@ export function SendForm() {
         .join("");
       const secretBigInt = BigInt("0x" + secret);
 
-      // 5. Compute commitment via backend (snarkjs BLS12-381 Poseidon)
+      // 4. Compute commitment via backend (snarkjs BLS12-381 Poseidon)
       const commitRes = await fetch(`${RESOLVER_URL}/commitment`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -103,7 +159,7 @@ export function SendForm() {
       const { commitment } = (await commitRes.json()) as { commitment: string };
       const commitmentBigInt = BigInt(commitment);
 
-      // 6. Build, sign, submit deposit transaction
+      // 5. Build, sign, submit deposit transaction
       setStep("signing");
       const hash = await depositNote(
         senderAddress,
@@ -122,7 +178,7 @@ export function SendForm() {
       );
       setTxHash(hash);
 
-      // 7. Build claim link
+      // 6. Build claim link
       const payload: ClaimPayload = {
         secret,
         recipientDigest: recipientDigest.toString(),
@@ -138,93 +194,190 @@ export function SendForm() {
     }
   }
 
+  const shareMessage = `I sent you $${denom} USDC on Bullet (private payments on Stellar). Claim it here: ${claimLink}. Keep this link private, it contains your claim secret.`;
+
+  // ---- Success state ----
+  if (step === "done") {
+    return (
+      <div className="space-y-5">
+        <div className="rounded-2xl border border-signal/30 bg-white p-5">
+          <p className="flex items-center gap-2 font-semibold text-signal">
+            <CheckIcon className="h-5 w-5" />${denom} USDC sent silently to{" "}
+            {recipient.trim()}
+          </p>
+          <p className="mt-1 text-sm text-graphite">
+            Nothing on-chain connects your deposit to their claim.
+          </p>
+        </div>
+
+        <div className="space-y-3 rounded-2xl border border-fog bg-white p-5">
+          <p className="text-sm font-medium">Deliver the claim link</p>
+          <p className="text-xs text-graphite">
+            Bullet never sends DMs. Deliver the link yourself, from an account
+            they already trust.
+          </p>
+          <div className="break-all rounded-lg bg-paper px-3 py-2 font-mono text-xs text-graphite">
+            {claimLink}
+          </div>
+          <div className="flex gap-2">
+            <CopyButton text={claimLink} label="Copy link" />
+            <CopyButton text={shareMessage} label="Copy ready-to-send message" />
+          </div>
+        </div>
+
+        {txHash && (
+          <a
+            href={`https://stellar.expert/explorer/testnet/tx/${txHash}`}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1.5 text-xs text-graphite underline-offset-2 hover:text-ink hover:underline"
+          >
+            <ExternalLinkIcon className="h-3.5 w-3.5" />
+            View deposit on stellar.expert (
+            <span className="font-mono">{txHash.slice(0, 12)}…</span>)
+          </a>
+        )}
+
+        <button
+          onClick={() => {
+            reset();
+            setRecipient("");
+          }}
+          className="w-full rounded-full border border-fog bg-white px-4 py-3 font-medium transition-colors hover:border-graphite"
+        >
+          Send another
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
-      {/* Recipient input */}
-      <div>
-        <label className="mb-1 block text-sm font-medium text-gray-300">
-          Recipient
-        </label>
-        <input
-          type="text"
-          placeholder="@handle or email"
-          value={recipient}
-          onChange={(e) => setRecipient(e.target.value)}
-          disabled={busy}
-          className="w-full rounded-lg border border-gray-700 bg-gray-900 px-4 py-2.5 text-gray-100 placeholder-gray-600 focus:border-purple-500 focus:outline-none disabled:opacity-50"
-        />
-      </div>
-
-      {/* Denomination picker */}
-      <div>
-        <label className="mb-1 block text-sm font-medium text-gray-300">
-          Amount (USDC)
-        </label>
-        <div className="grid grid-cols-4 gap-2">
-          {DENOMS.map((d) => (
+      {/* Recipient */}
+      {!resolved ? (
+        <div>
+          <label className="mb-1.5 block text-sm font-medium">Recipient</label>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              placeholder="@handle or email"
+              value={recipient}
+              onChange={(e) => setRecipient(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && recipient.trim() && !resolving)
+                  handleResolve();
+              }}
+              disabled={resolving}
+              className="w-full rounded-xl border border-fog bg-white px-4 py-2.5 placeholder-graphite/60 focus:border-ink focus:outline-none disabled:opacity-50"
+            />
             <button
-              key={d}
-              onClick={() => setDenom(d)}
-              disabled={busy}
-              className={`rounded-lg border px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50 ${
-                denom === d
-                  ? "border-purple-500 bg-purple-900 text-purple-200"
-                  : "border-gray-700 bg-gray-900 text-gray-400 hover:border-gray-500"
-              }`}
+              onClick={handleResolve}
+              disabled={resolving || !recipient.trim()}
+              className="shrink-0 rounded-xl bg-ink px-5 py-2.5 font-medium text-paper transition-colors hover:bg-ink/85 disabled:opacity-40"
             >
-              ${d}
+              {resolving ? (
+                <LoaderIcon className="h-5 w-5 animate-spin" />
+              ) : (
+                "Find"
+              )}
             </button>
-          ))}
+          </div>
+          <p className="mt-2 text-xs text-graphite">
+            No wallet address needed. Bullet resolves the handle for you.
+          </p>
         </div>
-      </div>
-
-      {/* Send button */}
-      <button
-        onClick={handleSend}
-        disabled={busy || !recipient.trim()}
-        className="w-full rounded-lg bg-purple-600 px-4 py-3 font-semibold text-white transition-colors hover:bg-purple-500 disabled:opacity-50"
-      >
-        {busy && (
-          <span className="mr-2 inline-block h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent align-middle" />
-        )}
-        {STEP_LABELS[step]}
-      </button>
-
-      {/* Error */}
-      {error && (
-        <div className="rounded-lg border border-red-800 bg-red-950 px-4 py-3 text-sm text-red-300">
-          {error}
+      ) : (
+        <div className="flex items-center gap-3 rounded-2xl border border-fog bg-white p-4">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-paper text-lg font-bold">
+            {recipient.trim().replace(/^@/, "").charAt(0).toUpperCase()}
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="truncate font-medium">{recipient.trim()}</p>
+            <p className="flex items-center gap-1 text-xs text-signal">
+              <ShieldCheckIcon className="h-3.5 w-3.5" />
+              Registered on Bullet ·{" "}
+              <span className="font-mono text-graphite">
+                {resolved.stellarAddress!.slice(0, 4)}…
+                {resolved.stellarAddress!.slice(-4)}
+              </span>
+            </p>
+          </div>
+          <button
+            onClick={reset}
+            disabled={busy}
+            className="shrink-0 text-xs text-graphite underline-offset-2 hover:text-ink hover:underline disabled:opacity-50"
+          >
+            Change
+          </button>
         </div>
       )}
 
-      {/* Success */}
-      {step === "done" && (
-        <div className="space-y-4 rounded-lg border border-green-800 bg-green-950 px-4 py-4">
-          <p className="text-sm font-medium text-green-300">
-            Note deposited! Share this claim link with {recipient}:
-          </p>
-          <div className="break-all rounded bg-gray-900 px-3 py-2 text-xs text-gray-300">
-            {claimLink}
-          </div>
-          <button
-            onClick={() => navigator.clipboard.writeText(claimLink)}
-            className="rounded bg-green-800 px-3 py-1.5 text-xs font-medium text-green-200 hover:bg-green-700"
-          >
-            Copy link
-          </button>
-          {txHash && (
-            <p className="text-xs text-gray-500">
-              tx:{" "}
-              <a
-                href={`https://stellar.expert/explorer/testnet/tx/${txHash}`}
-                target="_blank"
-                rel="noreferrer"
-                className="text-gray-400 underline hover:text-gray-300"
-              >
-                {txHash.slice(0, 16)}…
-              </a>
+      {/* Denomination picker */}
+      {resolved && (
+        <>
+          <div>
+            <label className="mb-1.5 block text-sm font-medium">Amount</label>
+            <div className="grid grid-cols-4 gap-2">
+              {DENOMS.map((d) => (
+                <button
+                  key={d}
+                  onClick={() => setDenom(d)}
+                  disabled={busy}
+                  className={`rounded-xl border px-2 py-3 transition-colors disabled:opacity-50 ${
+                    denom === d
+                      ? "border-ink bg-ink text-paper"
+                      : "border-fog bg-white text-graphite hover:border-graphite"
+                  }`}
+                >
+                  <span className="block text-lg font-bold">${d}</span>
+                  <span className="block text-[10px] tracking-wider">USDC</span>
+                </button>
+              ))}
+            </div>
+            <p className="mt-2 flex items-start gap-1.5 text-xs text-graphite">
+              <EyeOffIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              Every Bullet payment uses one of these fixed amounts, so no
+              single payment stands out on-chain.
             </p>
+          </div>
+
+          {/* Send button / progress rail */}
+          {busy ? (
+            <div className="space-y-3 rounded-2xl border border-fog bg-white p-5">
+              {SEND_STEPS.map((s, i) => (
+                <div key={s.key} className="flex items-center gap-3 text-sm">
+                  {i < stepIndex ? (
+                    <CheckIcon className="h-4 w-4 shrink-0 text-signal" />
+                  ) : i === stepIndex ? (
+                    <LoaderIcon className="h-4 w-4 shrink-0 animate-spin" />
+                  ) : (
+                    <span className="h-4 w-4 shrink-0 rounded-full border border-fog" />
+                  )}
+                  <span
+                    className={
+                      i === stepIndex ? "text-ink" : "text-graphite"
+                    }
+                  >
+                    {s.label}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <button
+              onClick={handleSend}
+              className="w-full rounded-full bg-ink px-4 py-3 font-semibold text-paper transition-colors hover:bg-ink/85"
+            >
+              Send ${denom} silently
+            </button>
           )}
+        </>
+      )}
+
+      {/* Error */}
+      {error && (
+        <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
         </div>
       )}
     </div>

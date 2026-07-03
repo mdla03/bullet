@@ -130,9 +130,9 @@ export function ClaimView({ encoded }: { encoded: string }) {
 
   if (step === "no_link") {
     return (
-      <div className="rounded-lg border border-gray-700 bg-gray-900 px-6 py-8 text-center space-y-2">
-        <p className="text-gray-300 font-medium">No claim link found.</p>
-        <p className="text-sm text-gray-500">
+      <div className="rounded-2xl border border-fog bg-white px-6 py-8 text-center space-y-2">
+        <p className="font-medium">No claim link found.</p>
+        <p className="text-sm text-graphite">
           Ask your sender to share the claim link with you.
         </p>
       </div>
@@ -141,8 +141,8 @@ export function ClaimView({ encoded }: { encoded: string }) {
 
   if (step === "invalid") {
     return (
-      <div className="rounded-lg border border-red-800 bg-red-950 px-6 py-8 text-center">
-        <p className="text-red-300">Invalid claim link.</p>
+      <div className="rounded-2xl border border-red-300 bg-red-50 px-6 py-8 text-center">
+        <p className="text-red-700">Invalid claim link.</p>
       </div>
     );
   }
@@ -151,7 +151,7 @@ export function ClaimView({ encoded }: { encoded: string }) {
 
   const shortContract = payload.contractId
     ? `${payload.contractId.slice(0, 8)}…${payload.contractId.slice(-4)}`
-    : "—";
+    : "unknown";
 
   const busy =
     step === "connecting" ||
@@ -162,25 +162,26 @@ export function ClaimView({ encoded }: { encoded: string }) {
   return (
     <div className="space-y-6">
       {/* Note card */}
-      <div className="rounded-lg border border-purple-800 bg-purple-950 px-6 py-6">
-        <p className="text-xs font-medium uppercase tracking-widest text-purple-400">
-          ZeekPay Note
+      <div className="rounded-2xl border border-fog bg-white px-6 py-6">
+        <p className="text-sm font-bold tracking-tight">bullet</p>
+        <p className="mt-4 text-5xl font-bold tracking-tight">
+          ${payload.denom} USDC
         </p>
-        <p className="mt-3 text-4xl font-bold text-white">${payload.denom} USDC</p>
-        <div className="mt-4 space-y-1 text-sm text-gray-400">
+        <p className="mt-1 text-graphite">sent to you, silently</p>
+        <div className="mt-5 space-y-1 text-sm text-graphite">
           <p>
-            Network: <span className="text-gray-200">{payload.network}</span>
+            Network: <span className="text-ink">{payload.network}</span>
           </p>
           <p>
             Contract:{" "}
-            <span className="font-mono text-gray-200">{shortContract}</span>
+            <span className="font-mono text-ink">{shortContract}</span>
           </p>
         </div>
       </div>
 
       {/* Mismatch warning */}
       {step === "mismatch" && (
-        <div className="rounded-lg border border-yellow-700 bg-yellow-950 px-4 py-3 text-sm text-yellow-300">
+        <div className="rounded-xl border border-amber bg-amber/10 px-4 py-3 text-sm">
           This note is not for this wallet address. Connect the correct Stellar
           wallet.
         </div>
@@ -188,7 +189,7 @@ export function ClaimView({ encoded }: { encoded: string }) {
 
       {/* Error */}
       {error && (
-        <div className="rounded-lg border border-red-800 bg-red-950 px-4 py-3 text-sm text-red-300">
+        <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
         </div>
       )}
@@ -200,7 +201,7 @@ export function ClaimView({ encoded }: { encoded: string }) {
         step === "signing" ||
         step === "submitting") &&
         connectedAddress && (
-          <p className="text-xs text-gray-500">
+          <p className="text-xs text-graphite">
             Connected:{" "}
             <span className="font-mono">
               {connectedAddress.slice(0, 12)}…{connectedAddress.slice(-4)}
@@ -212,7 +213,7 @@ export function ClaimView({ encoded }: { encoded: string }) {
       {(step === "ready" || step === "mismatch" || step === "error") && (
         <button
           onClick={handleConnect}
-          className="w-full rounded-lg bg-purple-600 px-4 py-3 font-semibold text-white transition-colors hover:bg-purple-500"
+          className="w-full rounded-full bg-ink px-4 py-3 font-semibold text-paper transition-colors hover:bg-ink/85"
         >
           Connect Wallet
         </button>
@@ -221,9 +222,9 @@ export function ClaimView({ encoded }: { encoded: string }) {
       {step === "connecting" && (
         <button
           disabled
-          className="w-full rounded-lg bg-purple-600 px-4 py-3 font-semibold text-white opacity-50"
+          className="w-full rounded-full bg-ink px-4 py-3 font-semibold text-paper opacity-50"
         >
-          <span className="mr-2 inline-block h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent align-middle" />
+          <span className="mr-2 inline-block h-4 w-4 animate-spin rounded-full border-2 border-paper border-t-transparent align-middle" />
           Connecting…
         </button>
       )}
@@ -232,7 +233,7 @@ export function ClaimView({ encoded }: { encoded: string }) {
       {step === "matched" && (
         <button
           onClick={handleClaim}
-          className="w-full rounded-lg bg-green-600 px-4 py-3 font-semibold text-white transition-colors hover:bg-green-500"
+          className="w-full rounded-full bg-signal px-4 py-3 font-semibold text-white transition-colors hover:bg-signal/85"
         >
           Claim ${payload.denom} USDC
         </button>
@@ -242,30 +243,30 @@ export function ClaimView({ encoded }: { encoded: string }) {
       {(step === "proving" || step === "signing" || step === "submitting") && (
         <button
           disabled
-          className="w-full rounded-lg bg-green-600 px-4 py-3 font-semibold text-white opacity-60"
+          className="w-full rounded-full bg-signal px-4 py-3 font-semibold text-white opacity-60"
         >
           <span className="mr-2 inline-block h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent align-middle" />
           {STEP_LABELS[step]}
         </button>
       )}
       {step === "proving" && proveDetail && (
-        <p className="text-center text-xs text-gray-500">{proveDetail}</p>
+        <p className="text-center text-xs text-graphite">{proveDetail}</p>
       )}
 
       {/* Done */}
       {step === "done" && (
-        <div className="space-y-3 rounded-lg border border-green-800 bg-green-950 px-4 py-4">
-          <p className="text-sm font-medium text-green-300">
-            ${payload.denom} USDC claimed successfully!
+        <div className="space-y-3 rounded-2xl border border-signal/30 bg-white px-4 py-4">
+          <p className="text-sm font-medium text-signal">
+            ${payload.denom} USDC claimed
           </p>
           {txHash && (
-            <p className="text-xs text-gray-500">
+            <p className="text-xs text-graphite">
               tx:{" "}
               <a
                 href={`https://stellar.expert/explorer/testnet/tx/${txHash}`}
                 target="_blank"
                 rel="noreferrer"
-                className="font-mono text-gray-400 underline hover:text-gray-300"
+                className="font-mono underline hover:text-ink"
               >
                 {txHash.slice(0, 16)}…
               </a>
