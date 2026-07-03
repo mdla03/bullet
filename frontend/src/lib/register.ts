@@ -3,9 +3,9 @@ import { Keypair } from "@stellar/stellar-base";
 /** Domain-separated message whose signature seeds the Bullet keypair (SPEC §7). */
 export const KEY_DOMAIN_MESSAGE = "zeekpay-key-v1";
 
-/** Challenge the backend verifies in POST /auth/twitter/start (x-oauth-identity spec). */
-export function buildChallenge(handle: string, stellarAddress: string): string {
-  return `zeekpay-register-v1:${handle}:${stellarAddress}`;
+/** Challenge the backend verifies in POST /wallet/link. Must match verify.ts. */
+export function buildLinkWalletChallenge(userId: string): string {
+  return `bullet-link-wallet-v1:${userId}`;
 }
 
 function bytesToHex(bytes: Uint8Array): string {
@@ -37,10 +37,4 @@ export function deriveBulletPubKey(domainSigHex: string): string {
   // stellar-base's tweetnacl backend accepts any Uint8Array seed at runtime.
   const kp = Keypair.fromRawEd25519Seed(seed as unknown as Buffer);
   return bytesToHex(new Uint8Array(kp.rawPublicKey()));
-}
-
-/** @handle rules from the backend: "@" plus 2 to 16 chars. */
-export function normalizeHandle(input: string): string | null {
-  const h = input.trim().replace(/^@?/, "@");
-  return /^@[A-Za-z0-9_]{2,16}$/.test(h) ? h : null;
 }

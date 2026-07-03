@@ -91,9 +91,12 @@ Each feature has Plan→Code→Test→Review artifacts under `pipeline/<feature>
 ## 4. Open follow-ups / known gaps (verbatim)
 - **CLOSED** End-to-end claim with a REAL 4-input proof — `real_proof_verifies`
   now validates a real Groth16 claim proof through bls12_381 host fns. ✓
-- Nullifier TTL/rent: persistent entry has no `extend_ttl`; a reaped nullifier =
-  double-spend. MUST add extend_ttl/archival handling before any non-demo use.
-  Top follow-up.
+- **CLOSED** Nullifier TTL/rent: `claim` now bumps the nullifier TTL (~173 days,
+  under mainnet `max_entry_ttl`) and `post_root` bumps each root + ring slot, so
+  neither archives out from under a valid claim. `claim_bumps_nullifier_and_root_ttl`
+  asserts both. Note: persistent entries still archive on the long tail (restore
+  preserves value, so replay stays blocked); true permanence needs periodic
+  re-bump before any high-value non-demo use. ✓
 - `Fr::from_bytes` with root/nullifier ≥ r — caller-supplied edge; behavior
   (panic vs reduce) to confirm; a panic would be a DoS (not fund loss).
 - vk is set post-deploy via `set_vk`; the real claim-circuit vk (claim_vk.json,

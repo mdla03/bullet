@@ -94,19 +94,7 @@ export function ClaimView({ encoded }: { encoded: string }) {
           root: string;
         };
 
-      // 2. Post Merkle root on-chain (admin backend op)
-      setProveDetail("Posting Merkle root…");
-      const postRootRes = await fetch(`${RESOLVER_URL}/post-root`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ root }),
-      });
-      if (!postRootRes.ok) {
-        const err = await postRootRes.json().catch(() => ({})) as { detail?: string };
-        throw new Error(`Root posting failed: ${err.detail ?? postRootRes.status}`);
-      }
-
-      // 3. Sign + submit claim tx via Freighter
+      // 2. Sign + submit claim tx via Freighter (root already posted server-side inside /prove)
       setState((s) => ({ ...s, step: "signing" }));
       const { signTransaction } = await import("@stellar/freighter-api");
 

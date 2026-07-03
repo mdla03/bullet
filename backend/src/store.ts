@@ -1,82 +1,102 @@
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+// Bullet user store, backed by Supabase Postgres.
+//
+// Supabase manages auth.users and auth.identities. The public schema adds:
+//   profiles       one row per user (auto-created by trigger)
+//   handles        one row per linked identity (auto-created by trigger)
+//   wallets        one row per user, added via /wallet/link
+//
+// All queries here use the service role, bypassing RLS.
 
-const DATA_DIR = path.join(fileURLToPath(import.meta.url), "../../data");
-const REGISTRY_FILE =
-  process.env.REGISTRY_FILE_OVERRIDE ??
-  path.join(DATA_DIR, "registry.json");
+import { serviceClient } from "./supabase.js";
 
-export interface Entry {
-  handle?: string;
-  email?: string;
-  stellarAddress: string;
-  zeekPayPubKey: string;
+export interface Wallet {
+  user_id: string;
+  stellar_address: string;
+  bullet_pubkey: string;
   signature: string;
-  registeredAt: string;
+  attached_at: string;
 }
 
-// Normalized key (e.g. "@alice" or "user@example.com") → entry
-const registry = new Map<string, Entry>();
-
-function load(): void {
-  if (!fs.existsSync(REGISTRY_FILE)) return;
-  try {
-    const raw = JSON.parse(fs.readFileSync(REGISTRY_FILE, "utf8")) as Record<
-      string,
-      Entry
-    >;
-    for (const [k, v] of Object.entries(raw)) registry.set(k, v);
-  } catch {
-    // Corrupted file — start fresh; do not crash the server.
-  }
+export interface Handle {
+  provider: string;
+  subject: string;
+  handle: string;
+  linked_at: string;
 }
 
-function persist(): void {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  const obj: Record<string, Entry> = {};
-  for (const [k, v] of registry) obj[k] = v;
-  fs.writeFileSync(REGISTRY_FILE, JSON.stringify(obj, null, 2));
+export interface UserProfile {
+  id: string;
+  createdAt: string;
+  identities: Handle[];
+  wallet: Wallet | null;
 }
 
-/** Normalize a raw query string to a lookup key. */
-export function normalizeKey(q: string): string {
-  const trimmed = q.trim();
-  if (trimmed.startsWith("@")) {
-    return "@" + trimmed.slice(1).toLowerCase();
-  }
-  return trimmed.toLowerCase();
+function normalizeKey(q: string): string {
+  const t = q.trim();
+  return t.startsWith("@") ? "@" + t.slice(1).toLowerCase() : t.toLowerCase();
 }
 
-export function lookup(key: string): Entry | undefined {
-  return registry.get(key);
+/** Public lookup used by /resolve. Returns the user + wallet (or null). */
+export async function findByLookup(query: string): Promise<UserProfile | null> {
+  const key = normalizeKey(query);
+  const { data: h, error: e1 } = await serviceClient
+    .from("handles")
+    .select("user_id")
+    .eq("handle_normalized", key)
+    .maybeSingle();
+  if (e1 || !h) return null;
+  return getUser(h.user_id);
 }
 
-export type RegisterResult =
-  | { ok: true }
+/** Full user aggregate: profile + all handles + wallet (if any). */
+export async function getUser(userId: string): Promise<UserProfile | null> {
+  const [profileRes, handlesRes, walletRes] = await Promise.all([
+    serviceClient.from("profiles").select("id, created_at").eq("id", userId).maybeSingle(),
+    serviceClient
+      .from("handles")
+      .select("provider, subject, handle, linked_at")
+      .eq("user_id", userId)
+      .order("linked_at", { ascending: true }),
+    serviceClient.from("wallets").select("*").eq("user_id", userId).maybeSingle(),
+  ]);
+
+  if (profileRes.error || !profileRes.data) return null;
+  return {
+    id: profileRes.data.id,
+    createdAt: profileRes.data.created_at,
+    identities: (handlesRes.data ?? []) as Handle[],
+    wallet: (walletRes.data ?? null) as Wallet | null,
+  };
+}
+
+export type AttachWalletResult =
+  | { ok: true; wallet: Wallet }
   | { conflict: true; detail: string };
 
-export function register(entry: Omit<Entry, "registeredAt">): RegisterResult {
-  const keys: string[] = [];
-  if (entry.handle) keys.push(normalizeKey(entry.handle));
-  if (entry.email) keys.push(normalizeKey(entry.email));
-
-  // Conflict check: any existing key pointing to a different Stellar address.
-  for (const k of keys) {
-    const existing = registry.get(k);
-    if (existing && existing.stellarAddress !== entry.stellarAddress) {
-      return {
-        conflict: true,
-        detail: `${k} is already registered to a different address`,
-      };
+/** Insert/upsert wallet for a user. stellar_address is globally unique. */
+export async function attachWallet(
+  userId: string,
+  wallet: { stellar_address: string; bullet_pubkey: string; signature: string }
+): Promise<AttachWalletResult> {
+  const { data, error } = await serviceClient
+    .from("wallets")
+    .upsert(
+      {
+        user_id: userId,
+        stellar_address: wallet.stellar_address,
+        bullet_pubkey: wallet.bullet_pubkey,
+        signature: wallet.signature,
+      },
+      { onConflict: "user_id" }
+    )
+    .select("*")
+    .single();
+  if (error) {
+    // 23505 = unique_violation (someone else already claimed this stellar_address)
+    if (error.code === "23505") {
+      return { conflict: true, detail: "stellar_address already attached to another user" };
     }
+    return { conflict: true, detail: error.message };
   }
-
-  const full: Entry = { ...entry, registeredAt: new Date().toISOString() };
-  for (const k of keys) registry.set(k, full);
-  persist();
-  return { ok: true };
+  return { ok: true, wallet: data as Wallet };
 }
-
-// Load on module init.
-load();

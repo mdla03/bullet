@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Geist_Mono, Inter } from "next/font/google";
 import Link from "next/link";
+import IslandNav from "@/components/IslandNav";
+import { XBrandIcon } from "@/components/icons";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
@@ -18,29 +20,33 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body
         className={`${inter.variable} ${geistMono.variable} min-h-screen bg-paper font-sans text-ink antialiased`}
       >
-        <header className="border-b border-fog px-6 py-4">
-          <div className="mx-auto flex max-w-5xl items-center gap-2">
+        <IslandNav />
+        <main className="mx-auto max-w-5xl px-4 pb-12 pt-28">{children}</main>
+        <footer className="border-t border-fog">
+          <div className="mx-auto flex max-w-5xl flex-col items-center justify-between gap-4 px-4 py-8 sm:flex-row">
             <Link href="/" className="flex items-center">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/wordmark.svg" alt="bullet" className="h-7 w-auto" />
+              <img src="/wordmark.svg" alt="bullet" className="h-5 w-auto" />
             </Link>
-            <nav className="ml-auto flex items-center gap-3 text-sm">
+            <nav className="flex items-center gap-6 text-sm text-graphite">
               <Link
-                href="/send"
-                className="rounded-full border border-fog bg-white px-4 py-2 font-medium transition-colors hover:border-graphite"
+                href="/privacy"
+                className="transition-colors hover:text-ink"
               >
-                Send money
+                Privacy
               </Link>
-              <Link
-                href="/register"
-                className="rounded-full bg-ink px-4 py-2 font-medium text-paper transition-colors hover:bg-ink/85"
+              <a
+                href="https://x.com/BulletPayFi"
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="Bullet on X"
+                className="transition-colors hover:text-ink"
               >
-                Sign up
-              </Link>
+                <XBrandIcon className="h-4 w-4" />
+              </a>
             </nav>
           </div>
-        </header>
-        <main className="mx-auto max-w-5xl px-4 py-12">{children}</main>
+        </footer>
       </body>
     </html>
   );
