@@ -19,7 +19,7 @@ const RESOLVER_URL =
   process.env.NEXT_PUBLIC_RESOLVER_URL ?? "http://localhost:3001";
 const CONTRACT_ID = process.env.NEXT_PUBLIC_CONTRACT_ID ?? "";
 const FRONTEND_URL =
-  process.env.NEXT_PUBLIC_FRONTEND_URL ?? "http://localhost:3000";
+  process.env.NEXT_PUBLIC_FRONTEND_URL ?? "https://bullet-frontend.vercel.app";
 
 const DENOMS = [1, 10, 50, 100] as const;
 type Denom = (typeof DENOMS)[number];
