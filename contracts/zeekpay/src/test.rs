@@ -279,3 +279,47 @@ fn post_root_requires_admin_auth() {
     let res = client.try_post_root(&b32(&env, 0x11));
     assert!(res.is_err(), "post_root must require admin auth");
 }
+
+#[test]
+fn claim_bumps_nullifier_and_root_ttl() {
+    use crate::{DataKey, NULLIFIER_BUMP_TO, ROOT_BUMP_TO};
+    use soroban_sdk::testutils::storage::Persistent as _;
+
+    let s = setup();
+    let depositor = Address::generate(&s.env);
+    let recipient = Address::generate(&s.env);
+    s.usdc_admin.mint(&depositor, &1_000_000_000);
+    s.client.deposit(&depositor, &Denom::Ten, &b32(&s.env, 0xAA));
+
+    let root = b32(&s.env, 0x11);
+    let nullifier = b32(&s.env, 0x22);
+    s.client.post_root(&root);
+    let pa = BytesN::from_array(&s.env, &[0u8; 96]);
+    let pb = BytesN::from_array(&s.env, &[0u8; 192]);
+    let pc = BytesN::from_array(&s.env, &[0u8; 96]);
+    s.client
+        .claim(&pa, &pb, &pc, &root, &nullifier, &recipient, &Denom::Ten);
+
+    // A reaped nullifier = double-spend, so its TTL must be bumped hard on write.
+    // get_ttl is remaining-ledgers, so it is at most the value extend_ttl set.
+    s.env.as_contract(&s.id, || {
+        let null_ttl = s
+            .env
+            .storage()
+            .persistent()
+            .get_ttl(&DataKey::Nullifier(nullifier.clone()));
+        assert!(
+            null_ttl >= NULLIFIER_BUMP_TO - 1,
+            "nullifier TTL not bumped: {null_ttl} < {NULLIFIER_BUMP_TO}"
+        );
+        let root_ttl = s
+            .env
+            .storage()
+            .persistent()
+            .get_ttl(&DataKey::Root(root.clone()));
+        assert!(
+            root_ttl >= ROOT_BUMP_TO - 1,
+            "root TTL not bumped: {root_ttl} < {ROOT_BUMP_TO}"
+        );
+    });
+}
