@@ -1,11 +1,12 @@
+// In-memory OAuth pending state, TTL-scoped. Cleared on server restart.
+
 const TTL_MS = 5 * 60 * 1000;
 
 export interface PendingEntry {
-  handle: string;
-  stellarAddress: string;
-  zeekPayPubKey: string;
-  signature: string;
+  provider: "twitter" | "google";
+  handle?: string;            // claimed handle (twitter); optional for providers where it's derived
   codeVerifier: string;
+  existingUserId?: string;    // set when starting from a logged-in session (link flow)
   expiresAt: number;
 }
 
@@ -13,9 +14,7 @@ const map = new Map<string, PendingEntry>();
 
 export function set(state: string, entry: Omit<PendingEntry, "expiresAt">): void {
   const now = Date.now();
-  for (const [k, v] of map) {
-    if (v.expiresAt <= now) map.delete(k);
-  }
+  for (const [k, v] of map) if (v.expiresAt <= now) map.delete(k);
   map.set(state, { ...entry, expiresAt: now + TTL_MS });
 }
 
