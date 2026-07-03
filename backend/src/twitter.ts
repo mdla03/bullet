@@ -1,5 +1,3 @@
-import crypto from "node:crypto";
-
 const TWITTER_AUTH_URL = "https://twitter.com/i/oauth2/authorize";
 const TWITTER_TOKEN_URL = "https://api.twitter.com/2/oauth2/token";
 const TWITTER_ME_URL = "https://api.twitter.com/2/users/me?user.fields=username";
@@ -12,14 +10,7 @@ export function isConfigured(): boolean {
   );
 }
 
-export function generatePKCE(): { codeVerifier: string; codeChallenge: string } {
-  const codeVerifier = crypto.randomBytes(32).toString("base64url");
-  const codeChallenge = crypto
-    .createHash("sha256")
-    .update(codeVerifier)
-    .digest("base64url");
-  return { codeVerifier, codeChallenge };
-}
+export { generatePKCE } from "./oauth-utils.js";
 
 export function buildAuthUrl(state: string, codeChallenge: string): string {
   const params = new URLSearchParams({
@@ -61,13 +52,19 @@ export async function exchangeCode(
   return data.access_token;
 }
 
-export async function fetchUsername(accessToken: string): Promise<string> {
+export interface TwitterProfile {
+  subject: string;    // stable numeric ID
+  username: string;   // handle without leading '@'
+}
+
+export async function fetchProfile(accessToken: string): Promise<TwitterProfile> {
   const res = await fetch(TWITTER_ME_URL, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   if (!res.ok) throw new Error(`/users/me failed: ${res.status}`);
-  const data = (await res.json()) as { data?: { username?: string } };
+  const data = (await res.json()) as { data?: { id?: string; username?: string } };
+  const subject = data.data?.id;
   const username = data.data?.username;
-  if (!username) throw new Error("no username in response");
-  return username;
+  if (!subject || !username) throw new Error("missing id/username in response");
+  return { subject, username };
 }
