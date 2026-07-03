@@ -22,7 +22,7 @@ app.use(express.json());
 
 const CONTRACT_ADDRESS = process.env.ZEEKPAY_CONTRACT_ID ?? "";
 const USDC_SAC = process.env.USDC_SAC_ID ?? "";
-const PORT = parseInt(process.env.RESOLVER_PORT ?? "3001", 10);
+const PORT = parseInt(process.env.PORT ?? process.env.RESOLVER_PORT ?? "3001", 10);
 
 // ── validation helpers ────────────────────────────────────────────────────────
 
