@@ -46,7 +46,13 @@ export default function IslandNav() {
           href="/send"
           className="rounded-full px-3 py-1.5 text-sm font-medium text-paper/80 transition-colors hover:bg-white/10 hover:text-paper"
         >
-          Send money
+          Send
+        </Link>
+        <Link
+          href="/inbox"
+          className="rounded-full px-3 py-1.5 text-sm font-medium text-paper/80 transition-colors hover:bg-white/10 hover:text-paper"
+        >
+          Inbox
         </Link>
         <Link
           href="/register"
