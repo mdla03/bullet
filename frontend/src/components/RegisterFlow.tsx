@@ -56,12 +56,12 @@ export function RegisterFlow({
   if (successHandle) {
     return (
       <div className="space-y-5">
-        <div className="rounded-2xl border border-emerald-900 bg-emerald-950/40 p-5">
-          <p className="flex items-center gap-2 font-semibold text-emerald-300">
-            <CheckIcon className="h-5 w-5" />
+        <div className="rounded-2xl border border-signal/30 bg-white p-5">
+          <p className="flex items-center gap-2 font-semibold text-signal">
+            <span className="inline-block h-2 w-2 rounded-full bg-signal" />
             {successHandle} is linked to your wallet
           </p>
-          <p className="mt-1 text-sm text-zinc-400">
+          <p className="mt-1 text-sm text-graphite">
             Anyone can now pay {successHandle} on Bullet. Payments arrive as
             private notes only your wallet can claim.
           </p>
@@ -69,13 +69,13 @@ export function RegisterFlow({
         <div className="flex gap-2">
           <Link
             href="/send"
-            className="flex-1 rounded-xl bg-amber-400 px-4 py-3 text-center font-semibold text-zinc-950 transition-colors hover:bg-amber-300"
+            className="flex-1 rounded-full bg-ink px-4 py-3 text-center font-semibold text-paper transition-colors hover:bg-ink/85"
           >
             Send money
           </Link>
           <Link
             href="/register"
-            className="flex-1 rounded-xl border border-zinc-700 px-4 py-3 text-center font-medium text-zinc-300 transition-colors hover:border-zinc-500"
+            className="flex-1 rounded-full border border-fog bg-white px-4 py-3 text-center font-medium transition-colors hover:border-graphite"
           >
             Link another handle
           </Link>
@@ -151,18 +151,18 @@ export function RegisterFlow({
             <span
               className={`flex h-5 w-5 items-center justify-center rounded-full border text-[10px] font-semibold ${
                 i < stepIndex
-                  ? "border-amber-400 bg-amber-400 text-zinc-950"
+                  ? "border-ink bg-ink text-paper"
                   : i === stepIndex
-                    ? "border-amber-400 text-amber-400"
-                    : "border-zinc-700 text-zinc-600"
+                    ? "border-ink text-ink"
+                    : "border-fog text-graphite"
               }`}
             >
               {i < stepIndex ? <CheckIcon className="h-3 w-3" /> : i + 1}
             </span>
-            <span className={i === stepIndex ? "text-zinc-200" : "text-zinc-600"}>
+            <span className={i === stepIndex ? "text-ink" : "text-graphite"}>
               {s}
             </span>
-            {i < steps.length - 1 && <span className="w-4 border-t border-zinc-800" />}
+            {i < steps.length - 1 && <span className="w-4 border-t border-fog" />}
           </li>
         ))}
       </ol>
@@ -175,22 +175,22 @@ export function RegisterFlow({
               key={p.key}
               onClick={() => p.enabled && setPhase("handle")}
               disabled={!p.enabled}
-              className={`flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-left font-medium transition-colors ${
+              className={`flex w-full items-center gap-3 rounded-full border px-5 py-3 text-left font-medium transition-colors ${
                 p.enabled
-                  ? "border-zinc-700 bg-zinc-900 text-zinc-100 hover:border-zinc-500"
-                  : "cursor-not-allowed border-zinc-800 bg-zinc-900/40 text-zinc-600"
+                  ? "border-fog bg-white hover:border-graphite"
+                  : "cursor-not-allowed border-fog bg-paper text-graphite/70"
               }`}
             >
               <p.icon className="h-5 w-5" />
               <span className="flex-1">Continue with {p.label}</span>
               {!p.enabled && (
-                <span className="rounded-full border border-zinc-800 px-2 py-0.5 text-[10px] text-zinc-600">
+                <span className="rounded-full border border-fog bg-white px-2 py-0.5 text-[10px] text-graphite">
                   Soon
                 </span>
               )}
             </button>
           ))}
-          <p className="pt-1 text-xs text-zinc-600">
+          <p className="pt-1 text-xs text-graphite">
             Your handle is only used to receive payments. Bullet never posts or
             reads your account.
           </p>
@@ -200,9 +200,7 @@ export function RegisterFlow({
       {/* Phase: enter the handle */}
       {phase === "handle" && (
         <div className="space-y-3">
-          <label className="block text-sm font-medium text-zinc-300">
-            Your X handle
-          </label>
+          <label className="block text-sm font-medium">Your X handle</label>
           <input
             type="text"
             placeholder="@handle"
@@ -212,15 +210,15 @@ export function RegisterFlow({
               if (e.key === "Enter" && normalizeHandle(handleInput)) setPhase("wallet");
             }}
             autoFocus
-            className="w-full rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-2.5 text-zinc-100 placeholder-zinc-600 focus:border-amber-500 focus:outline-none"
+            className="w-full rounded-xl border border-fog bg-white px-4 py-2.5 placeholder-graphite/60 focus:border-ink focus:outline-none"
           />
-          <p className="text-xs text-zinc-600">
+          <p className="text-xs text-graphite">
             You'll sign in to X in a moment to prove it's yours.
           </p>
           <button
             onClick={() => setPhase("wallet")}
             disabled={!normalizeHandle(handleInput)}
-            className="w-full rounded-xl bg-amber-400 px-4 py-3 font-semibold text-zinc-950 transition-colors hover:bg-amber-300 disabled:opacity-40"
+            className="w-full rounded-full bg-ink px-4 py-3 font-semibold text-paper transition-colors hover:bg-ink/85 disabled:opacity-40"
           >
             Continue
           </button>
@@ -232,14 +230,14 @@ export function RegisterFlow({
         <div className="space-y-3">
           {!address ? (
             <>
-              <p className="text-sm text-zinc-400">
+              <p className="text-sm text-graphite">
                 Connect the Stellar wallet that will claim payments sent to{" "}
-                <span className="text-zinc-200">{normalizeHandle(handleInput)}</span>.
+                <span className="text-ink">{normalizeHandle(handleInput)}</span>.
               </p>
               <button
                 onClick={connectWallet}
                 disabled={working === "connect"}
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-amber-400 px-4 py-3 font-semibold text-zinc-950 transition-colors hover:bg-amber-300 disabled:opacity-50"
+                className="flex w-full items-center justify-center gap-2 rounded-full bg-ink px-4 py-3 font-semibold text-paper transition-colors hover:bg-ink/85 disabled:opacity-50"
               >
                 {working === "connect" ? (
                   <LoaderIcon className="h-5 w-5 animate-spin" />
@@ -251,14 +249,14 @@ export function RegisterFlow({
             </>
           ) : (
             <>
-              <div className="flex items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900/60 px-4 py-3">
-                <WalletIcon className="h-5 w-5 text-amber-400" />
-                <span className="font-mono text-sm text-zinc-300">
+              <div className="flex items-center gap-3 rounded-xl border border-fog bg-white px-4 py-3">
+                <WalletIcon className="h-5 w-5" />
+                <span className="font-mono text-sm text-graphite">
                   {address.slice(0, 6)}…{address.slice(-6)}
                 </span>
-                <CheckIcon className="ml-auto h-4 w-4 text-emerald-400" />
+                <CheckIcon className="ml-auto h-4 w-4 text-signal" />
               </div>
-              <p className="text-xs text-zinc-600">
+              <p className="text-xs text-graphite">
                 Two Freighter signatures follow: one derives your Bullet keys,
                 one proves this wallet owns the handle. Then X opens to verify
                 the handle itself. No transaction is submitted and nothing is
@@ -267,7 +265,7 @@ export function RegisterFlow({
               <button
                 onClick={signAndVerify}
                 disabled={working === "sign"}
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-amber-400 px-4 py-3 font-semibold text-zinc-950 transition-colors hover:bg-amber-300 disabled:opacity-50"
+                className="flex w-full items-center justify-center gap-2 rounded-full bg-ink px-4 py-3 font-semibold text-paper transition-colors hover:bg-ink/85 disabled:opacity-50"
               >
                 {working === "sign" && <LoaderIcon className="h-5 w-5 animate-spin" />}
                 {working === "sign" ? "Waiting for Freighter…" : "Sign and verify on X"}
@@ -279,7 +277,7 @@ export function RegisterFlow({
               setPhase("provider");
               setAddress("");
             }}
-            className="w-full text-center text-xs text-zinc-500 underline-offset-2 hover:text-zinc-300 hover:underline"
+            className="w-full text-center text-xs text-graphite underline-offset-2 hover:text-ink hover:underline"
           >
             Start over
           </button>
@@ -287,7 +285,7 @@ export function RegisterFlow({
       )}
 
       {error && (
-        <div className="rounded-xl border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-300">
+        <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
         </div>
       )}
