@@ -61,3 +61,4 @@ pnpm-debug.log*
 # commit shared editor settings only:
 !.vscode/settings.json
 .idea/
+.playwright-mcp/

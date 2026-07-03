@@ -1,8 +1,8 @@
 {
-  "name": "@zeekpay/frontend",
+  "name": "@bullet/frontend",
   "version": "0.0.0",
   "private": true,
-  "description": "ZeekPay frontend — Next.js + TS + Tailwind, stellar-sdk + Freighter.",
+  "description": "Bullet frontend: Next.js + TS + Tailwind, stellar-sdk + Freighter.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

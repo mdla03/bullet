@@ -1,1 +1,15 @@
 @import "tailwindcss";
+
+@theme {
+  /* Bullet brand color system */
+  --color-ink: #0a0a0a;
+  --color-paper: #f5f3ee;
+  --color-fog: #e5e0de;
+  --color-graphite: #6b6b6b;
+  --color-signal: #00a676;
+  --color-amber: #e8b54a;
+
+  /* Inter for body, Geist Mono for addresses and hashes */
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "Cascadia Mono", monospace;
+}

@@ -6,5 +6,9 @@ interface Props {
 
 export default async function ClaimPage({ searchParams }: Props) {
   const { p } = await searchParams;
-  return <ClaimView encoded={p ?? ""} />;
+  return (
+    <div className="mx-auto max-w-lg">
+      <ClaimView encoded={p ?? ""} />
+    </div>
+  );
 }
