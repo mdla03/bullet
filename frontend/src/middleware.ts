@@ -8,6 +8,12 @@ const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request });
 
+  // Without Supabase config there is no session to refresh. Skip instead of
+  // letting createServerClient throw, which would 500 every request.
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+    return response;
+  }
+
   const supabase = createServerClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     cookies: {
       getAll() {
@@ -25,8 +31,13 @@ export async function middleware(request: NextRequest) {
     },
   });
 
-  // Touch the user to trigger a token refresh when needed.
-  await supabase.auth.getUser();
+  // Touch the user to trigger a token refresh when needed. A failure here
+  // (network, bad config) must not take down the request.
+  try {
+    await supabase.auth.getUser();
+  } catch {
+    // Session refresh failed; serve the request unauthenticated.
+  }
 
   return response;
 }
