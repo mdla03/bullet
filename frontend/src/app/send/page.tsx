@@ -2,7 +2,12 @@ import { SendForm } from "@/components/SendForm";
 
 export const metadata = { title: "Send · bullet" };
 
-export default function SendPage() {
+export default async function SendPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ to?: string }>;
+}) {
+  const { to } = await searchParams;
   return (
     <div className="mx-auto max-w-lg">
       <h1 className="mb-2 text-2xl font-bold tracking-tight">
@@ -12,7 +17,7 @@ export default function SendPage() {
         Pay any X handle or email in USDC. Nothing on-chain links you to the
         recipient. The payment lands as an anonymous note only they can claim.
       </p>
-      <SendForm />
+      <SendForm initialRecipient={to} />
     </div>
   );
 }
