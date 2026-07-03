@@ -153,32 +153,34 @@ export default function HowItWorks() {
               active === 2 ? "opacity-40" : "opacity-100"
             }`}
           >
-            <div className="flex items-center gap-2">
-              <span className="flex min-w-[260px] items-center rounded-full border border-fog bg-white px-6 py-4 text-xl sm:min-w-[340px]">
+            <div className="flex w-full max-w-md items-center gap-2 sm:w-auto sm:max-w-none">
+              <span className="flex min-w-0 flex-1 items-center rounded-full border border-fog bg-white px-5 py-3 text-lg sm:min-w-[340px] sm:flex-none sm:px-6 sm:py-4 sm:text-xl">
                 {typed ? (
-                  <span>{typed}</span>
+                  <span className="truncate">{typed}</span>
                 ) : (
-                  <span className="text-graphite/60">@handle or email</span>
+                  <span className="truncate text-graphite/60">
+                    @handle or email
+                  </span>
                 )}
                 <span
-                  className={`ml-0.5 inline-block h-6 w-0.5 bg-ink ${
+                  className={`ml-0.5 inline-block h-6 w-0.5 shrink-0 bg-ink ${
                     active === 2 ? "opacity-0" : "animate-pulse"
                   }`}
                 />
               </span>
               <span
-                className={`rounded-full bg-ink px-7 py-4 text-xl font-semibold text-paper transition-transform duration-200 ${
+                className={`shrink-0 rounded-full bg-ink px-6 py-3 text-lg font-semibold text-paper transition-transform duration-200 sm:px-7 sm:py-4 sm:text-xl ${
                   pressed ? "scale-90" : "scale-100"
                 }`}
               >
                 Pay
               </span>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-center gap-2">
               {DENOMS.map((d) => (
                 <span
                   key={d}
-                  className={`rounded-full border px-5 py-2.5 font-medium transition-all duration-300 ${
+                  className={`whitespace-nowrap rounded-full border px-4 py-2 text-sm font-medium transition-all duration-300 sm:px-5 sm:py-2.5 sm:text-base ${
                     denom && d === PICKED
                       ? "scale-105 border-ink bg-ink text-paper"
                       : "border-fog bg-white text-graphite"
