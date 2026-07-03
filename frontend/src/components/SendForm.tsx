@@ -40,10 +40,10 @@ function CopyButton({ text, label }: { text: string; label: string }) {
         setCopied(true);
         setTimeout(() => setCopied(false), 1500);
       }}
-      className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-800 px-2.5 py-1.5 text-xs font-medium text-zinc-200 transition-colors hover:border-zinc-500"
+      className="inline-flex items-center gap-1.5 rounded-md border border-fog bg-white px-2.5 py-1.5 text-xs font-medium transition-colors hover:border-graphite"
     >
       {copied ? (
-        <CheckIcon className="h-3.5 w-3.5 text-emerald-400" />
+        <CheckIcon className="h-3.5 w-3.5 text-signal" />
       ) : (
         <CopyIcon className="h-3.5 w-3.5" />
       )}
@@ -185,25 +185,23 @@ export function SendForm() {
   if (step === "done") {
     return (
       <div className="space-y-5">
-        <div className="rounded-2xl border border-emerald-900 bg-emerald-950/40 p-5">
-          <p className="flex items-center gap-2 font-semibold text-emerald-300">
-            <CheckIcon className="h-5 w-5" />${denom} USDC sent to{" "}
-            {recipient.trim()}
+        <div className="rounded-2xl border border-signal/30 bg-white p-5">
+          <p className="flex items-center gap-2 font-semibold text-signal">
+            <span className="inline-block h-2 w-2 rounded-full bg-signal" />
+            ${denom} USDC sent silently to {recipient.trim()}
           </p>
-          <p className="mt-1 text-sm text-zinc-400">
+          <p className="mt-1 text-sm text-graphite">
             Nothing on-chain connects your deposit to their claim.
           </p>
         </div>
 
-        <div className="space-y-3 rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5">
-          <p className="text-sm font-medium text-zinc-200">
-            Deliver the claim link
-          </p>
-          <p className="text-xs text-zinc-500">
+        <div className="space-y-3 rounded-2xl border border-fog bg-white p-5">
+          <p className="text-sm font-medium">Deliver the claim link</p>
+          <p className="text-xs text-graphite">
             Bullet never sends DMs. Deliver the link yourself, from an account
             they already trust.
           </p>
-          <div className="break-all rounded-lg bg-zinc-950 px-3 py-2 font-mono text-xs text-zinc-400">
+          <div className="break-all rounded-lg bg-paper px-3 py-2 font-mono text-xs text-graphite">
             {claimLink}
           </div>
           <div className="flex gap-2">
@@ -217,10 +215,11 @@ export function SendForm() {
             href={`https://stellar.expert/explorer/testnet/tx/${txHash}`}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex items-center gap-1.5 text-xs text-zinc-500 underline-offset-2 hover:text-zinc-300 hover:underline"
+            className="inline-flex items-center gap-1.5 text-xs text-graphite underline-offset-2 hover:text-ink hover:underline"
           >
             <ExternalLinkIcon className="h-3.5 w-3.5" />
-            View deposit on stellar.expert ({txHash.slice(0, 12)}…)
+            View deposit on stellar.expert (
+            <span className="font-mono">{txHash.slice(0, 12)}…</span>)
           </a>
         )}
 
@@ -229,7 +228,7 @@ export function SendForm() {
             reset();
             setRecipient("");
           }}
-          className="w-full rounded-xl border border-zinc-700 px-4 py-3 font-medium text-zinc-300 transition-colors hover:border-zinc-500"
+          className="w-full rounded-full border border-fog bg-white px-4 py-3 font-medium transition-colors hover:border-graphite"
         >
           Send another
         </button>
@@ -242,9 +241,7 @@ export function SendForm() {
       {/* Recipient */}
       {!resolved ? (
         <div>
-          <label className="mb-1.5 block text-sm font-medium text-zinc-300">
-            Recipient
-          </label>
+          <label className="mb-1.5 block text-sm font-medium">Recipient</label>
           <div className="flex gap-2">
             <input
               type="text"
@@ -256,12 +253,12 @@ export function SendForm() {
                   handleResolve();
               }}
               disabled={resolving}
-              className="w-full rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-2.5 text-zinc-100 placeholder-zinc-600 focus:border-amber-500 focus:outline-none disabled:opacity-50"
+              className="w-full rounded-xl border border-fog bg-white px-4 py-2.5 placeholder-graphite/60 focus:border-ink focus:outline-none disabled:opacity-50"
             />
             <button
               onClick={handleResolve}
               disabled={resolving || !recipient.trim()}
-              className="shrink-0 rounded-xl bg-zinc-100 px-5 py-2.5 font-medium text-zinc-950 transition-colors hover:bg-white disabled:opacity-40"
+              className="shrink-0 rounded-xl bg-ink px-5 py-2.5 font-medium text-paper transition-colors hover:bg-ink/85 disabled:opacity-40"
             >
               {resolving ? (
                 <LoaderIcon className="h-5 w-5 animate-spin" />
@@ -270,23 +267,21 @@ export function SendForm() {
               )}
             </button>
           </div>
-          <p className="mt-2 text-xs text-zinc-600">
+          <p className="mt-2 text-xs text-graphite">
             No wallet address needed. Bullet resolves the handle for you.
           </p>
         </div>
       ) : (
-        <div className="flex items-center gap-3 rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-amber-400/10 text-lg font-bold text-amber-400">
+        <div className="flex items-center gap-3 rounded-2xl border border-fog bg-white p-4">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-paper text-lg font-bold">
             {recipient.trim().replace(/^@/, "").charAt(0).toUpperCase()}
           </div>
           <div className="min-w-0 flex-1">
-            <p className="truncate font-medium text-zinc-100">
-              {recipient.trim()}
-            </p>
-            <p className="flex items-center gap-1 text-xs text-emerald-400">
+            <p className="truncate font-medium">{recipient.trim()}</p>
+            <p className="flex items-center gap-1 text-xs text-signal">
               <ShieldCheckIcon className="h-3.5 w-3.5" />
               Registered on Bullet ·{" "}
-              <span className="font-mono text-zinc-500">
+              <span className="font-mono text-graphite">
                 {resolved.stellarAddress!.slice(0, 4)}…
                 {resolved.stellarAddress!.slice(-4)}
               </span>
@@ -295,7 +290,7 @@ export function SendForm() {
           <button
             onClick={reset}
             disabled={busy}
-            className="shrink-0 text-xs text-zinc-500 underline-offset-2 hover:text-zinc-300 hover:underline disabled:opacity-50"
+            className="shrink-0 text-xs text-graphite underline-offset-2 hover:text-ink hover:underline disabled:opacity-50"
           >
             Change
           </button>
@@ -306,9 +301,7 @@ export function SendForm() {
       {resolved && (
         <>
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-zinc-300">
-              Amount
-            </label>
+            <label className="mb-1.5 block text-sm font-medium">Amount</label>
             <div className="grid grid-cols-4 gap-2">
               {DENOMS.map((d) => (
                 <button
@@ -317,18 +310,16 @@ export function SendForm() {
                   disabled={busy}
                   className={`rounded-xl border px-2 py-3 transition-colors disabled:opacity-50 ${
                     denom === d
-                      ? "border-amber-400 bg-amber-400/10 text-amber-300"
-                      : "border-zinc-700 bg-zinc-900 text-zinc-400 hover:border-zinc-500"
+                      ? "border-ink bg-ink text-paper"
+                      : "border-fog bg-white text-graphite hover:border-graphite"
                   }`}
                 >
                   <span className="block text-lg font-bold">${d}</span>
-                  <span className="block text-[10px] tracking-wider text-zinc-500">
-                    USDC
-                  </span>
+                  <span className="block text-[10px] tracking-wider">USDC</span>
                 </button>
               ))}
             </div>
-            <p className="mt-2 flex items-start gap-1.5 text-xs text-zinc-600">
+            <p className="mt-2 flex items-start gap-1.5 text-xs text-graphite">
               <EyeOffIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
               Every Bullet payment uses one of these fixed amounts, so no
               single payment stands out on-chain.
@@ -337,23 +328,19 @@ export function SendForm() {
 
           {/* Send button / progress rail */}
           {busy ? (
-            <div className="space-y-3 rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5">
+            <div className="space-y-3 rounded-2xl border border-fog bg-white p-5">
               {SEND_STEPS.map((s, i) => (
                 <div key={s.key} className="flex items-center gap-3 text-sm">
                   {i < stepIndex ? (
-                    <CheckIcon className="h-4 w-4 shrink-0 text-emerald-400" />
+                    <CheckIcon className="h-4 w-4 shrink-0 text-signal" />
                   ) : i === stepIndex ? (
-                    <LoaderIcon className="h-4 w-4 shrink-0 animate-spin text-amber-400" />
+                    <LoaderIcon className="h-4 w-4 shrink-0 animate-spin" />
                   ) : (
-                    <span className="h-4 w-4 shrink-0 rounded-full border border-zinc-700" />
+                    <span className="h-4 w-4 shrink-0 rounded-full border border-fog" />
                   )}
                   <span
                     className={
-                      i < stepIndex
-                        ? "text-zinc-500"
-                        : i === stepIndex
-                          ? "text-zinc-100"
-                          : "text-zinc-600"
+                      i === stepIndex ? "text-ink" : "text-graphite"
                     }
                   >
                     {s.label}
@@ -364,9 +351,9 @@ export function SendForm() {
           ) : (
             <button
               onClick={handleSend}
-              className="w-full rounded-xl bg-amber-400 px-4 py-3 font-semibold text-zinc-950 transition-colors hover:bg-amber-300"
+              className="w-full rounded-full bg-ink px-4 py-3 font-semibold text-paper transition-colors hover:bg-ink/85"
             >
-              Send ${denom} privately
+              Send ${denom} silently
             </button>
           )}
         </>
@@ -374,7 +361,7 @@ export function SendForm() {
 
       {/* Error */}
       {error && (
-        <div className="rounded-xl border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-300">
+        <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
         </div>
       )}
