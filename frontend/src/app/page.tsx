@@ -2,7 +2,7 @@ import Link from "next/link";
 import HeroSendBox from "@/components/HeroSendBox";
 import HowItWorks from "@/components/HowItWorks";
 import Reveal from "@/components/Reveal";
-import { XBrandIcon } from "@/components/icons";
+import { GoogleIcon } from "@/components/icons";
 
 // ponytail: sample commitments, purely illustrative. Real ones are Poseidon hashes.
 const SAMPLE_NOTES = [
@@ -40,8 +40,8 @@ export default function Home() {
             href="/register"
             className="inline-flex items-center gap-2 rounded-full border border-fog bg-white px-4 py-2 font-medium text-ink transition-colors hover:border-graphite"
           >
-            <XBrandIcon className="h-4 w-4" />
-            Continue with X
+            <GoogleIcon className="h-4 w-4" />
+            Continue with Google
           </Link>
         </p>
       </div>
