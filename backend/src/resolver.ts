@@ -169,9 +169,16 @@ app.post("/commitment", async (req: Request, res: Response) => {
     const leafIndex = leaves.insert(c);
     tree.onLeafInserted(c, leafIndex);
     const root = tree.root();
-    // Post the new root on-chain here so the client can prove against a known
-    // root at claim time. (Was previously done inside /prove.)
-    const postRootHash = await postRootOnChain(adminKey, contractId, root);
+    // post_root on-chain is required for claims to work, but we treat a trap
+    // as non-fatal so the sender still gets a claim link / can retry. If this
+    // logs consistently, the on-chain contract's post_root state needs
+    // attention (usually admin key mismatch or TTL bump exceeds network max).
+    let postRootHash: string | null = null;
+    try {
+      postRootHash = await postRootOnChain(adminKey, contractId, root);
+    } catch (e) {
+      console.error("[/commitment] post_root failed (non-fatal):", String(e));
+    }
     res.json({ commitment: c, leafIndex, root, postRootHash });
   } catch (e) {
     res.status(400).json({ error: "compute_failed", detail: String(e) });
