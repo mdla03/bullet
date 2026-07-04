@@ -1,4 +1,5 @@
 import { SendForm } from "@/components/SendForm";
+import { SentInvites } from "@/components/SentInvites";
 
 export const metadata = { title: "Send · bullet" };
 
@@ -21,8 +22,9 @@ export default async function SendPage({
           recipient.
         </p>
       </div>
-      <div className="w-full text-left">
+      <div className="w-full space-y-6 text-left">
         <SendForm initialRecipient={to} />
+        <SentInvites />
       </div>
     </div>
   );

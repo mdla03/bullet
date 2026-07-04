@@ -6,6 +6,7 @@ import { computeRecipientDigest } from "@/lib/recipient";
 import { depositNote } from "@/lib/deposit";
 import { encodeClaimLink, type ClaimPayload } from "@/lib/claim_link";
 import { postNote } from "@/lib/notes";
+import { apiFetch } from "@/lib/api";
 import {
   CheckIcon,
   CopyIcon,
@@ -56,11 +57,14 @@ function CopyButton({ text, label }: { text: string; label: string }) {
 export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
   const [recipient, setRecipient] = useState(initialRecipient ?? "");
   const [resolved, setResolved] = useState<ResolveResult | null>(null);
+  const [unregistered, setUnregistered] = useState<string | null>(null);
+  const [expiryDays, setExpiryDays] = useState<15 | 30>(30);
   const [resolving, setResolving] = useState(false);
   const [denom, setDenom] = useState<Denom>(10);
   const [step, setStep] = useState<Step>("idle");
   const [claimLink, setClaimLink] = useState("");
   const [notePosted, setNotePosted] = useState(false);
+  const [sentAsInvite, setSentAsInvite] = useState(false);
   const [txHash, setTxHash] = useState("");
   const [error, setError] = useState("");
 
@@ -80,15 +84,16 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
   async function handleResolve() {
     setError("");
     setResolving(true);
+    setResolved(null);
+    setUnregistered(null);
     try {
       const res = await fetch(
         `${RESOLVER_URL}/resolve?q=${encodeURIComponent(recipient.trim())}`
       );
       const result: ResolveResult = await res.json();
       if (!result.found || !result.stellarAddress) {
-        throw new Error(
-          `"${recipient.trim()}" isn't registered on Bullet yet. Ask them to sign up, then try again.`
-        );
+        setUnregistered(recipient.trim());
+        return;
       }
       setResolved(result);
     } catch (e) {
@@ -105,11 +110,120 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
 
   function reset() {
     setResolved(null);
+    setUnregistered(null);
     setStep("idle");
     setClaimLink("");
     setNotePosted(false);
+    setSentAsInvite(false);
     setTxHash("");
     setError("");
+  }
+
+  async function handleSendInvite() {
+    if (!unregistered) return;
+    setError("");
+    setClaimLink("");
+    setTxHash("");
+    try {
+      const { requestAccess, signTransaction } = await import(
+        "@stellar/freighter-api"
+      );
+      const addrRes = await requestAccess();
+      if ("error" in addrRes) throw new Error(`Freighter: ${addrRes.error}`);
+      const senderAddress = addrRes.address;
+
+      // Get a per-invite custody Stellar wallet from the backend.
+      setStep("computing");
+      const prepRes = await apiFetch("/invite/prepare", { method: "POST", body: "{}" });
+      if (!prepRes.ok) {
+        const err = (await prepRes.json().catch(() => ({}))) as { detail?: string };
+        throw new Error(`Invite setup failed: ${err.detail ?? prepRes.status}`);
+      }
+      const { custodyStellarAddress, custodySecret } = (await prepRes.json()) as {
+        custodyStellarAddress: string;
+        custodySecret: string;
+      };
+
+      const recipientDigest = await computeRecipientDigest(custodyStellarAddress);
+
+      const secretBytes = new Uint8Array(32);
+      crypto.getRandomValues(secretBytes);
+      secretBytes[0] = 0;
+      const secret = Array.from(secretBytes)
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("");
+      const secretBigInt = BigInt("0x" + secret);
+
+      const commitRes = await fetch(`${RESOLVER_URL}/commitment`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          secret: secretBigInt.toString(),
+          recipientDigest: recipientDigest.toString(),
+          denom: denom.toString(),
+        }),
+      });
+      if (!commitRes.ok) {
+        const err = await commitRes.json().catch(() => ({}));
+        throw new Error(
+          `Commitment computation failed: ${(err as { detail?: string }).detail ?? commitRes.status}`
+        );
+      }
+      const { commitment } = (await commitRes.json()) as { commitment: string };
+      const commitmentBigInt = BigInt(commitment);
+
+      setStep("signing");
+      const hash = await depositNote(
+        senderAddress,
+        commitmentBigInt,
+        denom,
+        async (xdr) => {
+          setStep("submitting");
+          const signRes = await signTransaction(xdr, {
+            networkPassphrase:
+              process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ??
+              "Test SDF Network ; September 2015",
+          });
+          if ("error" in signRes) throw new Error(`Freighter: ${signRes.error}`);
+          return signRes.signedTxXdr;
+        }
+      );
+      setTxHash(hash);
+
+      const payload: ClaimPayload = {
+        secret,
+        recipientDigest: recipientDigest.toString(),
+        denom,
+        contractId: CONTRACT_ID,
+        network: "testnet",
+        recipientHandle: unregistered,
+      };
+      setClaimLink(encodeClaimLink(payload, FRONTEND_URL));
+
+      const commitInv = await apiFetch("/invite/commit", {
+        method: "POST",
+        body: JSON.stringify({
+          handle: unregistered,
+          denom,
+          claimPayload: payload,
+          custodyStellarAddress,
+          custodySecret,
+          expiresInDays: expiryDays,
+        }),
+      });
+      if (!commitInv.ok) {
+        // Non-fatal: deposit already happened. Sender still has the claim link
+        // to hand off manually if the backend hiccups.
+        const err = (await commitInv.json().catch(() => ({}))) as { detail?: string };
+        console.warn("invite_record failed", err);
+      }
+
+      setSentAsInvite(true);
+      setStep("done");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setStep("error");
+    }
   }
 
   async function handleSend() {
@@ -218,12 +332,15 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
       <div className="space-y-5">
         <div className="rounded-2xl border border-signal/30 bg-white p-5">
           <p className="flex items-center gap-2 font-semibold text-signal">
-            <CheckIcon className="h-5 w-5" />${denom} USDC sent silently to{" "}
+            <CheckIcon className="h-5 w-5" />${denom} USDC{" "}
+            {sentAsInvite ? "sent as an invite to " : "sent silently to "}
             {recipient.trim()}
           </p>
           <p className="mt-1 text-sm text-graphite">
-            Nothing on-chain connects your deposit to their claim.
-            {notePosted &&
+            {sentAsInvite
+              ? `Held for ${expiryDays} days. Lands in their inbox the moment they sign up on Bullet and link a wallet. If unclaimed by then, it comes back to you.`
+              : "Nothing on-chain connects your deposit to their claim."}
+            {!sentAsInvite && notePosted &&
               " The note is waiting in their Bullet inbox the next time they open the app."}
           </p>
         </div>
@@ -275,7 +392,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
   return (
     <div className="space-y-6">
       {/* Recipient */}
-      {!resolved ? (
+      {!resolved && !unregistered ? (
         <div>
           <label className="mb-1.5 block text-sm font-medium">Recipient</label>
           <div className="flex gap-2">
@@ -307,6 +424,49 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
             No wallet address needed. Bullet resolves the handle for you.
           </p>
         </div>
+      ) : unregistered ? (
+        <div className="space-y-3 rounded-2xl border border-amber/40 bg-amber/5 p-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white text-lg font-bold">
+              {unregistered.replace(/^@/, "").charAt(0).toUpperCase()}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="truncate font-medium">{unregistered}</p>
+              <p className="text-xs text-graphite">
+                Not on Bullet yet. Send as an invite. Bullet holds the funds
+                until they sign up and link a wallet.
+              </p>
+            </div>
+            <button
+              onClick={reset}
+              disabled={busy}
+              className="shrink-0 text-xs text-graphite underline-offset-2 hover:text-ink hover:underline disabled:opacity-50"
+            >
+              Change
+            </button>
+          </div>
+          <div>
+            <p className="mb-1.5 text-xs font-medium text-graphite">
+              Refund if unclaimed after
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              {[15, 30].map((d) => (
+                <button
+                  key={d}
+                  onClick={() => setExpiryDays(d as 15 | 30)}
+                  disabled={busy}
+                  className={`rounded-xl border px-3 py-2 text-sm transition-colors disabled:opacity-50 ${
+                    expiryDays === d
+                      ? "border-ink bg-ink text-paper"
+                      : "border-fog bg-white text-graphite hover:border-graphite"
+                  }`}
+                >
+                  {d} days
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
       ) : (
         <div className="flex items-center gap-3 rounded-2xl border border-fog bg-white p-4">
           <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-paper text-lg font-bold">
@@ -318,8 +478,8 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
               <ShieldCheckIcon className="h-3.5 w-3.5" />
               Registered on Bullet ·{" "}
               <span className="font-mono text-graphite">
-                {resolved.stellarAddress!.slice(0, 4)}…
-                {resolved.stellarAddress!.slice(-4)}
+                {resolved?.stellarAddress?.slice(0, 4)}…
+                {resolved?.stellarAddress?.slice(-4)}
               </span>
             </p>
           </div>
@@ -334,7 +494,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
       )}
 
       {/* Denomination picker */}
-      {resolved && (
+      {(resolved || unregistered) && (
         <>
           <div>
             <label className="mb-1.5 block text-sm font-medium">Amount</label>
@@ -386,10 +546,12 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
             </div>
           ) : (
             <button
-              onClick={handleSend}
+              onClick={unregistered ? handleSendInvite : handleSend}
               className="w-full rounded-full bg-ink px-4 py-3 font-semibold text-paper transition-colors hover:bg-ink/85"
             >
-              Send ${denom} silently
+              {unregistered
+                ? `Send $${denom} as invite`
+                : `Send $${denom} silently`}
             </button>
           )}
         </>
