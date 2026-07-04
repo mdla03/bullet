@@ -20,8 +20,8 @@ import {
 } from "@/lib/register";
 
 const PROVIDERS = [
-  { key: "google", label: "Google", icon: GoogleIcon, enabled: true },
-  { key: "twitter", label: "X (Twitter)", icon: XBrandIcon, enabled: true },
+  { key: "google", label: "Google", icon: GoogleIcon, enabled: false },
+  { key: "twitter", label: "X (Twitter)", icon: XBrandIcon, enabled: false },
 ] as const;
 
 const OAUTH_ERRORS: Record<string, string> = {
@@ -40,7 +40,9 @@ export function RegisterFlow({ oauthError }: { oauthError?: string }) {
   const [session, setSession] = useState<Session | null | undefined>(undefined);
   const [me, setMe] = useState<MeResponse | null>(null);
   const [address, setAddress] = useState("");
-  const [working, setWorking] = useState<"" | "oauth" | "connect" | "link">("");
+  const [working, setWorking] = useState<"" | "oauth" | "email" | "connect" | "link">("");
+  const [email, setEmail] = useState("");
+  const [emailSent, setEmailSent] = useState(false);
   const [error, setError] = useState(
     oauthError ? (OAUTH_ERRORS[oauthError] ?? "Sign-in failed. Start again.") : ""
   );
@@ -78,6 +80,19 @@ export function RegisterFlow({ oauthError }: { oauthError?: string }) {
       setError(oauthErr.message);
       setWorking("");
     }
+  }
+
+  async function signInWithEmail() {
+    setError("");
+    setEmailSent(false);
+    setWorking("email");
+    const { error: err } = await supabase.auth.signInWithOtp({
+      email: email.trim(),
+      options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+    });
+    setWorking("");
+    if (err) setError(err.message);
+    else setEmailSent(true);
   }
 
   async function signOut() {
@@ -186,6 +201,39 @@ export function RegisterFlow({ oauthError }: { oauthError?: string }) {
       {/* Step 1: sign in */}
       {!session && (
         <div className="space-y-2">
+          <div className="space-y-2 rounded-2xl border border-fog bg-white p-4">
+            <label className="block text-sm font-medium">Email sign-in</label>
+            <div className="flex gap-2">
+              <input
+                type="email"
+                placeholder="you@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && email.trim() && working !== "email")
+                    signInWithEmail();
+                }}
+                disabled={working === "email"}
+                className="w-full rounded-xl border border-fog bg-white px-4 py-2.5 placeholder-graphite/60 focus:border-ink focus:outline-none disabled:opacity-50"
+              />
+              <button
+                onClick={signInWithEmail}
+                disabled={working === "email" || !email.trim()}
+                className="shrink-0 rounded-xl bg-ink px-5 py-2.5 font-medium text-paper transition-colors hover:bg-ink/85 disabled:opacity-40"
+              >
+                {working === "email" ? (
+                  <LoaderIcon className="h-5 w-5 animate-spin" />
+                ) : (
+                  "Send link"
+                )}
+              </button>
+            </div>
+            {emailSent && (
+              <p className="text-xs text-signal">
+                Check your inbox. The link signs you in.
+              </p>
+            )}
+          </div>
           {PROVIDERS.map((p) => (
             <button
               key={p.key}
