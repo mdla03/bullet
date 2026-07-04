@@ -69,6 +69,31 @@ export async function getUser(userId: string): Promise<UserProfile | null> {
   };
 }
 
+/** Mark a note claimed only if it's addressed to the caller's own wallet
+ * bullet_pubkey. Prevents griefing under the RLS-locked notes table. */
+export async function markNoteClaimedIfOwned(
+  userId: string,
+  noteId: string
+): Promise<boolean> {
+  const { data: wallet } = await serviceClient
+    .from("wallets")
+    .select("bullet_pubkey")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (!wallet?.bullet_pubkey) return false;
+
+  const { data, error } = await serviceClient
+    .from("notes")
+    .update({ claimed_at: new Date().toISOString() })
+    .eq("id", noteId)
+    .eq("recipient_pubkey", wallet.bullet_pubkey)
+    .is("claimed_at", null)
+    .select("id")
+    .maybeSingle();
+  if (error) return false;
+  return !!data;
+}
+
 export type AttachWalletResult =
   | { ok: true; wallet: Wallet }
   | { conflict: true; detail: string };
