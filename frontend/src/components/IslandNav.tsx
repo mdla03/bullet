@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import type { Session } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 
@@ -10,6 +11,7 @@ export default function IslandNav() {
   const [hidden, setHidden] = useState(false);
   const [session, setSession] = useState<Session | null | undefined>(undefined);
   const lastY = useRef(0);
+  const router = useRouter();
 
   useEffect(() => {
     const onScroll = () => {
@@ -36,6 +38,10 @@ export default function IslandNav() {
 
   async function signOut() {
     await createClient().auth.signOut();
+    // Force every page (Inbox, Send, etc.) to remount so their auth-dependent
+    // state clears. Just nulling `session` doesn't tell child pages to reset.
+    router.replace("/");
+    router.refresh();
   }
 
   return (
