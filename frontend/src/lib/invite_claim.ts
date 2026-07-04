@@ -3,14 +3,15 @@
 // Deposits for invites are bound to a per-invite custody Stellar wallet, not
 // to the recipient's real wallet. So the recipient's browser:
 //   1. Runs the same browser Groth16 prover (recipientDigest = sha256(custody)).
-//   2. Signs the claim tx with the custody wallet's private key (not Freighter).
-//      That tx has the custody wallet claim the note (contract sends USDC to
-//      the custody wallet) AND immediately transfer the USDC to the recipient's
-//      real wallet, in a single atomic tx.
+//   2. TX A: contract.claim signed by the custody keypair. Contract sends
+//      USDC to the custody wallet.
+//   3. TX B: SAC transfer signed by the custody keypair. Custody wallet sends
+//      USDC to the recipient's real wallet.
 //
-// After this succeeds, the custody wallet holds no USDC — its only remaining
-// balance is the leftover XLM used for base reserve + fees. Sweeping that back
-// to a master wallet is deferred to a background cleanup script.
+// The two ops must be SEPARATE Stellar txs because Soroban only allows ONE
+// InvokeHostFunction per transaction. Not atomic on-chain, but only the
+// recipient (holder of the custody secret) can execute step 3, so no race
+// window that an attacker can exploit.
 
 import * as StellarSdk from "@stellar/stellar-sdk";
 
@@ -58,6 +59,7 @@ export async function claimInvite(
   const usdcContract = new StellarSdk.Contract(USDC_SAC);
   const { xdr } = StellarSdk;
 
+  // TX A: contract.claim, USDC lands in the custody wallet.
   const claimOp = contract.call(
     "claim",
     xdr.ScVal.scvBytes(hexToBuffer(proofA)),
@@ -68,8 +70,26 @@ export async function claimInvite(
     StellarSdk.nativeToScVal(custodyAddr, { type: "address" }),
     xdr.ScVal.scvVec([xdr.ScVal.scvSymbol(DENOM_VARIANT[denom])])
   );
+  const acctA = await rpc.getAccount(custodyAddr);
+  const txA = new StellarSdk.TransactionBuilder(acctA, {
+    fee: "2000000",
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(claimOp)
+    .setTimeout(60)
+    .build();
+  const preparedA = await rpc.prepareTransaction(txA);
+  preparedA.sign(custody);
+  const resA = await rpc.sendTransaction(preparedA);
+  if (resA.status === "ERROR") {
+    throw new Error(`invite claim failed: ${JSON.stringify(resA.errorResult)}`);
+  }
+  const finalA = await rpc.pollTransaction(resA.hash, { attempts: 30 });
+  if (finalA.status !== "SUCCESS") {
+    throw new Error(`invite claim ended with status: ${finalA.status}`);
+  }
 
-  // Forward USDC from the custody wallet to the recipient's real wallet.
+  // TX B: forward USDC from custody to the recipient's real wallet.
   const amount = BigInt(denom) * USDC_DECIMALS;
   const transferOp = usdcContract.call(
     "transfer",
@@ -77,27 +97,23 @@ export async function claimInvite(
     StellarSdk.nativeToScVal(userRealWallet, { type: "address" }),
     StellarSdk.nativeToScVal(amount, { type: "i128" })
   );
-
-  const account = await rpc.getAccount(custodyAddr);
-  const tx = new StellarSdk.TransactionBuilder(account, {
+  const acctB = await rpc.getAccount(custodyAddr);
+  const txB = new StellarSdk.TransactionBuilder(acctB, {
     fee: "2000000",
     networkPassphrase: NETWORK_PASSPHRASE,
   })
-    .addOperation(claimOp)
     .addOperation(transferOp)
     .setTimeout(60)
     .build();
-
-  const prepared = await rpc.prepareTransaction(tx);
-  prepared.sign(custody);
-
-  const result = await rpc.sendTransaction(prepared);
-  if (result.status === "ERROR") {
-    throw new Error(`invite claim failed: ${JSON.stringify(result.errorResult)}`);
+  const preparedB = await rpc.prepareTransaction(txB);
+  preparedB.sign(custody);
+  const resB = await rpc.sendTransaction(preparedB);
+  if (resB.status === "ERROR") {
+    throw new Error(`invite forward failed: ${JSON.stringify(resB.errorResult)}`);
   }
-  const final = await rpc.pollTransaction(result.hash, { attempts: 30 });
-  if (final.status !== "SUCCESS") {
-    throw new Error(`invite claim ended with status: ${final.status}`);
+  const finalB = await rpc.pollTransaction(resB.hash, { attempts: 30 });
+  if (finalB.status !== "SUCCESS") {
+    throw new Error(`invite forward ended with status: ${finalB.status}`);
   }
-  return result.hash;
+  return resA.hash;
 }

@@ -87,7 +87,9 @@ export async function createCustodyAccount(): Promise<StellarSdk.Keypair> {
     .addOperation(
       StellarSdk.Operation.createAccount({
         destination: custody.publicKey(),
-        startingBalance: "1.5",
+        // Enough for base reserves (1 XLM after the trustline subentry) plus
+        // two Soroban txs at 0.2 XLM fee cap each on the recipient's claim.
+        startingBalance: "2.5",
       })
     )
     .addOperation(
