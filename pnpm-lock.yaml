@@ -28,6 +28,9 @@ importers:
       cors:
         specifier: ^2.8.6
         version: 2.8.6
+      ed2curve:
+        specifier: ^0.3.0
+        version: 0.3.0
       express:
         specifier: ^5.2.1
         version: 5.2.1
@@ -37,6 +40,9 @@ importers:
       tsx:
         specifier: ^4.22.4
         version: 4.22.4
+      tweetnacl:
+        specifier: ^1.0.3
+        version: 1.0.3
     devDependencies:
       '@types/cors':
         specifier: ^2.8.19
