@@ -38,11 +38,23 @@ else
 fi
 
 echo "== [3/6] Groth16 setup =="
-"$SNARKJS" groth16 setup "$BUILD/claim.r1cs" "$BUILD/pot14_final.ptau" \
-    "$BUILD/claim_0.zkey"
-"$SNARKJS" zkey contribute "$BUILD/claim_0.zkey" "$BUILD/claim.zkey" \
-    --name="zeekpay-claim" -v -e="$(date +%s%N)claimzkeyentropy"
-rm -f "$BUILD/claim_0.zkey"
+# The proving key (claim.zkey) is a trusted-setup artifact bound to the on-chain
+# verifying key. Regenerating it draws fresh entropy => a NEW vk => every proof
+# from the old key fails on-chain with InvalidProof (#7) until set_vk is re-run
+# AND the new claim.zkey is shipped to frontend/public/circuits. So do NOT
+# regenerate silently: reuse an existing key unless FORCE_SETUP=1 is set.
+if [ -f "$BUILD/claim.zkey" ] && [ "${FORCE_SETUP:-0}" != "1" ]; then
+    echo "claim.zkey exists, reusing (keeps it in sync with the on-chain vk)."
+    echo "  To rotate the key: FORCE_SETUP=1 ./scripts/build-claim.sh, then"
+    echo "  (a) copy build/claim.zkey -> frontend/public/circuits/claim.zkey and"
+    echo "  (b) re-run set_vk on the deployed contract with the new groth16_soroban.json."
+else
+    "$SNARKJS" groth16 setup "$BUILD/claim.r1cs" "$BUILD/pot14_final.ptau" \
+        "$BUILD/claim_0.zkey"
+    "$SNARKJS" zkey contribute "$BUILD/claim_0.zkey" "$BUILD/claim.zkey" \
+        --name="zeekpay-claim" -v -e="$(date +%s%N)claimzkeyentropy"
+    rm -f "$BUILD/claim_0.zkey"
+fi
 
 echo "== [4/6] export verification key =="
 "$SNARKJS" zkey export verificationkey "$BUILD/claim.zkey" "$BUILD/claim_vk.json"
