@@ -178,7 +178,7 @@ app.post("/commitment", async (req: Request, res: Response) => {
     try {
       postRootHash = await postRootOnChain(adminKey, contractId, root);
     } catch (e) {
-      postRootError = String(e).slice(0, 500);
+      postRootError = String(e).slice(0, 800);
       console.error("[/commitment] post_root failed (non-fatal):", postRootError);
     }
     res.json({ commitment: c, leafIndex, root, postRootHash, postRootError });
