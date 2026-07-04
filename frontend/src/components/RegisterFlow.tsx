@@ -153,6 +153,8 @@ export function RegisterFlow({ oauthError }: { oauthError?: string }) {
     await supabase.auth.signOut();
     setMe(null);
     setAddress("");
+    // Bounce to home so every page's local state clears on remount.
+    window.location.assign("/");
   }
 
   async function connectWallet() {
