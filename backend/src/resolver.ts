@@ -34,7 +34,24 @@ function badRequest(res: Response, detail: string): void {
 // ── health + resolve (public) ─────────────────────────────────────────────────
 
 app.get("/health", (_req: Request, res: Response) => {
-  res.json({ ok: true });
+  let adminPub: string | null = null;
+  let adminError: string | null = null;
+  try {
+    const k = process.env.ZEEKPAY_ADMIN_KEY;
+    if (!k) adminError = "not set";
+    else {
+      adminPub = StellarSdk.Keypair.fromSecret(k).publicKey();
+    }
+  } catch (e) {
+    adminError = String(e).slice(0, 200);
+  }
+  res.json({
+    ok: true,
+    contractId: process.env.ZEEKPAY_CONTRACT_ID ?? null,
+    adminPub,
+    adminError,
+    adminKeyLen: process.env.ZEEKPAY_ADMIN_KEY?.length ?? 0,
+  });
 });
 
 app.get("/resolve", async (req: Request, res: Response) => {
