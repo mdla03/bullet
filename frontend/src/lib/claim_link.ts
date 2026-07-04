@@ -4,6 +4,9 @@ export interface ClaimPayload {
   denom: 1 | 10 | 50 | 100;
   contractId: string;
   network: "testnet";
+  /** Handle the sender addressed (e.g. "@elykable", "you@x.com"). Optional
+   * for backwards-compat with links minted before this field existed. */
+  recipientHandle?: string;
 }
 
 export function encodeClaimLink(

@@ -353,6 +353,14 @@ export function Inbox() {
                   </p>
                   <p className="text-xs text-graphite">
                     received {timeAgo(note.createdAt)}
+                    {note.payload.recipientHandle && (
+                      <>
+                        {" · sent to "}
+                        <span className="text-ink">
+                          {note.payload.recipientHandle}
+                        </span>
+                      </>
+                    )}
                   </p>
                 </div>
 
