@@ -51,6 +51,9 @@ app.get("/health", (_req: Request, res: Response) => {
     adminPub,
     adminError,
     adminKeyLen: process.env.ZEEKPAY_ADMIN_KEY?.length ?? 0,
+    rpcUrl: process.env.SOROBAN_RPC_URL ?? "default",
+    networkPassphrase: process.env.NETWORK_PASSPHRASE ?? "default",
+    nodeVersion: process.version,
   });
 });
 
