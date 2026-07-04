@@ -4,9 +4,7 @@ import { useState } from "react";
 import { decodeClaimLink, type ClaimPayload } from "@/lib/claim_link";
 import { computeRecipientDigest } from "@/lib/recipient";
 import { claimNote } from "@/lib/claim_tx";
-
-const RESOLVER_URL =
-  process.env.NEXT_PUBLIC_RESOLVER_URL ?? "http://localhost:3001";
+import { proveBrowser } from "@/lib/prove_browser";
 
 type Step =
   | "no_link"
@@ -68,31 +66,19 @@ export function ClaimView({ encoded }: { encoded: string }) {
     const p = payload!;
 
     try {
-      // 1. Generate ZK proof (10-20 s)
-      setProveDetail("Generating proof (~15 s)…");
+      // 1. Generate ZK proof locally (browser). Secret never leaves the tab.
+      setProveDetail("Loading proving assets…");
       setState((s) => ({ ...s, step: "proving" }));
 
-      const proveRes = await fetch(`${RESOLVER_URL}/prove`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          secret: BigInt("0x" + p.secret).toString(),
-          recipientDigest: p.recipientDigest,
-          denom: String(p.denom),
-        }),
-      });
-      if (!proveRes.ok) {
-        const err = await proveRes.json().catch(() => ({})) as { detail?: string };
-        throw new Error(`Proof generation failed: ${err.detail ?? proveRes.status}`);
-      }
-      const { proof_a, proof_b, proof_c, nullifier, root } =
-        (await proveRes.json()) as {
-          proof_a: string;
-          proof_b: string;
-          proof_c: string;
-          nullifier: string;
-          root: string;
-        };
+      const { proof_a, proof_b, proof_c, nullifier, root } = await proveBrowser(
+        BigInt("0x" + p.secret).toString(),
+        p.recipientDigest,
+        String(p.denom),
+        (stage) => {
+          if (stage === "proving") setProveDetail("Generating proof (~15-30 s)…");
+          else if (stage === "path") setProveDetail("Fetching Merkle path…");
+        }
+      );
 
       // 2. Sign + submit claim tx via Freighter (root already posted server-side inside /prove)
       setState((s) => ({ ...s, step: "signing" }));
