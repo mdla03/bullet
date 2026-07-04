@@ -159,7 +159,7 @@ export function Inbox() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          secret: p.secret,
+          secret: BigInt("0x" + p.secret).toString(),
           recipientDigest: p.recipientDigest,
           denom: String(p.denom),
         }),
