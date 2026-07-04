@@ -81,6 +81,9 @@ importers:
       ed2curve:
         specifier: ^0.3.0
         version: 0.3.0
+      ffjavascript:
+        specifier: 0.3.1
+        version: 0.3.1
       next:
         specifier: '15'
         version: 15.5.19(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -90,6 +93,9 @@ importers:
       react-dom:
         specifier: ^19.2.7
         version: 19.2.7(react@19.2.7)
+      snarkjs:
+        specifier: 0.7.5
+        version: 0.7.5
       tweetnacl:
         specifier: ^1.0.3
         version: 1.0.3
