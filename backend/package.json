@@ -17,9 +17,11 @@
     "@zeekpay/shared": "workspace:*",
     "circomlibjs": "^0.1.7",
     "cors": "^2.8.6",
+    "ed2curve": "^0.3.0",
     "express": "^5.2.1",
     "ffjavascript": "0.3.1",
-    "tsx": "^4.22.4"
+    "tsx": "^4.22.4",
+    "tweetnacl": "^1.0.3"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
