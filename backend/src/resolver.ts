@@ -6,6 +6,7 @@ import * as store from "./store.js";
 import * as commitment from "./commitment.js";
 import * as leaves from "./leaves.js";
 import * as tree from "./tree.js";
+import * as invite from "./invite.js";
 import { requireAuth } from "./supabase.js";
 import { verifyLinkWalletSig } from "./verify.js";
 import * as StellarSdk from "@stellar/stellar-sdk";
@@ -92,7 +93,59 @@ app.post("/wallet/link", requireAuth, async (req: Request, res: Response) => {
     signature,
   });
   if ("conflict" in result) return void res.status(409).json({ error: "conflict", detail: result.detail });
+  // Best-effort: deliver any pending invites addressed to this user's handles.
+  invite.deliverInvitesFor(userId, zeekPayPubKey).catch(() => {});
   res.json({ ok: true, wallet: result.wallet });
+});
+
+// ── /invite: send-to-unregistered flow ────────────────────────────────────────
+
+app.post("/invite/prepare", requireAuth, async (_req: Request, res: Response) => {
+  try {
+    const custody = await invite.createCustodyAccount();
+    res.json({
+      custodyStellarAddress: custody.publicKey(),
+      custodySecret: custody.secret(),
+    });
+  } catch (e) {
+    res.status(500).json({ error: "custody_setup_failed", detail: String(e) });
+  }
+});
+
+app.post("/invite/commit", requireAuth, async (req: Request, res: Response) => {
+  const userId = (req as Request & { userId?: string }).userId!;
+  const { handle, denom, claimPayload, custodyStellarAddress, custodySecret, expiresInDays } =
+    req.body as {
+      handle?: string;
+      denom?: 1 | 10 | 50 | 100;
+      claimPayload?: unknown;
+      custodyStellarAddress?: string;
+      custodySecret?: string;
+      expiresInDays?: 15 | 30;
+    };
+  if (!handle || !denom || !claimPayload || !custodyStellarAddress || !custodySecret) {
+    return void badRequest(res, "handle, denom, claimPayload, custody fields required");
+  }
+  const days = expiresInDays === 15 ? 15 : 30;
+  try {
+    const { id } = await invite.recordInvite({
+      senderUserId: userId,
+      handle,
+      denom,
+      claimPayload,
+      custody: { publicKey: custodyStellarAddress, secret: custodySecret },
+      expiresInDays: days,
+    });
+    res.json({ ok: true, id });
+  } catch (e) {
+    res.status(500).json({ error: "invite_record_failed", detail: String(e) });
+  }
+});
+
+app.get("/invites", requireAuth, async (req: Request, res: Response) => {
+  const userId = (req as Request & { userId?: string }).userId!;
+  const items = await invite.listInvitesForSender(userId);
+  res.json({ items });
 });
 
 // ── /commitment ───────────────────────────────────────────────────────────────

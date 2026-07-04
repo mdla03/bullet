@@ -49,6 +49,10 @@ export interface InboxNote {
   payload: ClaimPayload;
   createdAt: string;
   claimedAt: string | null;
+  /** Present when this note came from an invite. Decrypted custody wallet
+   * Stellar secret (S…); the recipient uses it to sign the claim+forward tx. */
+  custodyStellarSecret?: string;
+  inviteId?: string;
 }
 
 /** Encrypt a claim payload to the recipient's Bullet pubkey and store it. */
@@ -79,7 +83,9 @@ export async function postNote(
 export async function fetchNotes(keys: BulletKeys): Promise<InboxNote[]> {
   const { data, error } = await supabase
     .from("notes")
-    .select("id, ephemeral_pubkey, nonce, ciphertext, created_at, claimed_at")
+    .select(
+      "id, ephemeral_pubkey, nonce, ciphertext, created_at, claimed_at, invite_id, custody_secret"
+    )
     .eq("recipient_pubkey", keys.pubKeyHex)
     .order("created_at", { ascending: false });
   if (error) throw new Error(`inbox scan failed: ${error.message}`);
@@ -94,11 +100,34 @@ export async function fetchNotes(keys: BulletKeys): Promise<InboxNote[]> {
     );
     if (!opened) continue; // wrong key or corrupted row: skip silently
     try {
+      let custodyStellarSecret: string | undefined;
+      if (row.invite_id && row.custody_secret) {
+        try {
+          const sealed = JSON.parse(row.custody_secret) as {
+            ephemeral_pubkey: string;
+            nonce: string;
+            ciphertext: string;
+          };
+          const custOpen = nacl.box.open(
+            hexToBytes(sealed.ciphertext),
+            hexToBytes(sealed.nonce),
+            hexToBytes(sealed.ephemeral_pubkey),
+            keys.curveSecret
+          );
+          if (custOpen) {
+            custodyStellarSecret = new TextDecoder().decode(custOpen);
+          }
+        } catch {
+          // custody blob unreadable: leave undefined so the row shows but can't be claimed
+        }
+      }
       notes.push({
         id: row.id,
         payload: JSON.parse(new TextDecoder().decode(opened)) as ClaimPayload,
         createdAt: row.created_at,
         claimedAt: row.claimed_at,
+        inviteId: row.invite_id ?? undefined,
+        custodyStellarSecret,
       });
     } catch {
       // not JSON: skip

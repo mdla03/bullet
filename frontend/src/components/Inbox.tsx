@@ -21,6 +21,7 @@ import {
   WalletIcon,
 } from "@/components/icons";
 import { proveBrowser } from "@/lib/prove_browser";
+import { claimInvite } from "@/lib/invite_claim";
 
 interface WalletRow {
   stellar_address: string;
@@ -160,26 +161,43 @@ export function Inbox() {
       );
 
       set({ state: "signing" });
-      const { signTransaction } = await import("@stellar/freighter-api");
-      const hash = await claimNote(
-        address,
-        proof_a,
-        proof_b,
-        proof_c,
-        root,
-        nullifier,
-        p.denom,
-        async (xdr) => {
-          set({ state: "submitting" });
-          const signRes = await signTransaction(xdr, {
-            networkPassphrase:
-              process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ??
-              "Test SDF Network ; September 2015",
-          });
-          if ("error" in signRes) throw new Error(`Freighter: ${signRes.error}`);
-          return signRes.signedTxXdr;
-        }
-      );
+      let hash: string;
+      if (note.inviteId && note.custodyStellarSecret) {
+        // Invite: custody wallet claims + forwards to the user's real wallet
+        // in one tx. No Freighter prompt needed.
+        set({ state: "submitting" });
+        hash = await claimInvite(
+          note.custodyStellarSecret,
+          address,
+          proof_a,
+          proof_b,
+          proof_c,
+          root,
+          nullifier,
+          p.denom
+        );
+      } else {
+        const { signTransaction } = await import("@stellar/freighter-api");
+        hash = await claimNote(
+          address,
+          proof_a,
+          proof_b,
+          proof_c,
+          root,
+          nullifier,
+          p.denom,
+          async (xdr) => {
+            set({ state: "submitting" });
+            const signRes = await signTransaction(xdr, {
+              networkPassphrase:
+                process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ??
+                "Test SDF Network ; September 2015",
+            });
+            if ("error" in signRes) throw new Error(`Freighter: ${signRes.error}`);
+            return signRes.signedTxXdr;
+          }
+        );
+      }
 
       set({ state: "done", tx: hash });
       markClaimed(note.id); // best-effort; the nullifier is the real record
