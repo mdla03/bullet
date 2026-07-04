@@ -135,9 +135,10 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
         resolved.stellarAddress
       );
 
-      // 3. Generate random 32-byte secret
+      // 3. Generate random 32-byte secret; zero top byte so value < BLS12-381 r.
       const secretBytes = new Uint8Array(32);
       crypto.getRandomValues(secretBytes);
+      secretBytes[0] = 0;
       const secret = Array.from(secretBytes)
         .map((b) => b.toString(16).padStart(2, "0"))
         .join("");
