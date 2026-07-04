@@ -21,7 +21,7 @@ import {
 
 const PROVIDERS = [
   { key: "google", label: "Google", icon: GoogleIcon, enabled: false },
-  { key: "twitter", label: "X (Twitter)", icon: XBrandIcon, enabled: true },
+  { key: "x", label: "X (Twitter)", icon: XBrandIcon, enabled: true },
 ] as const;
 
 const OAUTH_ERRORS: Record<string, string> = {
