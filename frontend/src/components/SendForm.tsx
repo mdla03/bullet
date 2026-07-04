@@ -188,6 +188,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
         denom,
         contractId: CONTRACT_ID,
         network: "testnet",
+        recipientHandle: recipient.trim(),
       };
       setClaimLink(encodeClaimLink(payload, FRONTEND_URL));
 

@@ -73,10 +73,11 @@ export type AttachWalletResult =
   | { ok: true; wallet: Wallet }
   | { conflict: true; detail: string };
 
-/** Insert/upsert wallet for a user. If the wallet is already attached to
- * another user, transfer it: valid Freighter signature over the challenge
- * proves the caller controls the private key, which is the only real
- * ownership test (verifyLinkWalletSig at the route layer already checked). */
+/** Attach wallet to userId. If the wallet already belongs to another user,
+ * merge that user INTO the current one: identities, handles, and existing
+ * wallet row are reparented via the public.merge_users() function, then the
+ * source user is deleted. Signature already validated at the route layer
+ * (verifyLinkWalletSig) so the caller provably owns the wallet. */
 export async function attachWallet(
   userId: string,
   wallet: { stellar_address: string; bullet_pubkey: string; signature: string }
@@ -88,13 +89,20 @@ export async function attachWallet(
     signature: wallet.signature,
   };
 
-  // Detach from any prior owner of this address.
-  const { error: delErr } = await serviceClient
+  const { data: existing, error: findErr } = await serviceClient
     .from("wallets")
-    .delete()
+    .select("user_id")
     .eq("stellar_address", wallet.stellar_address)
-    .neq("user_id", userId);
-  if (delErr) return { conflict: true, detail: delErr.message };
+    .maybeSingle();
+  if (findErr) return { conflict: true, detail: findErr.message };
+
+  if (existing && existing.user_id !== userId) {
+    const { error: mergeErr } = await serviceClient.rpc("merge_users", {
+      from_uid: existing.user_id,
+      to_uid: userId,
+    });
+    if (mergeErr) return { conflict: true, detail: mergeErr.message };
+  }
 
   const { data, error } = await serviceClient
     .from("wallets")
