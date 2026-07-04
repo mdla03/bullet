@@ -92,10 +92,23 @@ export function RegisterFlow({ oauthError }: { oauthError?: string }) {
     setError("");
     setEmailSent(false);
     setWorking("email");
-    const { error: err } = await supabase.auth.signInWithOtp({
-      email: email.trim(),
-      options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+    // Try sign-in first (shouldCreateUser: false). If Supabase says the user
+    // doesn't exist, retry as signup so new users still get a link. Doing it
+    // this order avoids Supabase silently dropping magic links for existing
+    // OAuth-only accounts under the anti-enumeration user_repeated_signup guard.
+    const trimmed = email.trim();
+    const opts = { emailRedirectTo: `${window.location.origin}/auth/callback` };
+    let { error: err } = await supabase.auth.signInWithOtp({
+      email: trimmed,
+      options: { ...opts, shouldCreateUser: false },
     });
+    if (err && /not found|user does not exist|Signups.*disabled/i.test(err.message)) {
+      const retry = await supabase.auth.signInWithOtp({
+        email: trimmed,
+        options: { ...opts, shouldCreateUser: true },
+      });
+      err = retry.error;
+    }
     setWorking("");
     if (err) setError(err.message);
     else setEmailSent(true);
