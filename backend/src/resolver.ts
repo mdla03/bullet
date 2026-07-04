@@ -174,12 +174,14 @@ app.post("/commitment", async (req: Request, res: Response) => {
     // logs consistently, the on-chain contract's post_root state needs
     // attention (usually admin key mismatch or TTL bump exceeds network max).
     let postRootHash: string | null = null;
+    let postRootError: string | null = null;
     try {
       postRootHash = await postRootOnChain(adminKey, contractId, root);
     } catch (e) {
-      console.error("[/commitment] post_root failed (non-fatal):", String(e));
+      postRootError = String(e).slice(0, 800);
+      console.error("[/commitment] post_root failed (non-fatal):", postRootError);
     }
-    res.json({ commitment: c, leafIndex, root, postRootHash });
+    res.json({ commitment: c, leafIndex, root, postRootHash, postRootError });
   } catch (e) {
     res.status(400).json({ error: "compute_failed", detail: String(e) });
   }
