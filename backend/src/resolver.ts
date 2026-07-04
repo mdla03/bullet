@@ -233,7 +233,7 @@ app.get("/path", (req: Request, res: Response) => {
 async function postRootOnChain(
   adminSecretKey: string,
   contractId: string,
-  rootHex: string
+  rootDec: string
 ): Promise<string> {
   const rpcUrl =
     process.env.SOROBAN_RPC_URL ?? "https://soroban-testnet.stellar.org";
@@ -244,6 +244,8 @@ async function postRootOnChain(
   const rpc = new StellarSdk.rpc.Server(rpcUrl);
   const contract = new StellarSdk.Contract(contractId);
 
+  // tree.root() returns a decimal Fr string; convert to 32-byte big-endian.
+  const rootHex = BigInt(rootDec).toString(16).padStart(64, "0");
   const rootVal = StellarSdk.xdr.ScVal.scvBytes(Buffer.from(rootHex, "hex"));
   const operation = contract.call("post_root", rootVal);
 
