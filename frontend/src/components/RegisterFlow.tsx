@@ -95,6 +95,19 @@ export function RegisterFlow({ oauthError }: { oauthError?: string }) {
     else setEmailSent(true);
   }
 
+  async function linkProvider(provider: "google" | "x") {
+    setError("");
+    setWorking("oauth");
+    const { error: err } = await supabase.auth.linkIdentity({
+      provider,
+      options: { redirectTo: `${window.location.origin}/auth/callback` },
+    });
+    if (err) {
+      setError(err.message);
+      setWorking("");
+    }
+  }
+
   async function signOut() {
     await supabase.auth.signOut();
     setMe(null);
@@ -369,6 +382,64 @@ export function RegisterFlow({ oauthError }: { oauthError?: string }) {
               </span>{" "}
               can claim them.
             </p>
+          </div>
+
+          <div className="rounded-2xl border border-fog bg-white p-5">
+            <p className="text-sm font-medium">Handles that can receive payments</p>
+            <p className="mt-1 text-xs text-graphite">
+              Anyone sending to any of these lands in your inbox.
+            </p>
+            <div className="mt-3 space-y-1.5">
+              {handles.map((h) => (
+                <p
+                  key={`${h.provider}:${h.handle}`}
+                  className="flex items-center gap-2 text-sm"
+                >
+                  <CheckIcon className="h-4 w-4 shrink-0 text-signal" />
+                  <span className="text-graphite">{providerLabel(h.provider)}</span>
+                  <span className="truncate font-medium">{h.handle}</span>
+                </p>
+              ))}
+            </div>
+            {(() => {
+              const linked = new Set(handles.map((h) => h.provider));
+              const missing = (
+                [
+                  { key: "google" as const, label: "Google" },
+                  { key: "x" as const, label: "X (Twitter)" },
+                ] as const
+              ).filter(
+                (p) =>
+                  !(
+                    linked.has(p.key) ||
+                    (p.key === "x" &&
+                      (linked.has("twitter") || linked.has("twitter_v2")))
+                  )
+              );
+              if (missing.length === 0) return null;
+              return (
+                <div className="mt-4 space-y-2 border-t border-fog pt-4">
+                  <p className="text-xs text-graphite">Add another handle</p>
+                  {missing.map((p) => (
+                    <button
+                      key={p.key}
+                      onClick={() => linkProvider(p.key)}
+                      disabled={working === "oauth"}
+                      className="flex w-full items-center gap-2 rounded-full border border-fog bg-white px-4 py-2.5 text-sm font-medium transition-colors hover:border-graphite disabled:opacity-50"
+                    >
+                      {working === "oauth" ? (
+                        <LoaderIcon className="h-4 w-4 animate-spin" />
+                      ) : p.key === "google" ? (
+                        <GoogleIcon className="h-4 w-4" />
+                      ) : (
+                        <XBrandIcon className="h-4 w-4" />
+                      )}
+                      Connect {p.label}
+                    </button>
+                  ))}
+                </div>
+              );
+            })()}
           </div>
           <div className="flex gap-2">
             <Link
