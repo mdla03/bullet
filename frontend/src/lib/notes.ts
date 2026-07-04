@@ -136,10 +136,16 @@ export async function fetchNotes(keys: BulletKeys): Promise<InboxNote[]> {
   return notes;
 }
 
-/** Stamp a note claimed so it renders as history instead of claimable. */
+/** Stamp a note claimed so it renders as history instead of claimable.
+ * Goes through the backend since notes.UPDATE is RLS-locked to service_role. */
 export async function markClaimed(id: string): Promise<void> {
-  await supabase
-    .from("notes")
-    .update({ claimed_at: new Date().toISOString() })
-    .eq("id", id);
+  const { apiFetch } = await import("./api");
+  try {
+    await apiFetch("/notes/mark-claimed", {
+      method: "POST",
+      body: JSON.stringify({ noteId: id }),
+    });
+  } catch {
+    // Best-effort. The on-chain nullifier is the real record.
+  }
 }
