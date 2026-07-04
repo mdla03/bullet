@@ -168,6 +168,17 @@ app.get("/invites", requireAuth, async (req: Request, res: Response) => {
   res.json({ items });
 });
 
+// ── /notes/mark-claimed: caller-owned note only (writes are RLS-locked) ───────
+
+app.post("/notes/mark-claimed", requireAuth, async (req: Request, res: Response) => {
+  const userId = (req as Request & { userId?: string }).userId!;
+  const { noteId } = req.body as { noteId?: string };
+  if (!noteId) return void badRequest(res, "noteId required");
+  const ok = await store.markNoteClaimedIfOwned(userId, noteId);
+  if (!ok) return void res.status(404).json({ error: "not_yours_or_missing" });
+  res.json({ ok: true });
+});
+
 // ── /commitment ───────────────────────────────────────────────────────────────
 
 app.post("/commitment", async (req: Request, res: Response) => {
