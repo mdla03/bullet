@@ -14,6 +14,7 @@ import {
   type InboxNote,
 } from "@/lib/notes";
 import { claimNote } from "@/lib/claim_tx";
+import { isNullifierUsed, nullifierHexFromSecret } from "@/lib/nullifier";
 import {
   CheckIcon,
   ExternalLinkIcon,
@@ -127,7 +128,7 @@ export function Inbox() {
 
       setAddress(res.address);
       setKeys(derived);
-      setNotes(await fetchNotes(derived));
+      await loadNotes(derived, res.address);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -139,12 +140,62 @@ export function Inbox() {
     if (!keys) return;
     setRefreshing(true);
     try {
-      setNotes(await fetchNotes(keys));
+      await loadNotes(keys, address);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setRefreshing(false);
     }
+  }
+
+  // Fetch notes, then reconcile against the chain: a note whose nullifier is
+  // already spent (e.g. claimed via its backup link) is stamped claimed so it
+  // never shows a Claim button that would fail with NullifierUsed (#6).
+  async function loadNotes(k: BulletKeys, source: string) {
+    const list = await fetchNotes(k);
+    const spent = await Promise.all(
+      list.map(async (n) => {
+        if (n.claimedAt) return false;
+        try {
+          return await isNullifierUsed(
+            source,
+            nullifierHexFromSecret(n.payload.secret)
+          );
+        } catch {
+          return false; // chain read failed: leave claimable, submit will guard
+        }
+      })
+    );
+    const now = new Date().toISOString();
+    setNotes(
+      list.map((n, i) => {
+        if (spent[i] && !n.claimedAt) {
+          markClaimed(n.id); // best-effort DB catch-up
+          return { ...n, claimedAt: now };
+        }
+        return n;
+      })
+    );
+  }
+
+  // A note is already claimed on-chain (backup link, or a prior tab). Reflect
+  // it as claimed instead of surfacing the raw contract error.
+  function markNoteSpent(id: string) {
+    markClaimed(id); // best-effort DB catch-up
+    setNotes((ns) =>
+      ns
+        ? ns.map((n) =>
+            n.id === id
+              ? { ...n, claimedAt: n.claimedAt ?? new Date().toISOString() }
+              : n
+          )
+        : ns
+    );
+    setClaims((c) => {
+      const next = { ...c };
+      delete next[id];
+      return next;
+    });
   }
 
   async function claimOne(note: InboxNote): Promise<boolean> {
@@ -203,7 +254,14 @@ export function Inbox() {
       markClaimed(note.id); // best-effort; the nullifier is the real record
       return true;
     } catch (e) {
-      set({ state: "error", message: e instanceof Error ? e.message : String(e) });
+      const msg = e instanceof Error ? e.message : String(e);
+      // Already spent (e.g. claimed via backup link). Not a real failure:
+      // render it as claimed and let a "Claim all" queue keep going.
+      if (/Error\(Contract, #6\)|NullifierUsed/i.test(msg)) {
+        markNoteSpent(note.id);
+        return true;
+      }
+      set({ state: "error", message: msg });
       return false;
     }
   }
