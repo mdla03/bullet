@@ -81,13 +81,13 @@ export default function IslandNav() {
             </button>
           </>
         )}
-        {/* ponytail: undefined = loading; don't flash Sign up before we know. */}
+        {/* ponytail: undefined = loading; don't flash Sign in before we know. */}
         {session === null && (
           <Link
             href="/register"
             className="rounded-full bg-paper px-3.5 py-1.5 text-sm font-semibold text-ink transition-colors hover:bg-white"
           >
-            Sign up
+            Sign in
           </Link>
         )}
       </div>

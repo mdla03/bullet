@@ -1,6 +1,6 @@
 import { RegisterFlow } from "@/components/RegisterFlow";
 
-export const metadata = { title: "Sign up · bullet" };
+export const metadata = { title: "Sign in · bullet" };
 
 export default async function RegisterPage({
   searchParams,

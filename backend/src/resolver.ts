@@ -5,7 +5,6 @@ import type { ResolveResult } from "@zeekpay/shared";
 import * as store from "./store.js";
 import * as commitment from "./commitment.js";
 import * as leaves from "./leaves.js";
-import * as prove from "./prove.js";
 import * as tree from "./tree.js";
 import { requireAuth } from "./supabase.js";
 import { verifyLinkWalletSig } from "./verify.js";
@@ -98,7 +97,7 @@ app.post("/wallet/link", requireAuth, async (req: Request, res: Response) => {
 
 // ── /commitment ───────────────────────────────────────────────────────────────
 
-app.post("/commitment", (req: Request, res: Response) => {
+app.post("/commitment", async (req: Request, res: Response) => {
   const { secret, recipientDigest, denom } = req.body as {
     secret?: string;
     recipientDigest?: string;
@@ -106,45 +105,46 @@ app.post("/commitment", (req: Request, res: Response) => {
   };
   if (!secret || !recipientDigest || !denom) {
     return void badRequest(res, "secret, recipientDigest, denom required");
-  }
-  try {
-    const c = commitment.computeCommitment(secret, recipientDigest, denom);
-    const leafIndex = leaves.insert(c);
-    tree.onLeafInserted(c, leafIndex);
-    res.json({ commitment: c, leafIndex, root: tree.root() });
-  } catch (e) {
-    res.status(400).json({ error: "compute_failed", detail: String(e) });
-  }
-});
-
-// ── /prove ────────────────────────────────────────────────────────────────────
-
-app.post("/prove", async (req: Request, res: Response) => {
-  if (!prove.isProveReady()) {
-    return void res.status(503).json({
-      error: "circuits_not_built",
-      detail: "run pnpm build:circuits first",
-    });
   }
   const adminKey = process.env.ZEEKPAY_ADMIN_KEY;
   const contractId = process.env.ZEEKPAY_CONTRACT_ID ?? "";
   if (!adminKey || !contractId) {
     return void res.status(503).json({ error: "admin_not_configured" });
   }
-  const { secret, recipientDigest, denom } = req.body as {
-    secret?: string;
-    recipientDigest?: string;
-    denom?: string;
-  };
-  if (!secret || !recipientDigest || !denom) {
-    return void badRequest(res, "secret, recipientDigest, denom required");
+  try {
+    const c = commitment.computeCommitment(secret, recipientDigest, denom);
+    const leafIndex = leaves.insert(c);
+    tree.onLeafInserted(c, leafIndex);
+    const root = tree.root();
+    // Post the new root on-chain here so the client can prove against a known
+    // root at claim time. (Was previously done inside /prove.)
+    const postRootHash = await postRootOnChain(adminKey, contractId, root);
+    res.json({ commitment: c, leafIndex, root, postRootHash });
+  } catch (e) {
+    res.status(400).json({ error: "compute_failed", detail: String(e) });
+  }
+});
+
+// ── /path: return Merkle path for a known commitment (browser-side prover) ────
+
+app.get("/path", (req: Request, res: Response) => {
+  const c = String(req.query.commitment ?? "").trim();
+  if (!c) return void badRequest(res, "commitment query param required");
+  const leafIndex = leaves.indexOf(c);
+  if (leafIndex === -1) {
+    return void res
+      .status(404)
+      .json({ error: "unknown_commitment", detail: "commitment not in tree" });
   }
   try {
-    const result = prove.generateProof(secret, recipientDigest, denom);
-    const postRootHash = await postRootOnChain(adminKey, contractId, result.root);
-    res.json({ ...result, postRootHash });
+    const p = tree.pathFor(leafIndex);
+    res.json({
+      root: p.root,
+      pathElements: p.pathElements,
+      pathIndices: p.pathIndices,
+    });
   } catch (e) {
-    res.status(400).json({ error: "prove_failed", detail: String(e) });
+    res.status(400).json({ error: "path_failed", detail: String(e) });
   }
 });
 

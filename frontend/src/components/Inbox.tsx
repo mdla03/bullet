@@ -20,9 +20,7 @@ import {
   LoaderIcon,
   WalletIcon,
 } from "@/components/icons";
-
-const RESOLVER_URL =
-  process.env.NEXT_PUBLIC_RESOLVER_URL ?? "http://localhost:3001";
+import { proveBrowser } from "@/lib/prove_browser";
 
 interface WalletRow {
   stellar_address: string;
@@ -155,29 +153,11 @@ export function Inbox() {
 
     try {
       set({ state: "proving" });
-      const proveRes = await fetch(`${RESOLVER_URL}/prove`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          secret: BigInt("0x" + p.secret).toString(),
-          recipientDigest: p.recipientDigest,
-          denom: String(p.denom),
-        }),
-      });
-      if (!proveRes.ok) {
-        const err = (await proveRes.json().catch(() => ({}))) as {
-          detail?: string;
-        };
-        throw new Error(`Proof generation failed: ${err.detail ?? proveRes.status}`);
-      }
-      const { proof_a, proof_b, proof_c, nullifier, root } =
-        (await proveRes.json()) as {
-          proof_a: string;
-          proof_b: string;
-          proof_c: string;
-          nullifier: string;
-          root: string;
-        };
+      const { proof_a, proof_b, proof_c, nullifier, root } = await proveBrowser(
+        BigInt("0x" + p.secret).toString(),
+        p.recipientDigest,
+        String(p.denom)
+      );
 
       set({ state: "signing" });
       const { signTransaction } = await import("@stellar/freighter-api");
