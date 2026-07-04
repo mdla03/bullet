@@ -73,30 +73,34 @@ export type AttachWalletResult =
   | { ok: true; wallet: Wallet }
   | { conflict: true; detail: string };
 
-/** Insert/upsert wallet for a user. stellar_address is globally unique. */
+/** Insert/upsert wallet for a user. If the wallet is already attached to
+ * another user, transfer it: valid Freighter signature over the challenge
+ * proves the caller controls the private key, which is the only real
+ * ownership test (verifyLinkWalletSig at the route layer already checked). */
 export async function attachWallet(
   userId: string,
   wallet: { stellar_address: string; bullet_pubkey: string; signature: string }
 ): Promise<AttachWalletResult> {
+  const row = {
+    user_id: userId,
+    stellar_address: wallet.stellar_address,
+    bullet_pubkey: wallet.bullet_pubkey,
+    signature: wallet.signature,
+  };
+
+  // Detach from any prior owner of this address.
+  const { error: delErr } = await serviceClient
+    .from("wallets")
+    .delete()
+    .eq("stellar_address", wallet.stellar_address)
+    .neq("user_id", userId);
+  if (delErr) return { conflict: true, detail: delErr.message };
+
   const { data, error } = await serviceClient
     .from("wallets")
-    .upsert(
-      {
-        user_id: userId,
-        stellar_address: wallet.stellar_address,
-        bullet_pubkey: wallet.bullet_pubkey,
-        signature: wallet.signature,
-      },
-      { onConflict: "user_id" }
-    )
+    .upsert(row, { onConflict: "user_id" })
     .select("*")
     .single();
-  if (error) {
-    // 23505 = unique_violation (someone else already claimed this stellar_address)
-    if (error.code === "23505") {
-      return { conflict: true, detail: "stellar_address already attached to another user" };
-    }
-    return { conflict: true, detail: error.message };
-  }
+  if (error) return { conflict: true, detail: error.message };
   return { ok: true, wallet: data as Wallet };
 }
