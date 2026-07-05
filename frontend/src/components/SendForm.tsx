@@ -476,11 +476,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
             <p className="truncate font-medium">{recipient.trim()}</p>
             <p className="flex items-center gap-1 text-xs text-signal">
               <ShieldCheckIcon className="h-3.5 w-3.5" />
-              Registered on Bullet ·{" "}
-              <span className="font-mono text-graphite">
-                {resolved?.stellarAddress?.slice(0, 4)}…
-                {resolved?.stellarAddress?.slice(-4)}
-              </span>
+              Registered on Bullet
             </p>
           </div>
           <button
