@@ -110,7 +110,12 @@ export function RegisterFlow({ oauthError }: { oauthError?: string }) {
       err = retry.error;
     }
     setWorking("");
-    if (err) setError(err.message);
+    if (err)
+      setError(
+        err.message?.trim()
+          ? err.message
+          : "Couldn't send the link. Email delivery is misconfigured. Try again shortly."
+      );
     else setEmailSent(true);
   }
 
