@@ -15,13 +15,25 @@ const app = express();
 // CORS allowlist (M3). Reflecting any origin with credentials is unsafe and
 // technically invalid; restrict to the configured frontend(s). Extra origins
 // can be added via CORS_ALLOWED_ORIGINS (comma-separated).
-const ALLOWED_ORIGINS = [
-  process.env.FRONTEND_URL ?? "http://localhost:3000",
-  process.env.NEXT_PUBLIC_FRONTEND_URL,
-  ...(process.env.CORS_ALLOWED_ORIGINS?.split(",") ?? []),
-]
-  .map((o) => o?.trim())
-  .filter((o): o is string => !!o);
+// Known first-party frontends are always allowed so a missing/misconfigured
+// env var can't CORS-block the real site; env vars add to (not replace) these.
+const DEFAULT_ORIGINS = [
+  "http://localhost:3000",
+  "https://sendbullet.xyz",
+  "https://bullet-frontend.vercel.app",
+];
+const ALLOWED_ORIGINS = Array.from(
+  new Set(
+    [
+      ...DEFAULT_ORIGINS,
+      process.env.FRONTEND_URL,
+      process.env.NEXT_PUBLIC_FRONTEND_URL,
+      ...(process.env.CORS_ALLOWED_ORIGINS?.split(",") ?? []),
+    ]
+      .map((o) => o?.trim())
+      .filter((o): o is string => !!o)
+  )
+);
 app.use(
   cors({
     origin(origin, cb) {
