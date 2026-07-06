@@ -76,21 +76,29 @@ export async function pollOnce(): Promise<{ inserted: number }> {
   }
   if (start > latest.sequence) return { inserted: 0 }; // nothing new yet
 
+  const filters = [{ type: "contract" as const, contractIds: [CONTRACT_ID] }];
   let res: StellarSdk.rpc.Api.GetEventsResponse;
   try {
-    res = await rpc.getEvents({
-      startLedger: start,
-      filters: [{ type: "contract", contractIds: [CONTRACT_ID] }],
-      limit: 200,
-    });
+    res = await rpc.getEvents({ startLedger: start, filters, limit: 200 });
   } catch (e) {
-    // Usually: cursor fell outside the RPC retention window. Clamp forward to
-    // resume from live traffic. Historic deposits already persisted in Postgres
-    // stay intact; only un-indexed pre-retention deposits would need a manual
-    // reindex from a retained ledger.
-    console.error("[indexer] getEvents failed, clamping cursor:", String(e).slice(0, 300));
-    await store.setCursor(latest.sequence);
-    return { inserted: 0 };
+    // Usually: `start` is below the RPC's event-retention window. Do NOT jump
+    // the cursor forward to latest — that silently skips every deposit between
+    // `start` and now. Instead clamp UP to the oldest retained ledger and retry
+    // from there, so we index as much history as the RPC still holds. Deposits
+    // older than retention are unfetchable via RPC (recover them from Postgres,
+    // already the source of truth, or a manual reindex from a retained ledger).
+    console.warn("[indexer] getEvents failed; clamping up to oldest retained:", String(e).slice(0, 200));
+    try {
+      const probe = await rpc.getEvents({ startLedger: latest.sequence, filters, limit: 1 });
+      const retryStart = Math.max(start, probe.oldestLedger);
+      res = await rpc.getEvents({ startLedger: retryStart, filters, limit: 200 });
+      console.warn(`[indexer] resumed from oldest retained ledger ${retryStart}`);
+    } catch (e2) {
+      // Still failing (RPC hiccup, etc.). Leave the cursor untouched so the
+      // next poll retries the same range rather than skipping it.
+      console.error("[indexer] getEvents retry failed; cursor unchanged:", String(e2).slice(0, 200));
+      return { inserted: 0 };
+    }
   }
 
   let inserted = 0;
