@@ -47,6 +47,13 @@ export function count(): number {
   return leaves.length;
 }
 
+/** Reset the in-memory + on-disk list. Used when re-hydrating from the durable
+ *  Postgres store (the source of truth) so memory exactly matches the DB. */
+export function clearAll(): void {
+  leaves = [];
+  persist();
+}
+
 // test-only: wipe in-memory + persisted state.
 export function _resetForTests(): void {
   leaves = [];
