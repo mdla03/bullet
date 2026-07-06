@@ -26,8 +26,9 @@ app.use(
   cors({
     origin(origin, cb) {
       // Non-browser clients (curl, server-to-server) send no Origin; allow.
-      if (!origin || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
-      cb(new Error("origin not allowed"));
+      // Disallowed browser origins get no ACAO header (the browser blocks the
+      // response). Return false rather than throwing, which would 500.
+      cb(null, !origin || ALLOWED_ORIGINS.includes(origin));
     },
     credentials: true,
   })
