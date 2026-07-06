@@ -20,7 +20,7 @@ import {
 } from "@/lib/register";
 
 const PROVIDERS = [
-  { key: "google", label: "Google", icon: GoogleIcon, enabled: false },
+  { key: "google", label: "Google", icon: GoogleIcon, enabled: true },
   { key: "x", label: "X (Twitter)", icon: XBrandIcon, enabled: true },
 ] as const;
 
