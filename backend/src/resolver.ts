@@ -1,20 +1,38 @@
 import { fileURLToPath } from "node:url";
-import express, { type Request, type Response } from "express";
+import express, { type Request, type Response, type NextFunction } from "express";
 import cors from "cors";
 import type { ResolveResult } from "@zeekpay/shared";
 import * as store from "./store.js";
-import * as commitment from "./commitment.js";
 import * as leaves from "./leaves.js";
 import * as tree from "./tree.js";
 import * as invite from "./invite.js";
+import * as indexer from "./indexer.js";
 import { requireAuth } from "./supabase.js";
 import { verifyLinkWalletSig } from "./verify.js";
 import * as StellarSdk from "@stellar/stellar-sdk";
 
 const app = express();
-// ponytail: demo, reflect any origin. Bearer-token auth means no CSRF surface.
-// Tighten to an allowlist post-demo.
-app.use(cors({ origin: true, credentials: true }));
+// CORS allowlist (M3). Reflecting any origin with credentials is unsafe and
+// technically invalid; restrict to the configured frontend(s). Extra origins
+// can be added via CORS_ALLOWED_ORIGINS (comma-separated).
+const ALLOWED_ORIGINS = [
+  process.env.FRONTEND_URL ?? "http://localhost:3000",
+  process.env.NEXT_PUBLIC_FRONTEND_URL,
+  ...(process.env.CORS_ALLOWED_ORIGINS?.split(",") ?? []),
+]
+  .map((o) => o?.trim())
+  .filter((o): o is string => !!o);
+app.use(
+  cors({
+    origin(origin, cb) {
+      // Non-browser clients (curl, server-to-server) send no Origin; allow.
+      // Disallowed browser origins get no ACAO header (the browser blocks the
+      // response). Return false rather than throwing, which would 500.
+      cb(null, !origin || ALLOWED_ORIGINS.includes(origin));
+    },
+    credentials: true,
+  })
+);
 app.use(express.json());
 
 const CONTRACT_ADDRESS = process.env.ZEEKPAY_CONTRACT_ID ?? "";
@@ -31,9 +49,39 @@ function badRequest(res: Response, detail: string): void {
   res.status(400).json({ error: "invalid_input", detail });
 }
 
+// ── rate limiter (M1) ─────────────────────────────────────────────────────────
+// In-memory sliding window keyed by userId (falls back to IP). Guards funder-
+// draining routes like /invite/prepare, which funds a custody account with real
+// XLM per call. For a single-process demo this is enough; a multi-instance
+// deploy needs a shared store (Redis).
+const rateBuckets = new Map<string, number[]>();
+export function rateLimit(maxPerWindow: number, windowMs: number) {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const key =
+      (req as Request & { userId?: string }).userId ?? req.ip ?? "anon";
+    const now = Date.now();
+    const hits = (rateBuckets.get(key) ?? []).filter((t) => now - t < windowMs);
+    if (hits.length >= maxPerWindow) {
+      res
+        .status(429)
+        .json({ error: "rate_limited", detail: "Too many requests. Slow down and retry shortly." });
+      return;
+    }
+    hits.push(now);
+    rateBuckets.set(key, hits);
+    next();
+  };
+}
+
 // ── health + resolve (public) ─────────────────────────────────────────────────
 
 app.get("/health", (_req: Request, res: Response) => {
+  // L1: keep the public health probe minimal. The deploy diagnostics (admin
+  // pubkey, RPC URL, passphrase, node version) leak fingerprinting info, so
+  // they are gated behind HEALTH_DEBUG=1 for local/staging troubleshooting.
+  if (process.env.HEALTH_DEBUG !== "1") {
+    return void res.json({ ok: true });
+  }
   let adminPub: string | null = null;
   let adminError: string | null = null;
   try {
@@ -120,7 +168,7 @@ app.post("/wallet/link", requireAuth, async (req: Request, res: Response) => {
 
 // ── /invite: send-to-unregistered flow ────────────────────────────────────────
 
-app.post("/invite/prepare", requireAuth, async (_req: Request, res: Response) => {
+app.post("/invite/prepare", requireAuth, rateLimit(5, 10 * 60 * 1000), async (_req: Request, res: Response) => {
   try {
     const custody = await invite.createCustodyAccount();
     res.json({
@@ -179,44 +227,50 @@ app.post("/notes/mark-claimed", requireAuth, async (req: Request, res: Response)
   res.json({ ok: true });
 });
 
+// ── /notes: deliver an encrypted inbox note (M4) ──────────────────────────────
+// notes INSERT is RLS-locked to the service role, so browsers deliver through
+// here instead of inserting directly (which let anyone spam any inbox). We
+// validate the ciphertext shape, require the recipient to be a registered
+// Bullet key, and rate-limit. No auth: an anonymous sender may still deliver to
+// a registered recipient's inbox, but only to real keys and not in bulk.
+const HEX_RE = /^[0-9a-f]+$/;
+const NONCE_RE = /^[0-9a-f]{48}$/; // 24-byte nacl.box nonce
+
+app.post("/notes", rateLimit(60, 10 * 60 * 1000), async (req: Request, res: Response) => {
+  const { recipientPubkey, ephemeralPubkey, nonce, ciphertext } = req.body as {
+    recipientPubkey?: string;
+    ephemeralPubkey?: string;
+    nonce?: string;
+    ciphertext?: string;
+  };
+  if (!recipientPubkey || !ZEEKPAY_KEY_RE.test(recipientPubkey))
+    return void badRequest(res, "recipientPubkey must be 64-char lowercase hex");
+  if (!ephemeralPubkey || !ZEEKPAY_KEY_RE.test(ephemeralPubkey))
+    return void badRequest(res, "ephemeralPubkey must be 64-char lowercase hex");
+  if (!nonce || !NONCE_RE.test(nonce))
+    return void badRequest(res, "nonce must be 48-char lowercase hex");
+  if (!ciphertext || !HEX_RE.test(ciphertext) || ciphertext.length > 8192)
+    return void badRequest(res, "ciphertext must be lowercase hex (<= 8192 chars)");
+
+  if (!(await store.pubkeyIsRegistered(recipientPubkey)))
+    return void res.status(404).json({ error: "recipient_not_registered" });
+
+  const ok = await store.insertNote({
+    recipient_pubkey: recipientPubkey,
+    ephemeral_pubkey: ephemeralPubkey,
+    nonce,
+    ciphertext,
+  });
+  if (!ok) return void res.status(500).json({ error: "note_insert_failed" });
+  res.json({ ok: true });
+});
+
 // ── /commitment ───────────────────────────────────────────────────────────────
 
-app.post("/commitment", async (req: Request, res: Response) => {
-  const { secret, recipientDigest, denom } = req.body as {
-    secret?: string;
-    recipientDigest?: string;
-    denom?: string;
-  };
-  if (!secret || !recipientDigest || !denom) {
-    return void badRequest(res, "secret, recipientDigest, denom required");
-  }
-  const adminKey = process.env.ZEEKPAY_ADMIN_KEY;
-  const contractId = process.env.ZEEKPAY_CONTRACT_ID ?? "";
-  if (!adminKey || !contractId) {
-    return void res.status(503).json({ error: "admin_not_configured" });
-  }
-  try {
-    const c = commitment.computeCommitment(secret, recipientDigest, denom);
-    const leafIndex = leaves.insert(c);
-    tree.onLeafInserted(c, leafIndex);
-    const root = tree.root();
-    // post_root on-chain is required for claims to work, but we treat a trap
-    // as non-fatal so the sender still gets a claim link / can retry. If this
-    // logs consistently, the on-chain contract's post_root state needs
-    // attention (usually admin key mismatch or TTL bump exceeds network max).
-    let postRootHash: string | null = null;
-    let postRootError: string | null = null;
-    try {
-      postRootHash = await postRootOnChain(adminKey, contractId, root);
-    } catch (e) {
-      postRootError = String(e).slice(0, 800);
-      console.error("[/commitment] post_root failed (non-fatal):", postRootError);
-    }
-    res.json({ commitment: c, leafIndex, root, postRootHash, postRootError });
-  } catch (e) {
-    res.status(400).json({ error: "compute_failed", detail: String(e) });
-  }
-});
+// NOTE: the old POST /commitment endpoint was removed. The commitment is now
+// computed entirely in the browser (frontend/src/lib/commitment.ts) so the
+// claim secret never reaches the backend. The Merkle tree is populated only by
+// the deposit indexer from confirmed on-chain deposits (see indexer.ts, C1).
 
 // ── /path: return Merkle path for a known commitment (browser-side prover) ────
 
@@ -241,50 +295,14 @@ app.get("/path", (req: Request, res: Response) => {
   }
 });
 
-async function postRootOnChain(
-  adminSecretKey: string,
-  contractId: string,
-  rootDec: string
-): Promise<string> {
-  const rpcUrl =
-    process.env.SOROBAN_RPC_URL ?? "https://soroban-testnet.stellar.org";
-  const networkPassphrase =
-    process.env.NETWORK_PASSPHRASE ?? StellarSdk.Networks.TESTNET;
-
-  const keypair = StellarSdk.Keypair.fromSecret(adminSecretKey);
-  const rpc = new StellarSdk.rpc.Server(rpcUrl);
-  const contract = new StellarSdk.Contract(contractId);
-
-  // tree.root() returns a decimal Fr string; convert to 32-byte big-endian.
-  const rootHex = BigInt(rootDec).toString(16).padStart(64, "0");
-  const rootVal = StellarSdk.xdr.ScVal.scvBytes(Buffer.from(rootHex, "hex"));
-  const operation = contract.call("post_root", rootVal);
-
-  const account = await rpc.getAccount(keypair.publicKey());
-  const tx = new StellarSdk.TransactionBuilder(account, {
-    fee: "1000000",
-    networkPassphrase,
-  })
-    .addOperation(operation)
-    .setTimeout(60)
-    .build();
-
-  const prepared = await rpc.prepareTransaction(tx);
-  prepared.sign(keypair);
-  const result = await rpc.sendTransaction(prepared);
-  if (result.status === "ERROR") {
-    throw new Error(`sendTransaction: ${JSON.stringify(result.errorResult)}`);
-  }
-  const final = await rpc.pollTransaction(result.hash, { attempts: 20 });
-  if (final.status !== "SUCCESS") throw new Error(`post_root tx ${final.status}`);
-  return result.hash;
-}
-
 // ── start ─────────────────────────────────────────────────────────────────────
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   app.listen(PORT, () => {
     console.log(`[resolver] listening on http://localhost:${PORT}`);
+    // The deposit indexer is the sole writer of the Merkle tree (see C1 in
+    // indexer.ts): it inserts leaves only for confirmed on-chain deposits.
+    indexer.start();
   });
 }
 
