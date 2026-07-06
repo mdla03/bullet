@@ -230,13 +230,15 @@ fn unknown_root_rejected() {
     let pa = BytesN::from_array(&s.env, &[0u8; 96]);
     let pb = BytesN::from_array(&s.env, &[0u8; 192]);
     let pc = BytesN::from_array(&s.env, &[0u8; 96]);
+    // Root must be canonical (< r) so it passes the field-element check and
+    // reaches the unknown-root branch. 0x11..11 is < r and was never posted.
     let err = s
         .client
         .try_claim(
             &pa,
             &pb,
             &pc,
-            &b32(&s.env, 0x99),
+            &b32(&s.env, 0x11),
             &b32(&s.env, 0x22),
             &recipient,
             &Denom::Ten,
