@@ -2,19 +2,19 @@
 //
 // SECURITY (C1): claim() pays out to anyone who proves membership under a
 // contract-known root. That is only sound if every leaf in the tree
-// corresponds to a real on-chain deposit. Previously the tree was filled by an
-// open /commitment endpoint with no deposit check, so anyone could add a leaf
-// and claim funds they never deposited (pool drain). This indexer closes that:
-// it polls the contract's `deposit` events over Soroban RPC and inserts a leaf
-// ONLY for a confirmed on-chain deposit, then posts the resulting root. No
-// other code path may insert leaves or post roots.
+// corresponds to a real on-chain deposit. This indexer inserts a leaf ONLY for
+// a confirmed on-chain `deposit` event, then posts the resulting root.
+//
+// DURABILITY: leaves + ledger cursor live in Postgres (merkle_store), NOT on
+// local disk. An ephemeral host (Railway) wipes local files on redeploy, which
+// previously desynced the tree and made deposited notes unclaimable. On boot we
+// hydrate the in-memory tree from Postgres and write every new leaf through to
+// it, so restarts/redeploys can't lose the tree.
 
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import * as StellarSdk from "@stellar/stellar-sdk";
 import * as leaves from "./leaves.js";
 import * as tree from "./tree.js";
+import * as store from "./merkle_store.js";
 
 const RPC_URL =
   process.env.SOROBAN_RPC_URL ?? "https://soroban-testnet.stellar.org";
@@ -23,33 +23,15 @@ const NETWORK_PASSPHRASE =
 const CONTRACT_ID = process.env.ZEEKPAY_CONTRACT_ID ?? "";
 const ADMIN_KEY = process.env.ZEEKPAY_ADMIN_KEY ?? "";
 const POLL_MS = parseInt(process.env.INDEXER_POLL_MS ?? "5000", 10);
-// How far back to scan on a cold start (no cursor). Deposits older than this
-// window at first boot must be backfilled manually via reprocessFrom().
+// First ledger to scan when the DB has no cursor yet (fresh deploy). Set this
+// to around the contract's creation ledger so the very first run backfills all
+// historic deposits (bounded by RPC event retention). Falls back to a ~1-day
+// look-back if unset.
+const START_LEDGER = parseInt(process.env.INDEXER_START_LEDGER ?? "0", 10);
 const COLD_START_BACKFILL = parseInt(
   process.env.INDEXER_COLD_START_BACKFILL ?? "17280", // ~1 day of ledgers
   10
 );
-
-const DATA_DIR = path.join(fileURLToPath(import.meta.url), "../../data");
-const CURSOR_FILE =
-  process.env.INDEXER_CURSOR_OVERRIDE ??
-  path.join(DATA_DIR, "indexer-cursor.json");
-
-function loadCursor(): number | null {
-  try {
-    const raw = JSON.parse(fs.readFileSync(CURSOR_FILE, "utf8")) as {
-      lastLedger?: number;
-    };
-    return typeof raw.lastLedger === "number" ? raw.lastLedger : null;
-  } catch {
-    return null;
-  }
-}
-
-function saveCursor(lastLedger: number): void {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(CURSOR_FILE, JSON.stringify({ lastLedger }));
-}
 
 /** 32-byte big-endian commitment -> decimal Fr string (the leaf format). */
 function bytesToDecimal(bytes: Uint8Array): string {
@@ -60,20 +42,38 @@ function bytesToDecimal(bytes: Uint8Array): string {
 }
 
 let running = false;
+let hydrated = false;
 let timer: ReturnType<typeof setTimeout> | null = null;
 
+/** Rebuild the in-memory tree from the durable Postgres store. Idempotent. */
+export async function hydrate(): Promise<void> {
+  const all = await store.loadLeaves();
+  leaves.clearAll();
+  tree.rebuild();
+  for (let i = 0; i < all.length; i++) {
+    const idx = leaves.insert(all[i]);
+    tree.onLeafInserted(all[i], idx);
+  }
+  hydrated = true;
+  console.log(`[indexer] hydrated ${all.length} leaf(s) from Postgres`);
+}
+
 /** One poll: fetch new deposit events since the cursor, insert confirmed
- *  leaves, post the root if anything changed, advance the cursor. Idempotent —
- *  duplicate events are dropped by leaves.insert()'s dedupe. */
+ *  leaves (in-memory + Postgres), post the root if anything changed, advance
+ *  the cursor. Idempotent — duplicate events are dropped by dedupe. */
 export async function pollOnce(): Promise<{ inserted: number }> {
   if (!CONTRACT_ID) throw new Error("ZEEKPAY_CONTRACT_ID not set");
+  if (!hydrated) await hydrate();
   const rpc = new StellarSdk.rpc.Server(RPC_URL);
 
   const latest = await rpc.getLatestLedger();
-  let start = loadCursor();
-  if (start == null) start = Math.max(1, latest.sequence - COLD_START_BACKFILL);
-  else start = start + 1;
-
+  const cursor = await store.getCursor();
+  let start: number;
+  if (cursor == null) {
+    start = START_LEDGER > 0 ? START_LEDGER : Math.max(1, latest.sequence - COLD_START_BACKFILL);
+  } else {
+    start = cursor + 1;
+  }
   if (start > latest.sequence) return { inserted: 0 }; // nothing new yet
 
   let res: StellarSdk.rpc.Api.GetEventsResponse;
@@ -84,11 +84,12 @@ export async function pollOnce(): Promise<{ inserted: number }> {
       limit: 200,
     });
   } catch (e) {
-    // Most common cause: the cursor fell outside the RPC retention window.
-    // Clamp forward to the latest ledger so we resume from live traffic rather
-    // than looping on an un-servable range. Older deposits need reprocessFrom().
+    // Usually: cursor fell outside the RPC retention window. Clamp forward to
+    // resume from live traffic. Historic deposits already persisted in Postgres
+    // stay intact; only un-indexed pre-retention deposits would need a manual
+    // reindex from a retained ledger.
     console.error("[indexer] getEvents failed, clamping cursor:", String(e).slice(0, 300));
-    saveCursor(latest.sequence);
+    await store.setCursor(latest.sequence);
     return { inserted: 0 };
   }
 
@@ -103,20 +104,17 @@ export async function pollOnce(): Promise<{ inserted: number }> {
       if (!(commitmentBytes instanceof Uint8Array) || commitmentBytes.length === 0)
         continue;
       const dec = bytesToDecimal(commitmentBytes);
-      const existed = leaves.indexOf(dec) !== -1;
+      if (leaves.indexOf(dec) !== -1) continue; // already have it
       const leafIndex = leaves.insert(dec);
-      if (!existed) {
-        tree.onLeafInserted(dec, leafIndex);
-        inserted += 1;
-      }
+      tree.onLeafInserted(dec, leafIndex);
+      await store.appendLeaf(leafIndex, dec); // durable write-through
+      inserted += 1;
     } catch (e) {
       console.error("[indexer] skipped undecodable event:", String(e).slice(0, 200));
     }
   }
 
-  // Advance the cursor past everything we scanned. When the page had events we
-  // trust maxLedger; otherwise jump to latest so we don't rescan empty ranges.
-  saveCursor(res.events.length > 0 ? maxLedger : latest.sequence);
+  await store.setCursor(res.events.length > 0 ? maxLedger : latest.sequence);
 
   if (inserted > 0) {
     await postRoot(tree.root());
@@ -154,9 +152,11 @@ async function postRoot(rootDec: string): Promise<void> {
   if (final.status !== "SUCCESS") throw new Error(`post_root tx ${final.status}`);
 }
 
-/** Force a rescan from a specific ledger (manual backfill / recovery). */
+/** Force a rescan from a specific ledger (manual backfill / recovery). Re-inserts
+ *  any deposits missing from the tree; dedupe makes it safe to re-run. */
 export async function reprocessFrom(ledger: number): Promise<{ inserted: number }> {
-  saveCursor(ledger - 1);
+  if (!hydrated) await hydrate();
+  await store.setCursor(Math.max(0, ledger - 1));
   return pollOnce();
 }
 
@@ -178,7 +178,10 @@ export function start(): void {
       timer = setTimeout(tick, POLL_MS);
     }
   };
-  void tick();
+  // Hydrate from Postgres first, then begin polling.
+  hydrate()
+    .catch((e) => console.error("[indexer] hydrate error:", String(e).slice(0, 400)))
+    .finally(() => void tick());
   console.log(`[indexer] started; polling every ${POLL_MS}ms`);
 }
 
