@@ -7,6 +7,7 @@ import * as commitment from "./commitment.js";
 import * as leaves from "./leaves.js";
 import * as tree from "./tree.js";
 import * as invite from "./invite.js";
+import * as indexer from "./indexer.js";
 import { requireAuth } from "./supabase.js";
 import { verifyLinkWalletSig } from "./verify.js";
 import * as StellarSdk from "@stellar/stellar-sdk";
@@ -181,6 +182,14 @@ app.post("/notes/mark-claimed", requireAuth, async (req: Request, res: Response)
 
 // ── /commitment ───────────────────────────────────────────────────────────────
 
+// Pure commitment computation. SECURITY (C1): this endpoint MUST NOT insert
+// into the Merkle tree or post a root. The tree is populated exclusively by the
+// deposit indexer (indexer.ts) from confirmed on-chain deposits; a leaf that
+// never had a matching deposit can never appear here. This route only echoes
+// the Poseidon commitment so the sender's browser can build the deposit tx.
+// NOTE: `secret` is sent to the backend here purely for the hash. Follow-up:
+// move commitment computation fully client-side (frontend already ships the
+// same Poseidon) so the backend never sees the claim secret.
 app.post("/commitment", async (req: Request, res: Response) => {
   const { secret, recipientDigest, denom } = req.body as {
     secret?: string;
@@ -190,29 +199,9 @@ app.post("/commitment", async (req: Request, res: Response) => {
   if (!secret || !recipientDigest || !denom) {
     return void badRequest(res, "secret, recipientDigest, denom required");
   }
-  const adminKey = process.env.ZEEKPAY_ADMIN_KEY;
-  const contractId = process.env.ZEEKPAY_CONTRACT_ID ?? "";
-  if (!adminKey || !contractId) {
-    return void res.status(503).json({ error: "admin_not_configured" });
-  }
   try {
     const c = commitment.computeCommitment(secret, recipientDigest, denom);
-    const leafIndex = leaves.insert(c);
-    tree.onLeafInserted(c, leafIndex);
-    const root = tree.root();
-    // post_root on-chain is required for claims to work, but we treat a trap
-    // as non-fatal so the sender still gets a claim link / can retry. If this
-    // logs consistently, the on-chain contract's post_root state needs
-    // attention (usually admin key mismatch or TTL bump exceeds network max).
-    let postRootHash: string | null = null;
-    let postRootError: string | null = null;
-    try {
-      postRootHash = await postRootOnChain(adminKey, contractId, root);
-    } catch (e) {
-      postRootError = String(e).slice(0, 800);
-      console.error("[/commitment] post_root failed (non-fatal):", postRootError);
-    }
-    res.json({ commitment: c, leafIndex, root, postRootHash, postRootError });
+    res.json({ commitment: c });
   } catch (e) {
     res.status(400).json({ error: "compute_failed", detail: String(e) });
   }
@@ -241,50 +230,14 @@ app.get("/path", (req: Request, res: Response) => {
   }
 });
 
-async function postRootOnChain(
-  adminSecretKey: string,
-  contractId: string,
-  rootDec: string
-): Promise<string> {
-  const rpcUrl =
-    process.env.SOROBAN_RPC_URL ?? "https://soroban-testnet.stellar.org";
-  const networkPassphrase =
-    process.env.NETWORK_PASSPHRASE ?? StellarSdk.Networks.TESTNET;
-
-  const keypair = StellarSdk.Keypair.fromSecret(adminSecretKey);
-  const rpc = new StellarSdk.rpc.Server(rpcUrl);
-  const contract = new StellarSdk.Contract(contractId);
-
-  // tree.root() returns a decimal Fr string; convert to 32-byte big-endian.
-  const rootHex = BigInt(rootDec).toString(16).padStart(64, "0");
-  const rootVal = StellarSdk.xdr.ScVal.scvBytes(Buffer.from(rootHex, "hex"));
-  const operation = contract.call("post_root", rootVal);
-
-  const account = await rpc.getAccount(keypair.publicKey());
-  const tx = new StellarSdk.TransactionBuilder(account, {
-    fee: "1000000",
-    networkPassphrase,
-  })
-    .addOperation(operation)
-    .setTimeout(60)
-    .build();
-
-  const prepared = await rpc.prepareTransaction(tx);
-  prepared.sign(keypair);
-  const result = await rpc.sendTransaction(prepared);
-  if (result.status === "ERROR") {
-    throw new Error(`sendTransaction: ${JSON.stringify(result.errorResult)}`);
-  }
-  const final = await rpc.pollTransaction(result.hash, { attempts: 20 });
-  if (final.status !== "SUCCESS") throw new Error(`post_root tx ${final.status}`);
-  return result.hash;
-}
-
 // ── start ─────────────────────────────────────────────────────────────────────
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   app.listen(PORT, () => {
     console.log(`[resolver] listening on http://localhost:${PORT}`);
+    // The deposit indexer is the sole writer of the Merkle tree (see C1 in
+    // indexer.ts): it inserts leaves only for confirmed on-chain deposits.
+    indexer.start();
   });
 }
 
