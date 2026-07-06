@@ -111,6 +111,34 @@ pub enum Error {
     NullifierUsed = 6,
     InvalidProof = 7,
     VkNotSet = 8,
+    NonCanonicalInput = 9,
+}
+
+/// BLS12-381 scalar field modulus r, big-endian. A `nullifier`/`root` is used
+/// both as a storage key (raw 32 bytes) AND, via `Fr::from_bytes`, as a proof
+/// public input. `Fr::from_bytes` reduces mod r, so `n` and `n + r` yield the
+/// SAME field element (identical proof) but DIFFERENT storage keys — a
+/// double-spend. Rejecting any 32-byte value >= r forces one canonical
+/// encoding per field element, closing that gap.
+const BLS_R_BE: [u8; 32] = [
+    0x73, 0xed, 0xa7, 0x53, 0x29, 0x9d, 0x7d, 0x48, 0x33, 0x39, 0xd8, 0x08, 0x09, 0xa1, 0xd8, 0x05,
+    0x53, 0xbd, 0xa4, 0x02, 0xff, 0xfe, 0x5b, 0xfe, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x01,
+];
+
+/// True iff the big-endian 32-byte value is a canonical field element (< r).
+fn is_canonical_fr(b: &BytesN<32>) -> bool {
+    let x = b.to_array();
+    let mut i = 0usize;
+    while i < 32 {
+        if x[i] < BLS_R_BE[i] {
+            return true;
+        }
+        if x[i] > BLS_R_BE[i] {
+            return false;
+        }
+        i += 1;
+    }
+    false // exactly equal to r is non-canonical (== 0 mod r)
 }
 
 #[contract]
@@ -228,6 +256,12 @@ impl ZeekPay {
         Self::require_initialized(&env)?;
         if Self::is_paused(&env) {
             return Err(Error::Paused);
+        }
+        // 0. Reject non-canonical field elements (>= r). Without this, a
+        //    nullifier of `n + r` reduces to the same Fr as `n` (so the same
+        //    proof verifies) yet stores under a different key -> double-spend.
+        if !is_canonical_fr(&nullifier) || !is_canonical_fr(&root) {
+            return Err(Error::NonCanonicalInput);
         }
         // 1. Root must be one the contract knows.
         if !env.storage().persistent().has(&DataKey::Root(root.clone())) {

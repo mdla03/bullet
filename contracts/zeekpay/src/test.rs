@@ -199,19 +199,46 @@ fn double_spend_rejected() {
 }
 
 #[test]
+fn non_canonical_nullifier_rejected() {
+    // A nullifier >= r must be rejected before the replay check, so `n` and
+    // `n + r` can never both be spent. 0xff*32 is well above r.
+    let s = setup();
+    let recipient = Address::generate(&s.env);
+    let depositor = Address::generate(&s.env);
+    s.usdc_admin.mint(&depositor, &1_000_000_000);
+    s.client.deposit(&depositor, &Denom::Ten, &b32(&s.env, 0xAA));
+
+    let root = b32(&s.env, 0x11);
+    s.client.post_root(&root);
+    let pa = BytesN::from_array(&s.env, &[0u8; 96]);
+    let pb = BytesN::from_array(&s.env, &[0u8; 192]);
+    let pc = BytesN::from_array(&s.env, &[0u8; 96]);
+
+    let err = s
+        .client
+        .try_claim(&pa, &pb, &pc, &root, &b32(&s.env, 0xff), &recipient, &Denom::Ten)
+        .err()
+        .unwrap()
+        .unwrap();
+    assert_eq!(err, Error::NonCanonicalInput);
+}
+
+#[test]
 fn unknown_root_rejected() {
     let s = setup();
     let recipient = Address::generate(&s.env);
     let pa = BytesN::from_array(&s.env, &[0u8; 96]);
     let pb = BytesN::from_array(&s.env, &[0u8; 192]);
     let pc = BytesN::from_array(&s.env, &[0u8; 96]);
+    // Root must be canonical (< r) so it passes the field-element check and
+    // reaches the unknown-root branch. 0x11..11 is < r and was never posted.
     let err = s
         .client
         .try_claim(
             &pa,
             &pb,
             &pc,
-            &b32(&s.env, 0x99),
+            &b32(&s.env, 0x11),
             &b32(&s.env, 0x22),
             &recipient,
             &Denom::Ten,

@@ -55,6 +55,9 @@ dist/
 # ─── Runtime data (regenerable / PII risk) ────────────────────────────
 backend/data/registry.json
 backend/data/_test_registry.json
+# Merkle state rebuilt from on-chain deposits by the indexer; machine-local.
+backend/data/leaves.json
+backend/data/indexer-cursor.json
 
 # ─── Tooling noise ────────────────────────────────────────────────────
 .DS_Store

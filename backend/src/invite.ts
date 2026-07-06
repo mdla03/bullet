@@ -38,6 +38,49 @@ function bytesToHex(bytes: Uint8Array): string {
     .join("");
 }
 
+// ── custody secret encryption at rest (H3) ────────────────────────────────────
+// The custody wallet's Stellar secret controls real USDC held for an unclaimed
+// invite. Storing it plaintext means a DB or service-role-key compromise sweeps
+// every custody wallet. Encrypt it with a backend-only key (nacl.secretbox)
+// before it touches Postgres. Fail closed: if the key is missing we refuse to
+// write rather than silently persisting plaintext.
+const CUSTODY_ENC_PREFIX = "enc:v1:";
+
+function custodyEncKey(): Uint8Array {
+  const raw = process.env.BULLET_CUSTODY_ENC_KEY ?? "";
+  if (!/^[0-9a-fA-F]{64}$/.test(raw)) {
+    throw new Error(
+      "BULLET_CUSTODY_ENC_KEY must be 64 hex chars (32 bytes); refusing to store custody secret in plaintext"
+    );
+  }
+  return hexToBytes(raw);
+}
+
+/** Encrypt a custody secret for storage. Output: enc:v1:<nonceHex>:<ctHex>. */
+export function encryptCustodySecret(plaintext: string): string {
+  const key = custodyEncKey();
+  const nonce = nacl.randomBytes(nacl.secretbox.nonceLength);
+  const ct = nacl.secretbox(new TextEncoder().encode(plaintext), nonce, key);
+  return `${CUSTODY_ENC_PREFIX}${bytesToHex(nonce)}:${bytesToHex(ct)}`;
+}
+
+/** Decrypt a stored custody secret. Legacy plaintext rows (no prefix) are
+ *  returned as-is for backward compatibility during migration. */
+export function decryptCustodySecret(stored: string): string {
+  if (!stored.startsWith(CUSTODY_ENC_PREFIX)) {
+    console.warn("[invite] custody secret stored without encryption (legacy row)");
+    return stored;
+  }
+  const [nonceHex, ctHex] = stored.slice(CUSTODY_ENC_PREFIX.length).split(":");
+  const opened = nacl.secretbox.open(
+    hexToBytes(ctHex),
+    hexToBytes(nonceHex),
+    custodyEncKey()
+  );
+  if (!opened) throw new Error("custody secret decryption failed");
+  return new TextDecoder().decode(opened);
+}
+
 /** Sealed-box style: eph keypair + nacl.box to recipient's ed25519 pub. */
 export function sealTo(recipientPubKeyHex: string, plaintext: string): {
   ephemeral_pubkey: string;
@@ -139,7 +182,7 @@ export async function recordInvite(args: {
       denom: args.denom,
       claim_payload: args.claimPayload,
       custody_stellar_address: args.custody.publicKey,
-      custody_secret: args.custody.secret,
+      custody_secret: encryptCustodySecret(args.custody.secret),
       expires_at: expiresAt,
     })
     .select("id")
@@ -179,7 +222,12 @@ export async function deliverInvitesFor(
         bulletPubKeyHex,
         JSON.stringify(inv.claim_payload)
       );
-      const custodySealed = sealTo(bulletPubKeyHex, inv.custody_secret);
+      // Decrypt the at-rest custody secret, then re-seal it to the recipient's
+      // bullet pubkey so only they can open it.
+      const custodySealed = sealTo(
+        bulletPubKeyHex,
+        decryptCustodySecret(inv.custody_secret)
+      );
       const { error: nErr } = await serviceClient.from("notes").insert({
         recipient_pubkey: bulletPubKeyHex,
         ephemeral_pubkey: payloadSealed.ephemeral_pubkey,
