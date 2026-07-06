@@ -254,13 +254,12 @@ export function RegisterFlow({ oauthError }: { oauthError?: string }) {
         {steps.map((s, i) => (
           <li key={s} className="flex items-center gap-2">
             <span
-              className={`flex h-5 w-5 items-center justify-center rounded-full border text-[10px] font-semibold ${
-                i < stepIndex
+              className={`flex h-5 w-5 items-center justify-center rounded-full border text-[10px] font-semibold ${i < stepIndex
                   ? "border-ink bg-ink text-paper"
                   : i === stepIndex
                     ? "border-ink text-ink"
                     : "border-fog text-graphite"
-              }`}
+                }`}
             >
               {i < stepIndex ? <CheckIcon className="h-3 w-3" /> : i + 1}
             </span>
@@ -304,7 +303,7 @@ export function RegisterFlow({ oauthError }: { oauthError?: string }) {
             </div>
             {emailSent && (
               <p className="text-xs text-signal">
-                Check your inbox. The link signs you in.
+                Check your inbox. The link signs you in. If it doesn't arrive in a few minutes, please check your spam folder.
               </p>
             )}
           </div>
@@ -313,11 +312,10 @@ export function RegisterFlow({ oauthError }: { oauthError?: string }) {
               key={p.key}
               onClick={() => p.enabled && signIn(p.key)}
               disabled={!p.enabled || working === "oauth"}
-              className={`flex w-full items-center gap-3 rounded-full border px-5 py-3 text-left font-medium transition-colors ${
-                p.enabled
+              className={`flex w-full items-center gap-3 rounded-full border px-5 py-3 text-left font-medium transition-colors ${p.enabled
                   ? "border-fog bg-white hover:border-graphite disabled:opacity-50"
                   : "cursor-not-allowed border-fog bg-paper text-graphite/70"
-              }`}
+                }`}
             >
               {working === "oauth" && p.enabled ? (
                 <LoaderIcon className="h-5 w-5 animate-spin" />
