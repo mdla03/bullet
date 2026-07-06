@@ -55,7 +55,7 @@ function badRequest(res: Response, detail: string): void {
 // XLM per call. For a single-process demo this is enough; a multi-instance
 // deploy needs a shared store (Redis).
 const rateBuckets = new Map<string, number[]>();
-function rateLimit(maxPerWindow: number, windowMs: number) {
+export function rateLimit(maxPerWindow: number, windowMs: number) {
   return (req: Request, res: Response, next: NextFunction): void => {
     const key =
       (req as Request & { userId?: string }).userId ?? req.ip ?? "anon";

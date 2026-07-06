@@ -13,7 +13,7 @@ process.env.SUPABASE_URL ??= "https://placeholder.supabase.co";
 process.env.SUPABASE_ANON_KEY ??= "placeholder_anon_key";
 process.env.SUPABASE_SERVICE_ROLE_KEY ??= "placeholder_service_role_key";
 
-const { app } = await import("./resolver.js");
+const { app, rateLimit } = await import("./resolver.js");
 const { Keypair, hash } = await import("@stellar/stellar-base");
 const { buildLinkWalletChallenge, verifyLinkWalletSig } = await import("./verify.js");
 
@@ -109,5 +109,35 @@ describe("POST /wallet/link", () => {
       signature: "0".repeat(128),
     });
     assert.equal(r.status, 401);
+  });
+});
+
+// ── rate limiter (M1, unit — no funding side effects) ─────────────────────────
+
+/** Drive the middleware once; returns 429 if limited, 0 if it called next(). */
+function hitLimiter(
+  limiter: ReturnType<typeof rateLimit>,
+  userId: string
+): number {
+  let code = 0;
+  const res = { status(c: number) { code = c; return { json() {} }; } };
+  limiter({ userId } as never, res as never, (() => {}) as never);
+  return code;
+}
+
+describe("rateLimit (M1)", () => {
+  it("allows up to the cap, then 429s the next call", () => {
+    const limiter = rateLimit(5, 60_000);
+    const key = "usr_rate_" + Date.now();
+    const codes = Array.from({ length: 6 }, () => hitLimiter(limiter, key));
+    assert.deepEqual(codes.slice(0, 5), [0, 0, 0, 0, 0]); // first 5 pass
+    assert.equal(codes[5], 429); // 6th blocked
+  });
+
+  it("is keyed per user: a second user is unaffected", () => {
+    const limiter = rateLimit(1, 60_000);
+    assert.equal(hitLimiter(limiter, "userA"), 0); // A: first ok
+    assert.equal(hitLimiter(limiter, "userA"), 429); // A: second blocked
+    assert.equal(hitLimiter(limiter, "userB"), 0); // B: independent
   });
 });
