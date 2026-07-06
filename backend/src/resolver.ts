@@ -307,6 +307,24 @@ app.get("/path", (req: Request, res: Response) => {
   }
 });
 
+// ── /admin/reindex: force the indexer to rescan from a ledger (recovery) ──────
+// Re-inserts any on-chain deposits missing from the tree (e.g. after an
+// ephemeral-host wipe before Postgres persistence). Guarded by a shared secret.
+const INDEXER_ADMIN_TOKEN = process.env.INDEXER_ADMIN_TOKEN ?? "";
+app.post("/admin/reindex", async (req: Request, res: Response) => {
+  if (!INDEXER_ADMIN_TOKEN || req.header("x-admin-token") !== INDEXER_ADMIN_TOKEN)
+    return void res.status(401).json({ error: "unauthorized" });
+  const { fromLedger } = req.body as { fromLedger?: number };
+  if (typeof fromLedger !== "number" || fromLedger < 0)
+    return void badRequest(res, "fromLedger (non-negative number) required");
+  try {
+    const result = await indexer.reprocessFrom(fromLedger);
+    res.json({ ok: true, ...result });
+  } catch (e) {
+    res.status(500).json({ error: "reindex_failed", detail: String(e).slice(0, 400) });
+  }
+});
+
 // ── start ─────────────────────────────────────────────────────────────────────
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
