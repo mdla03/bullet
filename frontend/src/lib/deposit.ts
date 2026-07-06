@@ -68,5 +68,11 @@ export async function depositNote(
   if (result.status === "ERROR") {
     throw new Error(`deposit failed: ${JSON.stringify(result.errorResult)}`);
   }
+  // Poll to confirmation (L4): a submitted-but-not-yet-final deposit must not be
+  // reported as success. The indexer also only picks up confirmed deposits.
+  const final = await rpc.pollTransaction(result.hash, { attempts: 30 });
+  if (final.status !== "SUCCESS") {
+    throw new Error(`deposit tx ended with status: ${final.status}`);
+  }
   return result.hash;
 }
