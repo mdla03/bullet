@@ -1,9 +1,8 @@
 import { fileURLToPath } from "node:url";
-import express, { type Request, type Response } from "express";
+import express, { type Request, type Response, type NextFunction } from "express";
 import cors from "cors";
 import type { ResolveResult } from "@zeekpay/shared";
 import * as store from "./store.js";
-import * as commitment from "./commitment.js";
 import * as leaves from "./leaves.js";
 import * as tree from "./tree.js";
 import * as invite from "./invite.js";
@@ -47,6 +46,30 @@ const SIG_RE = /^[0-9a-f]{128}$/;
 
 function badRequest(res: Response, detail: string): void {
   res.status(400).json({ error: "invalid_input", detail });
+}
+
+// ── rate limiter (M1) ─────────────────────────────────────────────────────────
+// In-memory sliding window keyed by userId (falls back to IP). Guards funder-
+// draining routes like /invite/prepare, which funds a custody account with real
+// XLM per call. For a single-process demo this is enough; a multi-instance
+// deploy needs a shared store (Redis).
+const rateBuckets = new Map<string, number[]>();
+function rateLimit(maxPerWindow: number, windowMs: number) {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const key =
+      (req as Request & { userId?: string }).userId ?? req.ip ?? "anon";
+    const now = Date.now();
+    const hits = (rateBuckets.get(key) ?? []).filter((t) => now - t < windowMs);
+    if (hits.length >= maxPerWindow) {
+      res
+        .status(429)
+        .json({ error: "rate_limited", detail: "Too many requests. Slow down and retry shortly." });
+      return;
+    }
+    hits.push(now);
+    rateBuckets.set(key, hits);
+    next();
+  };
 }
 
 // ── health + resolve (public) ─────────────────────────────────────────────────
@@ -144,7 +167,7 @@ app.post("/wallet/link", requireAuth, async (req: Request, res: Response) => {
 
 // ── /invite: send-to-unregistered flow ────────────────────────────────────────
 
-app.post("/invite/prepare", requireAuth, async (_req: Request, res: Response) => {
+app.post("/invite/prepare", requireAuth, rateLimit(5, 10 * 60 * 1000), async (_req: Request, res: Response) => {
   try {
     const custody = await invite.createCustodyAccount();
     res.json({
@@ -205,30 +228,10 @@ app.post("/notes/mark-claimed", requireAuth, async (req: Request, res: Response)
 
 // ── /commitment ───────────────────────────────────────────────────────────────
 
-// Pure commitment computation. SECURITY (C1): this endpoint MUST NOT insert
-// into the Merkle tree or post a root. The tree is populated exclusively by the
-// deposit indexer (indexer.ts) from confirmed on-chain deposits; a leaf that
-// never had a matching deposit can never appear here. This route only echoes
-// the Poseidon commitment so the sender's browser can build the deposit tx.
-// NOTE: `secret` is sent to the backend here purely for the hash. Follow-up:
-// move commitment computation fully client-side (frontend already ships the
-// same Poseidon) so the backend never sees the claim secret.
-app.post("/commitment", async (req: Request, res: Response) => {
-  const { secret, recipientDigest, denom } = req.body as {
-    secret?: string;
-    recipientDigest?: string;
-    denom?: string;
-  };
-  if (!secret || !recipientDigest || !denom) {
-    return void badRequest(res, "secret, recipientDigest, denom required");
-  }
-  try {
-    const c = commitment.computeCommitment(secret, recipientDigest, denom);
-    res.json({ commitment: c });
-  } catch (e) {
-    res.status(400).json({ error: "compute_failed", detail: String(e) });
-  }
-});
+// NOTE: the old POST /commitment endpoint was removed. The commitment is now
+// computed entirely in the browser (frontend/src/lib/commitment.ts) so the
+// claim secret never reaches the backend. The Merkle tree is populated only by
+// the deposit indexer from confirmed on-chain deposits (see indexer.ts, C1).
 
 // ── /path: return Merkle path for a known commitment (browser-side prover) ────
 

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ResolveResult } from "@zeekpay/shared";
 import { computeRecipientDigest } from "@/lib/recipient";
+import { computeCommitment } from "@/lib/commitment";
 import { depositNote } from "@/lib/deposit";
 import { encodeClaimLink, type ClaimPayload } from "@/lib/claim_link";
 import { postNote } from "@/lib/notes";
@@ -154,22 +155,12 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
         .join("");
       const secretBigInt = BigInt("0x" + secret);
 
-      const commitRes = await fetch(`${RESOLVER_URL}/commitment`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          secret: secretBigInt.toString(),
-          recipientDigest: recipientDigest.toString(),
-          denom: denom.toString(),
-        }),
-      });
-      if (!commitRes.ok) {
-        const err = await commitRes.json().catch(() => ({}));
-        throw new Error(
-          `Commitment computation failed: ${(err as { detail?: string }).detail ?? commitRes.status}`
-        );
-      }
-      const { commitment } = (await commitRes.json()) as { commitment: string };
+      // Commitment computed locally so the claim secret never leaves the tab.
+      const commitment = computeCommitment(
+        secretBigInt.toString(),
+        recipientDigest.toString(),
+        denom.toString()
+      );
       const commitmentBigInt = BigInt(commitment);
 
       setStep("signing");
@@ -258,23 +249,12 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
         .join("");
       const secretBigInt = BigInt("0x" + secret);
 
-      // 4. Compute commitment via backend (snarkjs BLS12-381 Poseidon)
-      const commitRes = await fetch(`${RESOLVER_URL}/commitment`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          secret: secretBigInt.toString(),
-          recipientDigest: recipientDigest.toString(),
-          denom: denom.toString(),
-        }),
-      });
-      if (!commitRes.ok) {
-        const err = await commitRes.json().catch(() => ({}));
-        throw new Error(
-          `Commitment computation failed: ${(err as { detail?: string }).detail ?? commitRes.status}`
-        );
-      }
-      const { commitment } = (await commitRes.json()) as { commitment: string };
+      // 4. Compute commitment locally so the claim secret never leaves the tab.
+      const commitment = computeCommitment(
+        secretBigInt.toString(),
+        recipientDigest.toString(),
+        denom.toString()
+      );
       const commitmentBigInt = BigInt(commitment);
 
       // 5. Build, sign, submit deposit transaction
