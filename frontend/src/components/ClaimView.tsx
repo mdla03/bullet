@@ -135,8 +135,13 @@ export function ClaimView({ encoded }: { encoded: string }) {
 
   if (!payload) return null;
 
-  const shortContract = payload.contractId
-    ? `${payload.contractId.slice(0, 8)}…${payload.contractId.slice(-4)}`
+  // Link-minted payloads omit contractId/network to stay short; fall back to
+  // env / the demo default for display.
+  const contractId =
+    payload.contractId ?? process.env.NEXT_PUBLIC_CONTRACT_ID ?? "";
+  const network = payload.network ?? "testnet";
+  const shortContract = contractId
+    ? `${contractId.slice(0, 8)}…${contractId.slice(-4)}`
     : "unknown";
 
   const busy =
@@ -156,7 +161,7 @@ export function ClaimView({ encoded }: { encoded: string }) {
         <p className="mt-1 text-graphite">sent to you, silently</p>
         <div className="mt-5 space-y-1 text-sm text-graphite">
           <p>
-            Network: <span className="text-ink">{payload.network}</span>
+            Network: <span className="text-ink">{network}</span>
           </p>
           <p>
             Contract:{" "}
