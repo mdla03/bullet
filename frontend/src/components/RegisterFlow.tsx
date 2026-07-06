@@ -102,7 +102,17 @@ export function RegisterFlow({ oauthError }: { oauthError?: string }) {
       email: trimmed,
       options: { ...opts, shouldCreateUser: false },
     });
-    if (err && /not found|user does not exist|Signups.*disabled/i.test(err.message)) {
+    // A first-time email has no user yet, so shouldCreateUser:false is rejected
+    // with otp_disabled ("Signups not allowed for otp"). That is the signal to
+    // retry as a real signup so the new user still gets a link. Match on the
+    // stable error code, not just the message text.
+    const firstTimer =
+      (err as { code?: string } | null)?.code === "otp_disabled" ||
+      (!!err &&
+        /not found|user does not exist|signups? not allowed|otp[_ ]?disabled/i.test(
+          err.message
+        ));
+    if (firstTimer) {
       const retry = await supabase.auth.signInWithOtp({
         email: trimmed,
         options: { ...opts, shouldCreateUser: true },
