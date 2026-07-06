@@ -13,9 +13,26 @@ import { verifyLinkWalletSig } from "./verify.js";
 import * as StellarSdk from "@stellar/stellar-sdk";
 
 const app = express();
-// ponytail: demo, reflect any origin. Bearer-token auth means no CSRF surface.
-// Tighten to an allowlist post-demo.
-app.use(cors({ origin: true, credentials: true }));
+// CORS allowlist (M3). Reflecting any origin with credentials is unsafe and
+// technically invalid; restrict to the configured frontend(s). Extra origins
+// can be added via CORS_ALLOWED_ORIGINS (comma-separated).
+const ALLOWED_ORIGINS = [
+  process.env.FRONTEND_URL ?? "http://localhost:3000",
+  process.env.NEXT_PUBLIC_FRONTEND_URL,
+  ...(process.env.CORS_ALLOWED_ORIGINS?.split(",") ?? []),
+]
+  .map((o) => o?.trim())
+  .filter((o): o is string => !!o);
+app.use(
+  cors({
+    origin(origin, cb) {
+      // Non-browser clients (curl, server-to-server) send no Origin; allow.
+      if (!origin || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+      cb(new Error("origin not allowed"));
+    },
+    credentials: true,
+  })
+);
 app.use(express.json());
 
 const CONTRACT_ADDRESS = process.env.ZEEKPAY_CONTRACT_ID ?? "";
@@ -35,6 +52,12 @@ function badRequest(res: Response, detail: string): void {
 // ── health + resolve (public) ─────────────────────────────────────────────────
 
 app.get("/health", (_req: Request, res: Response) => {
+  // L1: keep the public health probe minimal. The deploy diagnostics (admin
+  // pubkey, RPC URL, passphrase, node version) leak fingerprinting info, so
+  // they are gated behind HEALTH_DEBUG=1 for local/staging troubleshooting.
+  if (process.env.HEALTH_DEBUG !== "1") {
+    return void res.json({ ok: true });
+  }
   let adminPub: string | null = null;
   let adminError: string | null = null;
   try {
