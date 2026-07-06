@@ -94,6 +94,29 @@ export async function markNoteClaimedIfOwned(
   return !!data;
 }
 
+/** True iff some wallet row publishes this bullet pubkey. Used to reject inbox
+ *  deliveries addressed to keys that were never registered (anti-spam). */
+export async function pubkeyIsRegistered(bulletPubKey: string): Promise<boolean> {
+  const { data } = await serviceClient
+    .from("wallets")
+    .select("user_id")
+    .eq("bullet_pubkey", bulletPubKey)
+    .maybeSingle();
+  return !!data;
+}
+
+/** Insert an encrypted inbox note via the service role (notes INSERT is
+ *  RLS-locked; browsers go through the backend). Returns false on error. */
+export async function insertNote(row: {
+  recipient_pubkey: string;
+  ephemeral_pubkey: string;
+  nonce: string;
+  ciphertext: string;
+}): Promise<boolean> {
+  const { error } = await serviceClient.from("notes").insert(row);
+  return !error;
+}
+
 export type AttachWalletResult =
   | { ok: true; wallet: Wallet }
   | { conflict: true; detail: string };
