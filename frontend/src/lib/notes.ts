@@ -13,6 +13,9 @@ import type { ClaimPayload } from "./claim_link";
 
 const supabase = createClient();
 
+const RESOLVER_URL =
+  process.env.NEXT_PUBLIC_RESOLVER_URL ?? "http://localhost:3001";
+
 function hexToBytes(hex: string): Uint8Array {
   const bytes = new Uint8Array(hex.length / 2);
   for (let i = 0; i < bytes.length; i++) {
@@ -55,7 +58,9 @@ export interface InboxNote {
   inviteId?: string;
 }
 
-/** Encrypt a claim payload to the recipient's Bullet pubkey and store it. */
+/** Encrypt a claim payload to the recipient's Bullet pubkey and store it.
+ *  Goes through the backend (M4): notes INSERT is RLS-locked to the service
+ *  role, so a browser can't spam arbitrary inboxes with direct inserts. */
 export async function postNote(
   payload: ClaimPayload,
   recipientPubKeyHex: string
@@ -70,13 +75,20 @@ export async function postNote(
     curvePub,
     eph.secretKey
   );
-  const { error } = await supabase.from("notes").insert({
-    recipient_pubkey: recipientPubKeyHex,
-    ephemeral_pubkey: bytesToHex(eph.publicKey),
-    nonce: bytesToHex(nonce),
-    ciphertext: bytesToHex(ciphertext),
+  const res = await fetch(`${RESOLVER_URL}/notes`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      recipientPubkey: recipientPubKeyHex,
+      ephemeralPubkey: bytesToHex(eph.publicKey),
+      nonce: bytesToHex(nonce),
+      ciphertext: bytesToHex(ciphertext),
+    }),
   });
-  if (error) throw new Error(`inbox delivery failed: ${error.message}`);
+  if (!res.ok) {
+    const err = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(`inbox delivery failed: ${err.error ?? res.status}`);
+  }
 }
 
 /** Fetch and decrypt every note addressed to these keys, newest first. */

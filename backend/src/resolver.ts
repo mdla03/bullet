@@ -226,6 +226,44 @@ app.post("/notes/mark-claimed", requireAuth, async (req: Request, res: Response)
   res.json({ ok: true });
 });
 
+// ── /notes: deliver an encrypted inbox note (M4) ──────────────────────────────
+// notes INSERT is RLS-locked to the service role, so browsers deliver through
+// here instead of inserting directly (which let anyone spam any inbox). We
+// validate the ciphertext shape, require the recipient to be a registered
+// Bullet key, and rate-limit. No auth: an anonymous sender may still deliver to
+// a registered recipient's inbox, but only to real keys and not in bulk.
+const HEX_RE = /^[0-9a-f]+$/;
+const NONCE_RE = /^[0-9a-f]{48}$/; // 24-byte nacl.box nonce
+
+app.post("/notes", rateLimit(60, 10 * 60 * 1000), async (req: Request, res: Response) => {
+  const { recipientPubkey, ephemeralPubkey, nonce, ciphertext } = req.body as {
+    recipientPubkey?: string;
+    ephemeralPubkey?: string;
+    nonce?: string;
+    ciphertext?: string;
+  };
+  if (!recipientPubkey || !ZEEKPAY_KEY_RE.test(recipientPubkey))
+    return void badRequest(res, "recipientPubkey must be 64-char lowercase hex");
+  if (!ephemeralPubkey || !ZEEKPAY_KEY_RE.test(ephemeralPubkey))
+    return void badRequest(res, "ephemeralPubkey must be 64-char lowercase hex");
+  if (!nonce || !NONCE_RE.test(nonce))
+    return void badRequest(res, "nonce must be 48-char lowercase hex");
+  if (!ciphertext || !HEX_RE.test(ciphertext) || ciphertext.length > 8192)
+    return void badRequest(res, "ciphertext must be lowercase hex (<= 8192 chars)");
+
+  if (!(await store.pubkeyIsRegistered(recipientPubkey)))
+    return void res.status(404).json({ error: "recipient_not_registered" });
+
+  const ok = await store.insertNote({
+    recipient_pubkey: recipientPubkey,
+    ephemeral_pubkey: ephemeralPubkey,
+    nonce,
+    ciphertext,
+  });
+  if (!ok) return void res.status(500).json({ error: "note_insert_failed" });
+  res.json({ ok: true });
+});
+
 // ── /commitment ───────────────────────────────────────────────────────────────
 
 // NOTE: the old POST /commitment endpoint was removed. The commitment is now
