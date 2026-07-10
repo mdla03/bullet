@@ -5,14 +5,15 @@ pragma circom 2.0.0;
 // Proof statement:
 //   prover knows `secret` such that:
 //     nullifier         = Poseidon([secret])
-//     commitment        = Poseidon([secret, recipientDigest, denom])
+//     commitment        = Poseidon([secret, recipientDigest, amount])
 //     commitment ∈ Merkle tree at `root` (with an opening path of depth 20)
 //
 // Public inputs (LOCKED — must match derive_public_inputs in contracts/zeekpay/src/lib.rs):
-//   [root, nullifier, recipientDigest, denom]   ← order is the snarkjs public-signal order
+//   [root, nullifier, recipientDigest, amount]   ← order is the snarkjs public-signal order
+//   `amount` is the raw stroop value (7 decimal places; e.g. 100000000 for 10 USDC).
 //
-// Security: recipientDigest and denom are inside the commitment preimage so that
-// a front-runner cannot substitute their own recipient or denomination while reusing
+// Security: recipientDigest and amount are inside the commitment preimage so that
+// a front-runner cannot substitute their own recipient or amount while reusing
 // the same secret. Nullifier arity (1) differs from commitment arity (3) for
 // domain separation.
 //
@@ -28,7 +29,7 @@ template Claim(DEPTH) {
     signal input root;
     signal input nullifier;
     signal input recipientDigest;
-    signal input denom;
+    signal input amount;
 
     // ── private inputs ────────────────────────────────────────────────────────
     signal input secret;
@@ -44,7 +45,7 @@ template Claim(DEPTH) {
     component commitmentHasher = Poseidon(3);
     commitmentHasher.inputs[0] <== secret;
     commitmentHasher.inputs[1] <== recipientDigest;
-    commitmentHasher.inputs[2] <== denom;
+    commitmentHasher.inputs[2] <== amount;
 
     // ── Merkle membership proof ───────────────────────────────────────────────
     component levelHashers[DEPTH];
@@ -73,4 +74,4 @@ template Claim(DEPTH) {
     levelHashes[DEPTH] === root;
 }
 
-component main {public [root, nullifier, recipientDigest, denom]} = Claim(20);
+component main {public [root, nullifier, recipientDigest, amount]} = Claim(20);

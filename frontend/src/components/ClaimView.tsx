@@ -73,7 +73,7 @@ export function ClaimView({ encoded }: { encoded: string }) {
       const { proof_a, proof_b, proof_c, nullifier, root } = await proveBrowser(
         BigInt("0x" + p.secret).toString(),
         p.recipientDigest,
-        String(p.denom),
+        String(p.amount),
         (stage) => {
           if (stage === "proving") setProveDetail("Generating proof (~15-30 s)…");
           else if (stage === "path") setProveDetail("Fetching Merkle path…");
@@ -91,7 +91,7 @@ export function ClaimView({ encoded }: { encoded: string }) {
         proof_c,
         root,
         nullifier,
-        p.denom,
+        BigInt(p.amount),
         async (xdr) => {
           setState((s) => ({ ...s, step: "submitting" }));
           const signRes = await signTransaction(xdr, {
@@ -156,7 +156,7 @@ export function ClaimView({ encoded }: { encoded: string }) {
       <div className="rounded-2xl border border-fog bg-white px-6 py-6">
         <p className="text-sm font-bold tracking-tight">bullet</p>
         <p className="mt-4 text-5xl font-bold tracking-tight">
-          ${payload.denom} USDC
+          ${payload.amount / 10_000_000} USDC
         </p>
         <p className="mt-1 text-graphite">sent to you, silently</p>
         <div className="mt-5 space-y-1 text-sm text-graphite">
@@ -226,7 +226,7 @@ export function ClaimView({ encoded }: { encoded: string }) {
           onClick={handleClaim}
           className="w-full rounded-full bg-signal px-4 py-3 font-semibold text-white transition-colors hover:bg-signal/85"
         >
-          Claim ${payload.denom} USDC
+          Claim ${payload.amount / 10_000_000} USDC
         </button>
       )}
 
@@ -248,7 +248,7 @@ export function ClaimView({ encoded }: { encoded: string }) {
       {step === "done" && (
         <div className="space-y-3 rounded-2xl border border-signal/30 bg-white px-4 py-4">
           <p className="text-sm font-medium text-signal">
-            ${payload.denom} USDC claimed
+            ${payload.amount / 10_000_000} USDC claimed
           </p>
           {txHash && (
             <p className="text-xs text-graphite">

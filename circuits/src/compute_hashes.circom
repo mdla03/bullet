@@ -12,7 +12,7 @@ include "../node_modules/circomlib/circuits/poseidon.circom";
 template ComputeHashes() {
     signal input secret;
     signal input recipientDigest;
-    signal input denom;
+    signal input amount;
     signal output nullifier;
     signal output root;
 
@@ -21,11 +21,11 @@ template ComputeHashes() {
     n.inputs[0] <== secret;
     nullifier <== n.out;
 
-    // commitment = Poseidon([secret, recipientDigest, denom])
+    // commitment = Poseidon([secret, recipientDigest, amount])
     component c = Poseidon(3);
     c.inputs[0] <== secret;
     c.inputs[1] <== recipientDigest;
-    c.inputs[2] <== denom;
+    c.inputs[2] <== amount;
 
     // zero[i] = Poseidon([zero[i-1], zero[i-1]]) — empty subtree hashes
     component zeros[20];

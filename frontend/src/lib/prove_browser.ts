@@ -1,8 +1,8 @@
 // Browser-side Groth16 prover. Mirrors backend/src/prove.ts byte layout so the
 // on-chain verifier accepts the resulting proof.
 //
-// Flow: client already has {secret, recipientDigest, denom} from the claim link.
-// (1) Compute commitment = Poseidon([secret, recipientDigest, denom]).
+// Flow: client already has {secret, recipientDigest, amount} from the claim link.
+// (1) Compute commitment = Poseidon([secret, recipientDigest, amount]).
 // (2) Ask resolver for the Merkle path against the current tree.
 // (3) Compute nullifier = Poseidon([secret]) so the secret never leaves the tab.
 // (4) Run snarkjs.groth16.fullProve locally against claim.wasm + claim.zkey.
@@ -59,19 +59,19 @@ const fr = (dec: string): string => be(dec, 32);
  *
  * @param secretDec  decimal string of the secret (BigInt("0x"+hex).toString() from the link)
  * @param recipientDigest decimal string from the claim link
- * @param denom "1" | "10" | "50" | "100"
+ * @param amount decimal string of the stroop amount (e.g. "100000000" for 10 USDC)
  * @param onStage optional callback receiving 'loading' | 'proving' for UI hooks
  */
 export async function proveBrowser(
   secretDec: string,
   recipientDigest: string,
-  denom: string,
+  amount: string,
   onStage?: (stage: "loading" | "path" | "proving") => void
 ): Promise<BrowserProveResult> {
   onStage?.("loading");
   const [{ wasm, zkey }, commitment] = await Promise.all([
     loadAssets(),
-    Promise.resolve(poseidon([secretDec, recipientDigest, denom])),
+    Promise.resolve(poseidon([secretDec, recipientDigest, amount])),
   ]);
 
   onStage?.("path");
@@ -98,7 +98,7 @@ export async function proveBrowser(
       root,
       nullifier,
       recipientDigest,
-      denom,
+      amount,
       secret: secretDec,
       pathElements,
       pathIndices,

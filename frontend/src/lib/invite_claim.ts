@@ -23,15 +23,6 @@ const USDC_SAC = process.env.NEXT_PUBLIC_USDC_SAC_ID ?? "";
 const NETWORK_PASSPHRASE =
   process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ?? StellarSdk.Networks.TESTNET;
 
-const DENOM_VARIANT: Record<number, string> = {
-  1: "One",
-  10: "Ten",
-  50: "Fifty",
-  100: "Hundred",
-};
-
-const USDC_DECIMALS = 10_000_000n; // 7 decimals on Stellar
-
 function hexToBuffer(hex: string): Buffer {
   return Buffer.from(hex, "hex");
 }
@@ -41,6 +32,10 @@ function hexToBuffer(hex: string): Buffer {
  * -> user real wallet). One tx, custody wallet signs both.
  * Returns the tx hash.
  */
+/**
+ * Claim an invite note and forward USDC to the user's real wallet.
+ * `amount` is the raw stroop value (e.g. 100_000_000n for 10 USDC).
+ */
 export async function claimInvite(
   custodyStellarSecret: string,
   userRealWallet: string,
@@ -49,7 +44,7 @@ export async function claimInvite(
   proofC: string,
   root: string,
   nullifier: string,
-  denom: 1 | 10 | 50 | 100
+  amount: bigint
 ): Promise<string> {
   const rpc = new StellarSdk.rpc.Server(RPC_URL);
   const custody = StellarSdk.Keypair.fromSecret(custodyStellarSecret);
@@ -68,7 +63,7 @@ export async function claimInvite(
     xdr.ScVal.scvBytes(hexToBuffer(root)),
     xdr.ScVal.scvBytes(hexToBuffer(nullifier)),
     StellarSdk.nativeToScVal(custodyAddr, { type: "address" }),
-    xdr.ScVal.scvVec([xdr.ScVal.scvSymbol(DENOM_VARIANT[denom])])
+    StellarSdk.nativeToScVal(amount, { type: "i128" })
   );
   const acctA = await rpc.getAccount(custodyAddr);
   const txA = new StellarSdk.TransactionBuilder(acctA, {
@@ -90,7 +85,6 @@ export async function claimInvite(
   }
 
   // TX B: forward USDC from custody to the recipient's real wallet.
-  const amount = BigInt(denom) * USDC_DECIMALS;
   const transferOp = usdcContract.call(
     "transfer",
     StellarSdk.nativeToScVal(custodyAddr, { type: "address" }),
