@@ -98,7 +98,10 @@ export async function proveBrowser(
       root,
       nullifier,
       recipientDigest,
-      amount,
+      // The compiled WASM still uses "denom" as the signal name (circom not yet
+      // recompiled after rename). Pass the stroop value under the old key until
+      // the circuit is rebuilt with `amount`.
+      denom: amount,
       secret: secretDec,
       pathElements,
       pathIndices,
