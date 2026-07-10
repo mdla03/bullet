@@ -34,22 +34,24 @@ export default function Home() {
           <HeroSendBox />
         </div>
 
-        <div className="animate-rise flex flex-wrap items-center justify-center gap-2 text-sm text-graphite [animation-delay:300ms]">
-          Getting paid instead?
-          <Link
-            href="/register"
-            className="inline-flex items-center gap-2 rounded-full border border-fog bg-white px-4 py-2 font-medium text-ink transition-colors hover:border-graphite"
-          >
-            <GoogleIcon className="h-4 w-4" />
-            Continue with Google
-          </Link>
-          <Link
-            href="/register"
-            className="inline-flex items-center gap-2 rounded-full border border-fog bg-white px-4 py-2 font-medium text-ink transition-colors hover:border-graphite"
-          >
-            <XBrandIcon className="h-4 w-4" />
-            Continue with X
-          </Link>
+        <div className="animate-rise flex flex-col items-center gap-3 [animation-delay:300ms]">
+          <p className="text-sm text-graphite">Getting paid instead?</p>
+          <div className="flex flex-wrap justify-center gap-2">
+            <Link
+              href="/register?provider=google"
+              className="inline-flex items-center gap-2 rounded-full border border-fog bg-white px-4 py-2 text-sm font-medium text-ink transition-colors hover:border-graphite"
+            >
+              <GoogleIcon className="h-4 w-4" />
+              Continue with Google
+            </Link>
+            <Link
+              href="/register?provider=x"
+              className="inline-flex items-center gap-2 rounded-full border border-fog bg-white px-4 py-2 text-sm font-medium text-ink transition-colors hover:border-graphite"
+            >
+              <XBrandIcon className="h-4 w-4" />
+              Continue with X
+            </Link>
+          </div>
         </div>
       </div>
 
