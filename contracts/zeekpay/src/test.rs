@@ -87,11 +87,14 @@ fn wrong_public_input_count_fails() {
 // ----------------------------------------------------------------------------
 // Contract business-logic tests. The Groth16 verify is exercised for real in
 // the tests above; here we use the cfg(test)-only verify bypass to drive the
-// stateful logic (nullifier replay, root checks, denom, auth, payout). The
+// stateful logic (nullifier replay, root checks, amount, auth, payout). The
 // bypass is excluded from the wasm build and cannot ship.
 // ----------------------------------------------------------------------------
 
-use crate::{test_support, Denom, Error, ZeekPay, ZeekPayClient};
+use crate::{test_support, Error, ZeekPay, ZeekPayClient};
+
+// 10 USDC in stroops (7 decimals on Stellar)
+const TEN_USDC: i128 = 100_000_000;
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{token, Address};
 
@@ -146,7 +149,7 @@ fn happy_path_deposit_then_claim() {
     s.usdc_admin.mint(&depositor, &1_000_000_000); // 100 USDC
 
     let commitment = b32(&s.env, 0xAA);
-    s.client.deposit(&depositor, &Denom::Ten, &commitment);
+    s.client.deposit(&depositor, &TEN_USDC, &commitment);
     // contract holds 10 USDC; depositor down 10.
     assert_eq!(s.token.balance(&s.id), 100_000_000);
     assert_eq!(s.token.balance(&depositor), 900_000_000);
@@ -159,7 +162,7 @@ fn happy_path_deposit_then_claim() {
     let pb = BytesN::from_array(&s.env, &[0u8; 192]);
     let pc = BytesN::from_array(&s.env, &[0u8; 96]);
     s.client
-        .claim(&pa, &pb, &pc, &root, &nullifier, &recipient, &Denom::Ten);
+        .claim(&pa, &pb, &pc, &root, &nullifier, &recipient, &TEN_USDC);
 
     assert_eq!(s.token.balance(&recipient), 100_000_000); // 10 USDC
     assert_eq!(s.token.balance(&s.id), 0);
@@ -174,8 +177,8 @@ fn double_spend_rejected() {
     s.usdc_admin.mint(&depositor, &1_000_000_000);
 
     // two deposits so the pool can cover a (wrongly) repeated claim
-    s.client.deposit(&depositor, &Denom::Ten, &b32(&s.env, 0xA1));
-    s.client.deposit(&depositor, &Denom::Ten, &b32(&s.env, 0xA2));
+    s.client.deposit(&depositor, &TEN_USDC, &b32(&s.env, 0xA1));
+    s.client.deposit(&depositor, &TEN_USDC, &b32(&s.env, 0xA2));
 
     let root = b32(&s.env, 0x11);
     let nullifier = b32(&s.env, 0x22);
@@ -185,11 +188,11 @@ fn double_spend_rejected() {
     let pc = BytesN::from_array(&s.env, &[0u8; 96]);
 
     s.client
-        .claim(&pa, &pb, &pc, &root, &nullifier, &recipient, &Denom::Ten);
+        .claim(&pa, &pb, &pc, &root, &nullifier, &recipient, &TEN_USDC);
     // same nullifier again -> NullifierUsed
     let err = s
         .client
-        .try_claim(&pa, &pb, &pc, &root, &nullifier, &recipient, &Denom::Ten)
+        .try_claim(&pa, &pb, &pc, &root, &nullifier, &recipient, &TEN_USDC)
         .err()
         .unwrap()
         .unwrap();
@@ -206,7 +209,7 @@ fn non_canonical_nullifier_rejected() {
     let recipient = Address::generate(&s.env);
     let depositor = Address::generate(&s.env);
     s.usdc_admin.mint(&depositor, &1_000_000_000);
-    s.client.deposit(&depositor, &Denom::Ten, &b32(&s.env, 0xAA));
+    s.client.deposit(&depositor, &TEN_USDC, &b32(&s.env, 0xAA));
 
     let root = b32(&s.env, 0x11);
     s.client.post_root(&root);
@@ -216,7 +219,7 @@ fn non_canonical_nullifier_rejected() {
 
     let err = s
         .client
-        .try_claim(&pa, &pb, &pc, &root, &b32(&s.env, 0xff), &recipient, &Denom::Ten)
+        .try_claim(&pa, &pb, &pc, &root, &b32(&s.env, 0xff), &recipient, &TEN_USDC)
         .err()
         .unwrap()
         .unwrap();
@@ -241,7 +244,7 @@ fn unknown_root_rejected() {
             &b32(&s.env, 0x11),
             &b32(&s.env, 0x22),
             &recipient,
-            &Denom::Ten,
+            &TEN_USDC,
         )
         .err()
         .unwrap()
@@ -258,7 +261,7 @@ fn paused_blocks_deposit_and_claim() {
 
     let err = s
         .client
-        .try_deposit(&depositor, &Denom::Ten, &b32(&s.env, 0xAA))
+        .try_deposit(&depositor, &TEN_USDC, &b32(&s.env, 0xAA))
         .err()
         .unwrap()
         .unwrap();
@@ -283,7 +286,7 @@ fn claim_before_init_fails() {
             &b32(&env, 0x11),
             &b32(&env, 0x22),
             &recipient,
-            &Denom::Ten,
+            &TEN_USDC,
         )
         .err()
         .unwrap()
@@ -316,7 +319,7 @@ fn claim_bumps_nullifier_and_root_ttl() {
     let depositor = Address::generate(&s.env);
     let recipient = Address::generate(&s.env);
     s.usdc_admin.mint(&depositor, &1_000_000_000);
-    s.client.deposit(&depositor, &Denom::Ten, &b32(&s.env, 0xAA));
+    s.client.deposit(&depositor, &TEN_USDC, &b32(&s.env, 0xAA));
 
     let root = b32(&s.env, 0x11);
     let nullifier = b32(&s.env, 0x22);
@@ -325,7 +328,7 @@ fn claim_bumps_nullifier_and_root_ttl() {
     let pb = BytesN::from_array(&s.env, &[0u8; 192]);
     let pc = BytesN::from_array(&s.env, &[0u8; 96]);
     s.client
-        .claim(&pa, &pb, &pc, &root, &nullifier, &recipient, &Denom::Ten);
+        .claim(&pa, &pb, &pc, &root, &nullifier, &recipient, &TEN_USDC);
 
     // A reaped nullifier = double-spend, so its TTL must be bumped hard on write.
     // get_ttl is remaining-ledgers, so it is at most the value extend_ttl set.

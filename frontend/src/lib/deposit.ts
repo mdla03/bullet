@@ -8,13 +8,6 @@ const NETWORK_PASSPHRASE =
   process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ??
   StellarSdk.Networks.TESTNET;
 
-const DENOM_VARIANT: Record<number, string> = {
-  1: "One",
-  10: "Ten",
-  50: "Fifty",
-  100: "Hundred",
-};
-
 /** Convert a bigint commitment to a 32-byte big-endian Uint8Array. */
 function bigIntToBytes32BE(n: bigint): Uint8Array {
   const hex = n.toString(16).padStart(64, "0");
@@ -28,25 +21,25 @@ function bigIntToBytes32BE(n: bigint): Uint8Array {
 /**
  * Build, prepare, sign (via Freighter), and submit a deposit transaction.
  * Returns the transaction hash on success.
+ * `amount` is the raw stroop value (e.g. 100_000_000n for 10 USDC).
  */
 export async function depositNote(
   senderAddress: string,
   commitment: bigint,
-  denom: 1 | 10 | 50 | 100,
+  amount: bigint,
   signTx: (xdr: string) => Promise<string>
 ): Promise<string> {
   const rpc = new StellarSdk.rpc.Server(RPC_URL);
   const contract = new StellarSdk.Contract(CONTRACT_ID);
   const { xdr } = StellarSdk;
 
-  const denomVariant = DENOM_VARIANT[denom];
-  const denomVal = xdr.ScVal.scvVec([xdr.ScVal.scvSymbol(denomVariant)]);
+  const amountVal = StellarSdk.nativeToScVal(amount, { type: "i128" });
   const commitmentVal = xdr.ScVal.scvBytes(
     Buffer.from(bigIntToBytes32BE(commitment))
   );
   const fromVal = StellarSdk.nativeToScVal(senderAddress, { type: "address" });
 
-  const operation = contract.call("deposit", fromVal, denomVal, commitmentVal);
+  const operation = contract.call("deposit", fromVal, amountVal, commitmentVal);
 
   const account = await rpc.getAccount(senderAddress);
   const tx = new StellarSdk.TransactionBuilder(account, {

@@ -72,7 +72,7 @@ export default function Privacy() {
           <span className="font-semibold text-ink">
             The crowd is still small.
           </span>{" "}
-          Unlinkability hides you among everyone using the same denomination.
+          Unlinkability hides you among all deposits in the contract pool.
           While volume is low, that crowd is thin, and it strengthens as usage
           grows.
         </li>

@@ -6,20 +6,14 @@ const CONTRACT_ID = process.env.NEXT_PUBLIC_CONTRACT_ID ?? "";
 const NETWORK_PASSPHRASE =
   process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ?? StellarSdk.Networks.TESTNET;
 
-const DENOM_VARIANT: Record<number, string> = {
-  1: "One",
-  10: "Ten",
-  50: "Fifty",
-  100: "Hundred",
-};
-
 function hexToBuffer(hex: string): Buffer {
   return Buffer.from(hex, "hex");
 }
 
 /**
  * Build, sign (via Freighter callback), submit, and poll the Soroban
- * claim(proof_a, proof_b, proof_c, root, nullifier, recipient, denom) tx.
+ * claim(proof_a, proof_b, proof_c, root, nullifier, recipient, amount) tx.
+ * `amount` is the raw stroop value (e.g. 100_000_000n for 10 USDC).
  * Returns the transaction hash on SUCCESS.
  */
 export async function claimNote(
@@ -29,7 +23,7 @@ export async function claimNote(
   proofC: string,
   root: string,
   nullifier: string,
-  denom: 1 | 10 | 50 | 100,
+  amount: bigint,
   signTx: (xdr: string) => Promise<string>
 ): Promise<string> {
   const rpc = new StellarSdk.rpc.Server(RPC_URL);
@@ -42,7 +36,7 @@ export async function claimNote(
   const rootVal = xdr.ScVal.scvBytes(hexToBuffer(root));
   const nullifierVal = xdr.ScVal.scvBytes(hexToBuffer(nullifier));
   const recipientVal = StellarSdk.nativeToScVal(connectedAddress, { type: "address" });
-  const denomVal = xdr.ScVal.scvVec([xdr.ScVal.scvSymbol(DENOM_VARIANT[denom])]);
+  const amountVal = StellarSdk.nativeToScVal(amount, { type: "i128" });
 
   const operation = contract.call(
     "claim",
@@ -52,7 +46,7 @@ export async function claimNote(
     rootVal,
     nullifierVal,
     recipientVal,
-    denomVal
+    amountVal
   );
 
   const account = await rpc.getAccount(connectedAddress);

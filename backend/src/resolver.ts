@@ -194,24 +194,24 @@ app.post("/invite/prepare", requireAuth, rateLimit(5, 10 * 60 * 1000), async (_r
 
 app.post("/invite/commit", requireAuth, async (req: Request, res: Response) => {
   const userId = (req as Request & { userId?: string }).userId!;
-  const { handle, denom, claimPayload, custodyStellarAddress, custodySecret, expiresInDays } =
+  const { handle, amount, claimPayload, custodyStellarAddress, custodySecret, expiresInDays } =
     req.body as {
       handle?: string;
-      denom?: 1 | 10 | 50 | 100;
+      amount?: number;
       claimPayload?: unknown;
       custodyStellarAddress?: string;
       custodySecret?: string;
       expiresInDays?: 15 | 30;
     };
-  if (!handle || !denom || !claimPayload || !custodyStellarAddress || !custodySecret) {
-    return void badRequest(res, "handle, denom, claimPayload, custody fields required");
+  if (!handle || !amount || !claimPayload || !custodyStellarAddress || !custodySecret) {
+    return void badRequest(res, "handle, amount, claimPayload, custody fields required");
   }
   const days = expiresInDays === 15 ? 15 : 30;
   try {
     const { id } = await invite.recordInvite({
       senderUserId: userId,
       handle,
-      denom,
+      amount,
       claimPayload,
       custody: { publicKey: custodyStellarAddress, secret: custodySecret },
       expiresInDays: days,
