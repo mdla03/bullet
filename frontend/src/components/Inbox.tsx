@@ -42,6 +42,12 @@ const CLAIM_LABELS: Record<string, string> = {
   submitting: "Submitting…",
 };
 
+/** Normalize legacy denom-format notes (denom: 1|10|50|100 USDC) to stroops. */
+function toStroops(p: ClaimPayload): number {
+  if (p.amount != null) return p.amount;
+  return ((p as unknown as { denom?: number }).denom ?? 0) * 10_000_000;
+}
+
 function timeAgo(iso: string): string {
   const s = (Date.now() - new Date(iso).getTime()) / 1000;
   if (s < 60) return "just now";
@@ -358,7 +364,7 @@ export function Inbox() {
   const claimable = notes.filter(
     (n) => !n.claimedAt && claims[n.id]?.state !== "done"
   );
-  const totalStroops = claimable.reduce((sum, n) => sum + n.payload.amount, 0);
+  const totalStroops = claimable.reduce((sum, n) => sum + toStroops(n.payload), 0);
   const total = totalStroops / 10_000_000;
 
   return (
@@ -422,7 +428,7 @@ export function Inbox() {
                     <span
                       className={`text-lg font-bold tracking-tight ${claimed ? "text-graphite" : ""}`}
                     >
-                      ${note.payload.amount / 10_000_000} USDC
+                      ${toStroops(note.payload) / 10_000_000} USDC
                     </span>
                     <span className="font-mono text-xs text-graphite">
                       note {note.id.slice(0, 4)}…
