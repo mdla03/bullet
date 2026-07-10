@@ -474,7 +474,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
         <>
           <div>
             <label className="mb-1.5 block text-sm font-medium">Amount</label>
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               {DENOMS.map((d) => (
                 <button
                   key={d}

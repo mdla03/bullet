@@ -47,7 +47,7 @@ export default function HeroSendBox() {
       />
       <button
         type="submit"
-        className="shrink-0 rounded-full bg-ink px-7 py-3.5 text-lg font-semibold text-paper transition hover:-translate-y-0.5 hover:bg-ink/85 active:translate-y-0"
+        className="shrink-0 rounded-full bg-ink px-5 py-3.5 text-lg font-semibold text-paper transition hover:-translate-y-0.5 hover:bg-ink/85 active:translate-y-0 sm:px-7"
       >
         Pay
       </button>

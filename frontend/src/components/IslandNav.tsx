@@ -57,7 +57,7 @@ export default function IslandNav() {
             : "px-4 py-2.5 shadow-md shadow-ink/10"
         }`}
       >
-        <Link href="/" className="flex items-center pl-2 pr-8">
+        <Link href="/" className="flex items-center pl-2 pr-4 sm:pr-8">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src="/wordmark.svg"
@@ -69,19 +69,19 @@ export default function IslandNav() {
           <>
             <Link
               href="/send"
-              className="rounded-full px-3 py-1.5 text-sm font-medium text-paper/80 transition-colors hover:bg-white/10 hover:text-paper"
+              className="rounded-full px-2 py-1.5 text-xs font-medium text-paper/80 transition-colors hover:bg-white/10 hover:text-paper sm:px-3 sm:text-sm"
             >
               Send
             </Link>
             <Link
               href="/inbox"
-              className="rounded-full px-3 py-1.5 text-sm font-medium text-paper/80 transition-colors hover:bg-white/10 hover:text-paper"
+              className="rounded-full px-2 py-1.5 text-xs font-medium text-paper/80 transition-colors hover:bg-white/10 hover:text-paper sm:px-3 sm:text-sm"
             >
               Inbox
             </Link>
             <button
               onClick={signOut}
-              className="rounded-full px-3 py-1.5 text-sm font-medium text-paper/60 transition-colors hover:bg-white/10 hover:text-paper"
+              className="rounded-full px-2 py-1.5 text-xs font-medium text-paper/60 transition-colors hover:bg-white/10 hover:text-paper sm:px-3 sm:text-sm"
             >
               Sign out
             </button>
