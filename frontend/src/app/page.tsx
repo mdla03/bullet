@@ -29,28 +29,27 @@ export default function Home() {
           them.
         </p>
 
-        {/* The real send box. Submits straight into the send flow. */}
-        <div className="animate-rise [animation-delay:200ms]">
+        {/* The real send box + sign-in CTA grouped so they sit close together */}
+        <div className="animate-rise flex flex-col items-center gap-5 [animation-delay:200ms]">
           <HeroSendBox />
-        </div>
-
-        <div className="animate-rise flex flex-col items-center gap-3 [animation-delay:300ms]">
-          <p className="text-sm text-graphite">Getting paid instead?</p>
-          <div className="flex flex-wrap justify-center gap-2">
-            <Link
-              href="/register?provider=google"
-              className="inline-flex items-center gap-2 rounded-full border border-fog bg-white px-4 py-2 text-sm font-medium text-ink transition-colors hover:border-graphite"
-            >
-              <GoogleIcon className="h-4 w-4" />
-              Continue with Google
-            </Link>
-            <Link
-              href="/register?provider=x"
-              className="inline-flex items-center gap-2 rounded-full border border-fog bg-white px-4 py-2 text-sm font-medium text-ink transition-colors hover:border-graphite"
-            >
-              <XBrandIcon className="h-4 w-4" />
-              Continue with X
-            </Link>
+          <div className="flex flex-col items-center gap-2">
+            <p className="text-sm text-graphite">Getting paid instead?</p>
+            <div className="flex flex-wrap justify-center gap-2">
+              <Link
+                href="/register?provider=google"
+                className="inline-flex items-center gap-2 rounded-full border border-fog bg-white px-4 py-2 text-sm font-medium text-ink transition-colors hover:border-graphite"
+              >
+                <GoogleIcon className="h-4 w-4" />
+                Continue with Google
+              </Link>
+              <Link
+                href="/register?provider=x"
+                className="inline-flex items-center gap-2 rounded-full border border-fog bg-white px-4 py-2 text-sm font-medium text-ink transition-colors hover:border-graphite"
+              >
+                <XBrandIcon className="h-4 w-4" />
+                Continue with X
+              </Link>
+            </div>
           </div>
         </div>
       </div>
