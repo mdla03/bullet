@@ -208,7 +208,7 @@ export function Inbox() {
       const { proof_a, proof_b, proof_c, nullifier, root } = await proveBrowser(
         BigInt("0x" + p.secret).toString(),
         p.recipientDigest,
-        String(p.denom)
+        String(p.amount)
       );
 
       set({ state: "signing" });
@@ -225,7 +225,7 @@ export function Inbox() {
           proof_c,
           root,
           nullifier,
-          p.denom
+          BigInt(p.amount)
         );
       } else {
         const { signTransaction } = await import("@stellar/freighter-api");
@@ -236,7 +236,7 @@ export function Inbox() {
           proof_c,
           root,
           nullifier,
-          p.denom,
+          BigInt(p.amount),
           async (xdr) => {
             set({ state: "submitting" });
             const signRes = await signTransaction(xdr, {
@@ -358,7 +358,8 @@ export function Inbox() {
   const claimable = notes.filter(
     (n) => !n.claimedAt && claims[n.id]?.state !== "done"
   );
-  const total = claimable.reduce((sum, n) => sum + n.payload.denom, 0);
+  const totalStroops = claimable.reduce((sum, n) => sum + n.payload.amount, 0);
+  const total = totalStroops / 10_000_000;
 
   return (
     <div className="space-y-5">
@@ -421,7 +422,7 @@ export function Inbox() {
                     <span
                       className={`text-lg font-bold tracking-tight ${claimed ? "text-graphite" : ""}`}
                     >
-                      ${note.payload.denom} USDC
+                      ${note.payload.amount / 10_000_000} USDC
                     </span>
                     <span className="font-mono text-xs text-graphite">
                       note {note.id.slice(0, 4)}…

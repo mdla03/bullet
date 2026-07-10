@@ -1,14 +1,14 @@
 //! ZeekPay main contract — Option B (off-chain Merkle).
 //!
-//! deposit: pull fixed-denomination USDC, store commitment, emit event (cheap).
+//! deposit: pull USDC from `from`, store commitment, emit event (cheap).
 //! post_root: admin/relayer publishes an off-chain-computed Merkle root (the
 //!   Option-B trust seam — documented in README honest-limits).
 //! claim: verify a Groth16 proof (real, BLS12-381 host fns) that the caller owns
 //!   a note in the tree under a known root, with {root, nullifier, recipient,
-//!   denom} bound as public inputs; reject replayed nullifiers; pay the recipient.
+//!   amount} bound as public inputs; reject replayed nullifiers; pay the recipient.
 //!
-//! SECURITY-SENSITIVE: nullifier replay = double-spend; recipient+denom binding
-//! prevents front-running / denom-mismatch drains; only contract-known roots are
+//! SECURITY-SENSITIVE: nullifier replay = double-spend; recipient+amount binding
+//! prevents front-running / amount-mismatch drains; only contract-known roots are
 //! accepted. See src/test.rs for the verifier correctness test against a real
 //! snarkjs proof and the adversarial business-logic tests.
 #![no_std]
@@ -31,7 +31,6 @@ use soroban_sdk::{
 
 use verifier::{Proof, VerifyingKey};
 
-const USDC_DECIMALS: i128 = 10_000_000; // 7 decimals on Stellar
 const ROOT_WINDOW: u32 = 64; // recent valid roots kept
 
 // Persistent-entry TTL management (~5s per ledger on Stellar). `extend_to` must
@@ -47,34 +46,6 @@ const NULLIFIER_BUMP_TO: u32 = 3_000_000; // ~173 days, < mainnet max_entry_ttl
 // Roots must outlive their ring-buffer window so in-window claims never fail.
 const ROOT_BUMP_THRESHOLD: u32 = 14 * LEDGERS_PER_DAY; // ~14 days
 const ROOT_BUMP_TO: u32 = 60 * LEDGERS_PER_DAY; // ~60 days
-
-#[contracttype]
-#[derive(Clone, Copy, PartialEq)]
-pub enum Denom {
-    One,
-    Ten,
-    Fifty,
-    Hundred,
-}
-
-impl Denom {
-    fn amount(&self) -> i128 {
-        match self {
-            Denom::One => USDC_DECIMALS,
-            Denom::Ten => 10 * USDC_DECIMALS,
-            Denom::Fifty => 50 * USDC_DECIMALS,
-            Denom::Hundred => 100 * USDC_DECIMALS,
-        }
-    }
-    fn as_u32(&self) -> u32 {
-        match self {
-            Denom::One => 1,
-            Denom::Ten => 10,
-            Denom::Fifty => 50,
-            Denom::Hundred => 100,
-        }
-    }
-}
 
 /// Verifying key stored on-chain (our trusted setup). Set by admin.
 #[contracttype]
@@ -112,6 +83,7 @@ pub enum Error {
     InvalidProof = 7,
     VkNotSet = 8,
     NonCanonicalInput = 9,
+    InvalidAmount = 10,
 }
 
 /// BLS12-381 scalar field modulus r, big-endian. A `nullifier`/`root` is used
@@ -209,40 +181,45 @@ impl ZeekPay {
         Ok(())
     }
 
-    /// Deposit a fixed-denomination note. Pulls `denom` USDC from `from` into the
-    /// contract pool and records the commitment. Emits Deposit (NO sender).
+    /// Deposit a note. Pulls `amount` stroops of USDC from `from` into the
+    /// contract pool and records the commitment. Emits Deposit (NO sender, NO amount).
     pub fn deposit(
         env: Env,
         from: Address,
-        denom: Denom,
+        amount: i128,
         commitment: BytesN<32>,
     ) -> Result<u64, Error> {
         Self::require_initialized(&env)?;
         if Self::is_paused(&env) {
             return Err(Error::Paused);
         }
+        if amount <= 0 {
+            return Err(Error::InvalidAmount);
+        }
         from.require_auth();
 
         let usdc: Address = env.storage().instance().get(&DataKey::Usdc).unwrap();
         let client = token::Client::new(&env, &usdc);
-        client.transfer(&from, &env.current_contract_address(), &denom.amount());
+        client.transfer(&from, &env.current_contract_address(), &amount);
 
         let index: u64 = env.storage().instance().get(&DataKey::Index).unwrap_or(0);
         env.storage()
             .instance()
             .set(&DataKey::Index, &(index + 1));
 
-        // Deposit event carries commitment + denom + index, NEVER the sender.
+        // Deposit event carries commitment + index only. Amount is not emitted:
+        // it is already visible from the SAC transfer and adding it here would
+        // make event scraping trivially link deposit size to the commitment.
         env.events().publish(
             (soroban_sdk::symbol_short!("deposit"),),
-            (commitment, denom.as_u32(), index),
+            (commitment, index),
         );
         Ok(index)
     }
 
     /// Claim a note. Verifies the Groth16 proof binding {root, nullifier,
-    /// recipient, denom}; rejects replayed nullifiers and unknown roots; pays
-    /// the recipient. Emits Claim (NO commitment -> no link to a deposit).
+    /// recipient, amount}; rejects replayed nullifiers and unknown roots; pays
+    /// the recipient. Emits Claim (NO commitment -> no link to a deposit, NO amount).
     pub fn claim(
         env: Env,
         proof_a: BytesN<96>,
@@ -251,11 +228,14 @@ impl ZeekPay {
         root: BytesN<32>,
         nullifier: BytesN<32>,
         recipient: Address,
-        denom: Denom,
+        amount: i128,
     ) -> Result<(), Error> {
         Self::require_initialized(&env)?;
         if Self::is_paused(&env) {
             return Err(Error::Paused);
+        }
+        if amount <= 0 {
+            return Err(Error::InvalidAmount);
         }
         // 0. Reject non-canonical field elements (>= r). Without this, a
         //    nullifier of `n + r` reduces to the same Fr as `n` (so the same
@@ -284,7 +264,7 @@ impl ZeekPay {
                 c: G1Affine::from_bytes(proof_c),
             };
             let vk = Self::load_vk(&env)?;
-            let pubs = Self::derive_public_inputs(&env, &root, &nullifier, &recipient, &denom);
+            let pubs = Self::derive_public_inputs(&env, &root, &nullifier, &recipient, amount);
             if !verifier::verify(&env, &vk, &proof, &pubs) {
                 return Err(Error::InvalidProof);
             }
@@ -305,11 +285,13 @@ impl ZeekPay {
         client.transfer(
             &env.current_contract_address(),
             &recipient,
-            &denom.amount(),
+            &amount,
         );
+        // Claim event carries nullifier only. Amount omitted: the SAC transfer
+        // already records it, and repeating it here aids amount-linkage analysis.
         env.events().publish(
             (soroban_sdk::symbol_short!("claim"),),
-            (nullifier, denom.as_u32()),
+            (nullifier,),
         );
         Ok(())
     }
@@ -373,21 +355,24 @@ impl ZeekPay {
 
     /// Public inputs the proof must commit to, in this exact order. The
     /// circom-circuit feature MUST match this encoding:
-    ///   [ Fr(root), Fr(nullifier), Fr(recipient_digest), Fr(denom) ]
+    ///   [ Fr(root), Fr(nullifier), Fr(recipient_digest), Fr(amount) ]
     /// recipient_digest = sha256(recipient.to_xdr) with the top byte zeroed so
     /// the 256-bit digest is < the BLS scalar field r.
+    /// amount is the raw stroop value (always positive, fits in u64 for any
+    /// realistic payment).
     fn derive_public_inputs(
         env: &Env,
         root: &BytesN<32>,
         nullifier: &BytesN<32>,
         recipient: &Address,
-        denom: &Denom,
+        amount: i128,
     ) -> Vec<Fr> {
         let mut v: Vec<Fr> = Vec::new(env);
         v.push_back(Fr::from_bytes(root.clone()));
         v.push_back(Fr::from_bytes(nullifier.clone()));
         v.push_back(Self::recipient_fr(env, recipient));
-        v.push_back(Fr::from_u256(soroban_sdk::U256::from_u32(env, denom.as_u32())));
+        // amount fits in u64 for any realistic payment; map into the lo_lo word.
+        v.push_back(Fr::from_u256(soroban_sdk::U256::from_parts(env, 0, 0, 0, amount as u64)));
         v
     }
 

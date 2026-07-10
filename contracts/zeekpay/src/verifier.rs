@@ -10,7 +10,7 @@
 //!
 //! SECURITY: soundness depends on (1) the vk being our genuine trusted-setup vk,
 //! (2) the public inputs binding everything the contract cares about
-//! (root, nullifier, recipient, denom — done in claim).
+//! (root, nullifier, recipient, amount — done in claim).
 
 use soroban_sdk::crypto::bls12_381::{Fr, G1Affine, G2Affine};
 use soroban_sdk::{Env, U256, Vec};
