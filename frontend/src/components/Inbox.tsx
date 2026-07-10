@@ -13,6 +13,7 @@ import {
   type BulletKeys,
   type InboxNote,
 } from "@/lib/notes";
+import { type ClaimPayload } from "@/lib/claim_link";
 import { claimNote } from "@/lib/claim_tx";
 import { isNullifierUsed, nullifierHexFromSecret } from "@/lib/nullifier";
 import {
