@@ -36,7 +36,13 @@ function providerLabel(provider: string): string {
   return provider.charAt(0).toUpperCase() + provider.slice(1);
 }
 
-export function RegisterFlow({ oauthError }: { oauthError?: string }) {
+export function RegisterFlow({
+  oauthError,
+  autoProvider,
+}: {
+  oauthError?: string;
+  autoProvider?: "google" | "x";
+}) {
   const supabase = createClient();
 
   const [session, setSession] = useState<Session | null | undefined>(undefined);
@@ -61,6 +67,14 @@ export function RegisterFlow({ oauthError }: { oauthError?: string }) {
     return () => sub.subscription.unsubscribe();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Auto-trigger OAuth when arriving from hero buttons with ?provider=
+  useEffect(() => {
+    if (session === null && autoProvider) {
+      signIn(autoProvider);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session, autoProvider]);
 
   const refreshMe = useCallback(async () => {
     try {

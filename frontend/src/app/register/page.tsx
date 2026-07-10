@@ -5,9 +5,13 @@ export const metadata = { title: "Sign in · bullet" };
 export default async function RegisterPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; provider?: string }>;
 }) {
   const params = await searchParams;
+  const autoProvider =
+    params.provider === "google" || params.provider === "x"
+      ? params.provider
+      : undefined;
 
   return (
     <div className="mx-auto max-w-lg">
@@ -19,7 +23,7 @@ export default async function RegisterPage({
         typing your handle, and each payment arrives as a private note only
         you can claim.
       </p>
-      <RegisterFlow oauthError={params.error} />
+      <RegisterFlow oauthError={params.error} autoProvider={autoProvider} />
     </div>
   );
 }
