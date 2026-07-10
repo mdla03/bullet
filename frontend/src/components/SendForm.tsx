@@ -23,8 +23,10 @@ const CONTRACT_ID = process.env.NEXT_PUBLIC_CONTRACT_ID ?? "";
 const FRONTEND_URL =
   process.env.NEXT_PUBLIC_FRONTEND_URL ?? "https://bullet-frontend.vercel.app";
 
-const DENOMS = [1, 10, 50, 100] as const;
-type Denom = (typeof DENOMS)[number];
+// USDC whole-unit presets shown in the UI. Internally converted to stroops.
+const USDC_PRESETS = [1, 10, 50, 100] as const;
+type UsdcPreset = (typeof USDC_PRESETS)[number];
+const USDC_DECIMALS = 10_000_000n;
 
 type Step = "idle" | "computing" | "signing" | "submitting" | "done" | "error";
 
@@ -61,7 +63,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
   const [unregistered, setUnregistered] = useState<string | null>(null);
   const [expiryDays, setExpiryDays] = useState<15 | 30>(30);
   const [resolving, setResolving] = useState(false);
-  const [denom, setDenom] = useState<Denom>(10);
+  const [selectedUsdc, setSelectedUsdc] = useState<UsdcPreset>(10);
   const [step, setStep] = useState<Step>("idle");
   const [claimLink, setClaimLink] = useState("");
   const [notePosted, setNotePosted] = useState(false);
@@ -155,11 +157,13 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
         .join("");
       const secretBigInt = BigInt("0x" + secret);
 
+      const amountStroops = BigInt(selectedUsdc) * USDC_DECIMALS;
+
       // Commitment computed locally so the claim secret never leaves the tab.
       const commitment = computeCommitment(
         secretBigInt.toString(),
         recipientDigest.toString(),
-        denom.toString()
+        amountStroops.toString()
       );
       const commitmentBigInt = BigInt(commitment);
 
@@ -167,7 +171,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
       const hash = await depositNote(
         senderAddress,
         commitmentBigInt,
-        denom,
+        amountStroops,
         async (xdr) => {
           setStep("submitting");
           const signRes = await signTransaction(xdr, {
@@ -184,7 +188,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
       const payload: ClaimPayload = {
         secret,
         recipientDigest: recipientDigest.toString(),
-        denom,
+        amount: Number(amountStroops),
         contractId: CONTRACT_ID,
         network: "testnet",
         recipientHandle: unregistered,
@@ -195,7 +199,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
         method: "POST",
         body: JSON.stringify({
           handle: unregistered,
-          denom,
+          amount: Number(amountStroops),
           claimPayload: payload,
           custodyStellarAddress,
           custodySecret,
@@ -249,11 +253,13 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
         .join("");
       const secretBigInt = BigInt("0x" + secret);
 
+      const amountStroops = BigInt(selectedUsdc) * USDC_DECIMALS;
+
       // 4. Compute commitment locally so the claim secret never leaves the tab.
       const commitment = computeCommitment(
         secretBigInt.toString(),
         recipientDigest.toString(),
-        denom.toString()
+        amountStroops.toString()
       );
       const commitmentBigInt = BigInt(commitment);
 
@@ -262,7 +268,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
       const hash = await depositNote(
         senderAddress,
         commitmentBigInt,
-        denom,
+        amountStroops,
         async (xdr) => {
           setStep("submitting");
           const signRes = await signTransaction(xdr, {
@@ -280,7 +286,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
       const payload: ClaimPayload = {
         secret,
         recipientDigest: recipientDigest.toString(),
-        denom,
+        amount: Number(amountStroops),
         contractId: CONTRACT_ID,
         network: "testnet",
         recipientHandle: recipient.trim(),
@@ -304,7 +310,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
     }
   }
 
-  const shareMessage = `I sent you $${denom} USDC on Bullet (private payments on Stellar). Claim it here: ${claimLink}. Keep this link private, it contains your claim secret.`;
+  const shareMessage = `I sent you $${selectedUsdc} USDC on Bullet (private payments on Stellar). Claim it here: ${claimLink}. Keep this link private, it contains your claim secret.`;
 
   // ---- Success state ----
   if (step === "done") {
@@ -312,7 +318,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
       <div className="space-y-5">
         <div className="rounded-2xl border border-signal/30 bg-white p-5">
           <p className="flex items-center gap-2 font-semibold text-signal">
-            <CheckIcon className="h-5 w-5" />${denom} USDC{" "}
+            <CheckIcon className="h-5 w-5" />${selectedUsdc} USDC{" "}
             {sentAsInvite ? "sent as an invite to " : "sent silently to "}
             {recipient.trim()}
           </p>
@@ -469,19 +475,19 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
         </div>
       )}
 
-      {/* Denomination picker */}
+      {/* Amount picker */}
       {(resolved || unregistered) && (
         <>
           <div>
             <label className="mb-1.5 block text-sm font-medium">Amount</label>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {DENOMS.map((d) => (
+              {USDC_PRESETS.map((d) => (
                 <button
                   key={d}
-                  onClick={() => setDenom(d)}
+                  onClick={() => setSelectedUsdc(d)}
                   disabled={busy}
                   className={`rounded-xl border px-2 py-3 transition-colors disabled:opacity-50 ${
-                    denom === d
+                    selectedUsdc === d
                       ? "border-ink bg-ink text-paper"
                       : "border-fog bg-white text-graphite hover:border-graphite"
                   }`}
@@ -493,8 +499,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
             </div>
             <p className="mt-2 flex items-start gap-1.5 text-xs text-graphite">
               <EyeOffIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              Every Bullet payment uses one of these fixed amounts, so no
-              single payment stands out on-chain.
+              Nothing on-chain connects your deposit to the claim.
             </p>
           </div>
 
@@ -526,8 +531,8 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
               className="w-full rounded-full bg-ink px-4 py-3 font-semibold text-paper transition-colors hover:bg-ink/85"
             >
               {unregistered
-                ? `Send $${denom} as invite`
-                : `Send $${denom} silently`}
+                ? `Send $${selectedUsdc} as invite`
+                : `Send $${selectedUsdc} silently`}
             </button>
           )}
         </>

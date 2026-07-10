@@ -7,7 +7,7 @@ import { CheckIcon, LoaderIcon } from "@/components/icons";
 interface Invite {
   id: string;
   handle: string;
-  denom: number;
+  amount: number; // raw stroops
   expires_at: string;
   delivered_at: string | null;
   claimed_at: string | null;
@@ -71,7 +71,7 @@ export function SentInvites() {
             >
               <div className="min-w-0 flex-1">
                 <p className="flex items-baseline gap-2">
-                  <span className="font-bold">${inv.denom}</span>
+                  <span className="font-bold">${inv.amount / 10_000_000}</span>
                   <span className="truncate text-graphite">to {inv.handle}</span>
                 </p>
               </div>

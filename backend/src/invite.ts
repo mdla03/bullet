@@ -165,7 +165,7 @@ void USDC_SAC; // referenced by the browser prover / claim path, not here.
 export async function recordInvite(args: {
   senderUserId: string;
   handle: string;
-  denom: 1 | 10 | 50 | 100;
+  amount: number; // raw stroops
   claimPayload: unknown;
   custody: { publicKey: string; secret: string };
   expiresInDays: 15 | 30;
@@ -179,7 +179,7 @@ export async function recordInvite(args: {
     .insert({
       sender_user_id: args.senderUserId,
       handle_normalized: normalizeHandle(args.handle),
-      denom: args.denom,
+      denom: args.amount, // DB column still named 'denom'; now stores stroop amount
       claim_payload: args.claimPayload,
       custody_stellar_address: args.custody.publicKey,
       custody_secret: encryptCustodySecret(args.custody.secret),
@@ -254,7 +254,7 @@ export async function listInvitesForSender(senderUserId: string): Promise<
   Array<{
     id: string;
     handle: string;
-    denom: number;
+    amount: number; // raw stroops (DB column 'denom' holds this value)
     expires_at: string;
     delivered_at: string | null;
     claimed_at: string | null;
@@ -273,7 +273,7 @@ export async function listInvitesForSender(senderUserId: string): Promise<
   return (data ?? []).map((r) => ({
     id: r.id,
     handle: r.handle_normalized,
-    denom: r.denom,
+    amount: r.denom,
     expires_at: r.expires_at,
     delivered_at: r.delivered_at,
     claimed_at: r.claimed_at,
