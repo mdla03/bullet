@@ -6,6 +6,7 @@ import * as store from "./store.js";
 import * as leaves from "./leaves.js";
 import * as tree from "./tree.js";
 import * as invite from "./invite.js";
+import * as email from "./email.js";
 import * as indexer from "./indexer.js";
 import { requireAuth } from "./supabase.js";
 import { verifyLinkWalletSig } from "./verify.js";
@@ -216,6 +217,16 @@ app.post("/invite/commit", requireAuth, async (req: Request, res: Response) => {
       custody: { publicKey: custodyStellarAddress, secret: custodySecret },
       expiresInDays: days,
     });
+    // Best-effort email delivery when the handle is an email address.
+    if (email.isEmail(handle)) {
+      const cp = claimPayload as { secret: string; recipientDigest: string; amount: number };
+      const link = email.buildClaimLink(cp);
+      email
+        .sendClaimEmail(handle, link, Math.round(amount / 10_000_000), days)
+        .catch((e: unknown) => {
+          console.warn("[email] claim email failed:", String(e).slice(0, 200));
+        });
+    }
     res.json({ ok: true, id });
   } catch (e) {
     res.status(500).json({ error: "invite_record_failed", detail: String(e) });
