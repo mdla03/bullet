@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ResolveResult } from "@zeekpay/shared";
 import { computeRecipientDigest } from "@/lib/recipient";
+import { deriveStealthDigest } from "@/lib/stealth";
 import { computeCommitment } from "@/lib/commitment";
 import { depositNote } from "@/lib/deposit";
 import { encodeClaimLink, type ClaimPayload } from "@/lib/claim_link";
@@ -238,11 +239,10 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
       }
       const senderAddress = addrRes.address;
 
-      // 2. Compute recipientDigest from resolved Stellar address
+      // 2. Derive per-payment stealth recipientDigest via ECDH with recipient's bullet key.
       setStep("computing");
-      const recipientDigest = await computeRecipientDigest(
-        resolved.stellarAddress
-      );
+      const { recipientDigest: recipientDigestDec, ephemeralPubHex } =
+        deriveStealthDigest(resolved.zeekPayPubKey!);
 
       // 3. Generate random 32-byte secret; zero top byte so value < BLS12-381 r.
       const secretBytes = new Uint8Array(32);
@@ -258,7 +258,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
       // 4. Compute commitment locally so the claim secret never leaves the tab.
       const commitment = computeCommitment(
         secretBigInt.toString(),
-        recipientDigest.toString(),
+        recipientDigestDec,
         amountStroops.toString()
       );
       const commitmentBigInt = BigInt(commitment);
@@ -285,11 +285,12 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
       // 6. Build claim link
       const payload: ClaimPayload = {
         secret,
-        recipientDigest: recipientDigest.toString(),
+        recipientDigest: recipientDigestDec,
         amount: Number(amountStroops),
         contractId: CONTRACT_ID,
         network: "testnet",
         recipientHandle: recipient.trim(),
+        ephemeralPubkey: ephemeralPubHex,
       };
       setClaimLink(encodeClaimLink(payload, FRONTEND_URL));
 
