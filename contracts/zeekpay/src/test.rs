@@ -162,7 +162,7 @@ fn happy_path_deposit_then_claim() {
     let pb = BytesN::from_array(&s.env, &[0u8; 192]);
     let pc = BytesN::from_array(&s.env, &[0u8; 96]);
     s.client
-        .claim(&pa, &pb, &pc, &root, &nullifier, &recipient, &TEN_USDC);
+        .claim(&pa, &pb, &pc, &root, &nullifier, &b32(&s.env, 0x33), &recipient, &TEN_USDC);
 
     assert_eq!(s.token.balance(&recipient), 100_000_000); // 10 USDC
     assert_eq!(s.token.balance(&s.id), 0);
@@ -188,11 +188,11 @@ fn double_spend_rejected() {
     let pc = BytesN::from_array(&s.env, &[0u8; 96]);
 
     s.client
-        .claim(&pa, &pb, &pc, &root, &nullifier, &recipient, &TEN_USDC);
+        .claim(&pa, &pb, &pc, &root, &nullifier, &b32(&s.env, 0x33), &recipient, &TEN_USDC);
     // same nullifier again -> NullifierUsed
     let err = s
         .client
-        .try_claim(&pa, &pb, &pc, &root, &nullifier, &recipient, &TEN_USDC)
+        .try_claim(&pa, &pb, &pc, &root, &nullifier, &b32(&s.env, 0x33), &recipient, &TEN_USDC)
         .err()
         .unwrap()
         .unwrap();
@@ -219,7 +219,33 @@ fn non_canonical_nullifier_rejected() {
 
     let err = s
         .client
-        .try_claim(&pa, &pb, &pc, &root, &b32(&s.env, 0xff), &recipient, &TEN_USDC)
+        .try_claim(&pa, &pb, &pc, &root, &b32(&s.env, 0xff), &b32(&s.env, 0x33), &recipient, &TEN_USDC)
+        .err()
+        .unwrap()
+        .unwrap();
+    assert_eq!(err, Error::NonCanonicalInput);
+}
+
+#[test]
+fn non_canonical_recipient_digest_rejected() {
+    // A recipientDigest >= r must be rejected so an attacker cannot submit
+    // two claims with `d` and `d + r` which map to the same proof field element
+    // but different on-chain semantics.
+    let s = setup();
+    let recipient = Address::generate(&s.env);
+    let depositor = Address::generate(&s.env);
+    s.usdc_admin.mint(&depositor, &1_000_000_000);
+    s.client.deposit(&depositor, &TEN_USDC, &b32(&s.env, 0xAA));
+
+    let root = b32(&s.env, 0x11);
+    s.client.post_root(&root);
+    let pa = BytesN::from_array(&s.env, &[0u8; 96]);
+    let pb = BytesN::from_array(&s.env, &[0u8; 192]);
+    let pc = BytesN::from_array(&s.env, &[0u8; 96]);
+
+    let err = s
+        .client
+        .try_claim(&pa, &pb, &pc, &root, &b32(&s.env, 0x22), &b32(&s.env, 0xff), &recipient, &TEN_USDC)
         .err()
         .unwrap()
         .unwrap();
@@ -243,6 +269,7 @@ fn unknown_root_rejected() {
             &pc,
             &b32(&s.env, 0x11),
             &b32(&s.env, 0x22),
+            &b32(&s.env, 0x33),
             &recipient,
             &TEN_USDC,
         )
@@ -285,6 +312,7 @@ fn claim_before_init_fails() {
             &pc,
             &b32(&env, 0x11),
             &b32(&env, 0x22),
+            &b32(&env, 0x33),
             &recipient,
             &TEN_USDC,
         )
@@ -328,7 +356,7 @@ fn claim_bumps_nullifier_and_root_ttl() {
     let pb = BytesN::from_array(&s.env, &[0u8; 192]);
     let pc = BytesN::from_array(&s.env, &[0u8; 96]);
     s.client
-        .claim(&pa, &pb, &pc, &root, &nullifier, &recipient, &TEN_USDC);
+        .claim(&pa, &pb, &pc, &root, &nullifier, &b32(&s.env, 0x33), &recipient, &TEN_USDC);
 
     // A reaped nullifier = double-spend, so its TTL must be bumped hard on write.
     // get_ttl is remaining-ledgers, so it is at most the value extend_ttl set.
