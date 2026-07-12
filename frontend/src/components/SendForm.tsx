@@ -21,8 +21,10 @@ import {
 const RESOLVER_URL =
   process.env.NEXT_PUBLIC_RESOLVER_URL ?? "http://localhost:3001";
 const CONTRACT_ID = process.env.NEXT_PUBLIC_CONTRACT_ID ?? "";
-const FRONTEND_URL =
-  process.env.NEXT_PUBLIC_FRONTEND_URL ?? "https://bullet-frontend.vercel.app";
+function getFrontendUrl() {
+  if (typeof window !== "undefined") return window.location.origin;
+  return process.env.NEXT_PUBLIC_FRONTEND_URL ?? "https://bullet-frontend.vercel.app";
+}
 
 // USDC whole-unit presets shown in the UI. Internally converted to stroops.
 const USDC_PRESETS = [1, 10, 50, 100] as const;
@@ -194,7 +196,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
         network: "testnet",
         recipientHandle: unregistered,
       };
-      setClaimLink(encodeClaimLink(payload, FRONTEND_URL));
+      setClaimLink(encodeClaimLink(payload, getFrontendUrl()));
 
       const commitInv = await apiFetch("/invite/commit", {
         method: "POST",
@@ -243,7 +245,6 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
       setStep("computing");
       const { recipientDigest: recipientDigestDec, ephemeralPubHex } =
         deriveStealthDigest(resolved.zeekPayPubKey!);
-
       // 3. Generate random 32-byte secret; zero top byte so value < BLS12-381 r.
       const secretBytes = new Uint8Array(32);
       crypto.getRandomValues(secretBytes);
@@ -292,7 +293,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
         recipientHandle: recipient.trim(),
         ephemeralPubkey: ephemeralPubHex,
       };
-      setClaimLink(encodeClaimLink(payload, FRONTEND_URL));
+      setClaimLink(encodeClaimLink(payload, getFrontendUrl()));
 
       // 7. Deliver to their Bullet inbox (encrypted to their published key).
       // Best-effort: the claim link above works even if this fails.
