@@ -190,8 +190,9 @@ export function start(): void {
     try {
       const { inserted } = await pollOnce();
       if (inserted > 0) console.log(`[indexer] inserted ${inserted} new leaf(s); root posted`);
+      else console.log(`[indexer] poll ok, 0 new leaves, ${leaves.count()} total`);
     } catch (e) {
-      console.error("[indexer] poll error:", String(e).slice(0, 400));
+      console.log("[indexer] poll error: " + String(e).slice(0, 400));
     } finally {
       timer = setTimeout(tick, POLL_MS);
     }
