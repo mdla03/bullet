@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { decodeClaimLink, type ClaimPayload } from "@/lib/claim_link";
-import { computeRecipientDigest } from "@/lib/recipient";
 import { claimNote } from "@/lib/claim_tx";
 import { proveBrowser } from "@/lib/prove_browser";
 
@@ -12,7 +11,6 @@ type Step =
   | "ready"
   | "connecting"
   | "matched"
-  | "mismatch"
   | "proving"
   | "signing"
   | "submitting"
@@ -49,12 +47,8 @@ export function ClaimView({ encoded }: { encoded: string }) {
       const { requestAccess } = await import("@stellar/freighter-api");
       const addrRes = await requestAccess();
       if ("error" in addrRes) throw new Error(`Freighter: ${addrRes.error}`);
-      const addr = addrRes.address;
-      setConnectedAddress(addr);
-
-      const digest = await computeRecipientDigest(addr);
-      const matched = digest.toString() === payload!.recipientDigest;
-      setState((s) => ({ ...s, step: matched ? "matched" : "mismatch" }));
+      setConnectedAddress(addrRes.address);
+      setState((s) => ({ ...s, step: "matched" }));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setState((s) => ({ ...s, step: "error" }));
@@ -84,6 +78,9 @@ export function ClaimView({ encoded }: { encoded: string }) {
       setState((s) => ({ ...s, step: "signing" }));
       const { signTransaction } = await import("@stellar/freighter-api");
 
+      // Convert decimal recipientDigest to 32-byte big-endian hex for contract.
+      const rdHex = BigInt(p.recipientDigest).toString(16).padStart(64, "0");
+
       const hash = await claimNote(
         connectedAddress,
         proof_a,
@@ -91,6 +88,7 @@ export function ClaimView({ encoded }: { encoded: string }) {
         proof_c,
         root,
         nullifier,
+        rdHex,
         BigInt(p.amount),
         async (xdr) => {
           setState((s) => ({ ...s, step: "submitting" }));
@@ -170,14 +168,6 @@ export function ClaimView({ encoded }: { encoded: string }) {
         </div>
       </div>
 
-      {/* Mismatch warning */}
-      {step === "mismatch" && (
-        <div className="rounded-xl border border-amber bg-amber/10 px-4 py-3 text-sm">
-          This note is not for this wallet address. Connect the correct Stellar
-          wallet.
-        </div>
-      )}
-
       {/* Error */}
       {error && (
         <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -187,7 +177,6 @@ export function ClaimView({ encoded }: { encoded: string }) {
 
       {/* Connected address */}
       {(step === "matched" ||
-        step === "mismatch" ||
         step === "proving" ||
         step === "signing" ||
         step === "submitting") &&
@@ -200,8 +189,8 @@ export function ClaimView({ encoded }: { encoded: string }) {
           </p>
         )}
 
-      {/* Connect button — pre-match states */}
-      {(step === "ready" || step === "mismatch" || step === "error") && (
+      {/* Connect button */}
+      {(step === "ready" || step === "error") && (
         <button
           onClick={handleConnect}
           className="w-full rounded-full bg-ink px-4 py-3 font-semibold text-paper transition-colors hover:bg-ink/85"

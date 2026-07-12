@@ -224,6 +224,7 @@ export function Inbox() {
         // Invite: custody wallet claims + forwards to the user's real wallet
         // in one tx. No Freighter prompt needed.
         set({ state: "submitting" });
+        const rdHexInv = BigInt(p.recipientDigest).toString(16).padStart(64, "0");
         hash = await claimInvite(
           note.custodyStellarSecret,
           address,
@@ -232,10 +233,13 @@ export function Inbox() {
           proof_c,
           root,
           nullifier,
+          rdHexInv,
           BigInt(p.amount)
         );
       } else {
         const { signTransaction } = await import("@stellar/freighter-api");
+        // Convert decimal recipientDigest to 32-byte big-endian hex for contract.
+        const rdHex = BigInt(p.recipientDigest).toString(16).padStart(64, "0");
         hash = await claimNote(
           address,
           proof_a,
@@ -243,6 +247,7 @@ export function Inbox() {
           proof_c,
           root,
           nullifier,
+          rdHex,
           BigInt(p.amount),
           async (xdr) => {
             set({ state: "submitting" });

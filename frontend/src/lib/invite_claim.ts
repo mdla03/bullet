@@ -44,6 +44,7 @@ export async function claimInvite(
   proofC: string,
   root: string,
   nullifier: string,
+  recipientDigest: string,
   amount: bigint
 ): Promise<string> {
   const rpc = new StellarSdk.rpc.Server(RPC_URL);
@@ -62,6 +63,7 @@ export async function claimInvite(
     xdr.ScVal.scvBytes(hexToBuffer(proofC)),
     xdr.ScVal.scvBytes(hexToBuffer(root)),
     xdr.ScVal.scvBytes(hexToBuffer(nullifier)),
+    xdr.ScVal.scvBytes(hexToBuffer(recipientDigest)),
     StellarSdk.nativeToScVal(custodyAddr, { type: "address" }),
     StellarSdk.nativeToScVal(amount, { type: "i128" })
   );

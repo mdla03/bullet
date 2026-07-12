@@ -12,8 +12,9 @@ function hexToBuffer(hex: string): Buffer {
 
 /**
  * Build, sign (via Freighter callback), submit, and poll the Soroban
- * claim(proof_a, proof_b, proof_c, root, nullifier, recipient, amount) tx.
+ * claim(proof_a, proof_b, proof_c, root, nullifier, recipient_digest, recipient, amount) tx.
  * `amount` is the raw stroop value (e.g. 100_000_000n for 10 USDC).
+ * `recipientDigest` is the 64-char hex (32-byte BE) passed explicitly to the contract.
  * Returns the transaction hash on SUCCESS.
  */
 export async function claimNote(
@@ -23,6 +24,7 @@ export async function claimNote(
   proofC: string,
   root: string,
   nullifier: string,
+  recipientDigest: string,
   amount: bigint,
   signTx: (xdr: string) => Promise<string>
 ): Promise<string> {
@@ -35,6 +37,7 @@ export async function claimNote(
   const proofCVal = xdr.ScVal.scvBytes(hexToBuffer(proofC));
   const rootVal = xdr.ScVal.scvBytes(hexToBuffer(root));
   const nullifierVal = xdr.ScVal.scvBytes(hexToBuffer(nullifier));
+  const recipientDigestVal = xdr.ScVal.scvBytes(hexToBuffer(recipientDigest));
   const recipientVal = StellarSdk.nativeToScVal(connectedAddress, { type: "address" });
   const amountVal = StellarSdk.nativeToScVal(amount, { type: "i128" });
 
@@ -45,6 +48,7 @@ export async function claimNote(
     proofCVal,
     rootVal,
     nullifierVal,
+    recipientDigestVal,
     recipientVal,
     amountVal
   );

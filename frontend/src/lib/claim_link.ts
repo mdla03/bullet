@@ -10,6 +10,9 @@ export interface ClaimPayload {
   /** Handle the sender addressed (e.g. "@elykable", "you@x.com"). Shown in the
    * inbox; not carried in the link. */
   recipientHandle?: string;
+  /** X25519 ephemeral pubkey (hex) used for stealth ECDH derivation of
+   * recipientDigest. Present in inbox notes; omitted from URL links. */
+  ephemeralPubkey?: string;
 }
 
 /** Only these three fields travel in the URL. Everything else is a known
