@@ -45,7 +45,8 @@ let running = false;
 let hydrated = false;
 let timer: ReturnType<typeof setTimeout> | null = null;
 
-/** Rebuild the in-memory tree from the durable Postgres store. Idempotent. */
+/** Rebuild the in-memory tree from the durable Postgres store. Idempotent.
+ *  Posts the current root on-chain so claims work immediately after restart. */
 export async function hydrate(): Promise<void> {
   const all = await store.loadLeaves();
   leaves.clearAll();
@@ -56,6 +57,14 @@ export async function hydrate(): Promise<void> {
   }
   hydrated = true;
   console.log(`[indexer] hydrated ${all.length} leaf(s) from Postgres`);
+  if (all.length > 0) {
+    try {
+      await postRoot(tree.root());
+      console.log("[indexer] root posted after hydration");
+    } catch (e) {
+      console.error("[indexer] post_root after hydration failed (non-fatal):", String(e).slice(0, 200));
+    }
+  }
 }
 
 /** One poll: fetch new deposit events since the cursor, insert confirmed
@@ -122,11 +131,12 @@ export async function pollOnce(): Promise<{ inserted: number }> {
     }
   }
 
-  await store.setCursor(res.events.length > 0 ? maxLedger : latest.sequence);
-
   if (inserted > 0) {
     await postRoot(tree.root());
   }
+  // Advance cursor AFTER post_root succeeds so a failed root post retries
+  // the same event range on the next poll instead of silently skipping it.
+  await store.setCursor(res.events.length > 0 ? maxLedger : latest.sequence);
   return { inserted };
 }
 
