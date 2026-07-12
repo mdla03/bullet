@@ -24,7 +24,6 @@ mod groth16_fixture;
 mod test;
 
 use soroban_sdk::crypto::bls12_381::{Fr, G1Affine, G2Affine};
-use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, token, Address, BytesN, Env, Vec,
 };
@@ -218,8 +217,15 @@ impl ZeekPay {
     }
 
     /// Claim a note. Verifies the Groth16 proof binding {root, nullifier,
-    /// recipient, amount}; rejects replayed nullifiers and unknown roots; pays
-    /// the recipient. Emits Claim (NO commitment -> no link to a deposit, NO amount).
+    /// recipientDigest, amount}; rejects replayed nullifiers and unknown roots;
+    /// pays the recipient.
+    ///
+    /// `recipient_digest` is the proof-bound identity commitment. For stealth
+    /// payments it is ECDH-derived (unique per payment), so the contract does
+    /// NOT re-derive it from `recipient`. The caller (claimer) supplies it and
+    /// the proof must commit to it — a wrong digest simply fails verification.
+    ///
+    /// Emits Claim (NO commitment -> no link to a deposit, NO amount).
     pub fn claim(
         env: Env,
         proof_a: BytesN<96>,
@@ -227,6 +233,7 @@ impl ZeekPay {
         proof_c: BytesN<96>,
         root: BytesN<32>,
         nullifier: BytesN<32>,
+        recipient_digest: BytesN<32>,
         recipient: Address,
         amount: i128,
     ) -> Result<(), Error> {
@@ -255,7 +262,11 @@ impl ZeekPay {
         {
             return Err(Error::NullifierUsed);
         }
-        // 3. Verify the proof (real). The test-only bypass below is excluded
+        // 3. Reject non-canonical recipient_digest (same reasoning as nullifier).
+        if !is_canonical_fr(&recipient_digest) {
+            return Err(Error::NonCanonicalInput);
+        }
+        // 4. Verify the proof (real). The test-only bypass below is excluded
         //    from the wasm build (cfg(test)) and cannot ship.
         if !Self::maybe_skip_verify(&env) {
             let proof = Proof {
@@ -264,12 +275,12 @@ impl ZeekPay {
                 c: G1Affine::from_bytes(proof_c),
             };
             let vk = Self::load_vk(&env)?;
-            let pubs = Self::derive_public_inputs(&env, &root, &nullifier, &recipient, amount);
+            let pubs = Self::derive_public_inputs(&env, &root, &nullifier, &recipient_digest, amount);
             if !verifier::verify(&env, &vk, &proof, &pubs) {
                 return Err(Error::InvalidProof);
             }
         }
-        // 4. Mark nullifier used (after verify, before payout). Bump its TTL so
+        // 5. Mark nullifier used (after verify, before payout). Bump its TTL so
         //    it is never reaped while unattended: a reaped nullifier = double-spend.
         env.storage()
             .persistent()
@@ -279,7 +290,7 @@ impl ZeekPay {
             NULLIFIER_BUMP_THRESHOLD,
             NULLIFIER_BUMP_TO,
         );
-        // 5. Pay recipient.
+        // 6. Pay recipient.
         let usdc: Address = env.storage().instance().get(&DataKey::Usdc).unwrap();
         let client = token::Client::new(&env, &usdc);
         client.transfer(
@@ -356,32 +367,28 @@ impl ZeekPay {
     /// Public inputs the proof must commit to, in this exact order. The
     /// circom-circuit feature MUST match this encoding:
     ///   [ Fr(root), Fr(nullifier), Fr(recipient_digest), Fr(amount) ]
-    /// recipient_digest = sha256(recipient.to_xdr) with the top byte zeroed so
-    /// the 256-bit digest is < the BLS scalar field r.
+    ///
+    /// `recipient_digest` is now caller-supplied (stealth derivation): the sender
+    /// computes it via ECDH so each payment has a unique digest even to the same
+    /// recipient. The contract no longer re-derives it from the claim address.
+    /// A wrong digest simply fails proof verification (the proof commits to it).
+    ///
     /// amount is the raw stroop value (always positive, fits in u64 for any
     /// realistic payment).
     fn derive_public_inputs(
         env: &Env,
         root: &BytesN<32>,
         nullifier: &BytesN<32>,
-        recipient: &Address,
+        recipient_digest: &BytesN<32>,
         amount: i128,
     ) -> Vec<Fr> {
         let mut v: Vec<Fr> = Vec::new(env);
         v.push_back(Fr::from_bytes(root.clone()));
         v.push_back(Fr::from_bytes(nullifier.clone()));
-        v.push_back(Self::recipient_fr(env, recipient));
+        v.push_back(Fr::from_bytes(recipient_digest.clone()));
         // amount fits in u64 for any realistic payment; map into the lo_lo word.
         v.push_back(Fr::from_u256(soroban_sdk::U256::from_parts(env, 0, 0, 0, amount as u64)));
         v
-    }
-
-    fn recipient_fr(env: &Env, recipient: &Address) -> Fr {
-        let xdr = recipient.clone().to_xdr(env);
-        let digest = env.crypto().sha256(&xdr);
-        let mut bytes = digest.to_array();
-        bytes[0] = 0; // ensure < r (BLS scalar field is ~255 bits)
-        Fr::from_bytes(BytesN::from_array(env, &bytes))
     }
 
     // verify bypass: real in wasm, test-controllable in unit tests only.
