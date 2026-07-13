@@ -79,6 +79,12 @@ export default function IslandNav() {
             >
               Inbox
             </Link>
+            <Link
+              href="/account"
+              className="rounded-full px-2 py-1.5 text-xs font-medium text-paper/80 transition-colors hover:bg-white/10 hover:text-paper sm:px-3 sm:text-sm"
+            >
+              Account
+            </Link>
             <button
               onClick={signOut}
               className="rounded-full px-2 py-1.5 text-xs font-medium text-paper/60 transition-colors hover:bg-white/10 hover:text-paper sm:px-3 sm:text-sm"
