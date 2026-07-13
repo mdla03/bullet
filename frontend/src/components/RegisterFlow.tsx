@@ -165,9 +165,18 @@ export function RegisterFlow({
     try {
       const { data, error: e1 } = await supabase.auth.getUserIdentities();
       if (e1) throw new Error(e1.message);
-      const identity = data?.identities?.find((i) => i.provider === provider);
+      const identities = data?.identities ?? [];
+      // Match by provider AND handle (email or username) so the correct
+      // identity is removed when multiple identities share a provider.
+      const identity = identities.find((i) => {
+        if (i.provider !== provider) return false;
+        const d = i.identity_data as Record<string, unknown> | undefined;
+        if (!d) return false;
+        return d.email === handle || d.user_name === handle ||
+          d.preferred_username === handle;
+      }) ?? identities.find((i) => i.provider === provider);
       if (!identity) throw new Error("Identity not found for this handle");
-      if ((data?.identities?.length ?? 0) <= 1)
+      if (identities.length <= 1)
         throw new Error(
           "Can't remove your last sign-in method. Add another first."
         );
