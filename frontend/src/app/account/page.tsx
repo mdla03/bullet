@@ -1,4 +1,4 @@
-import { RegisterFlow } from "@/components/RegisterFlow";
+import { AccountView } from "@/components/AccountView";
 
 export const metadata = { title: "Account · bullet" };
 
@@ -9,7 +9,7 @@ export default function AccountPage() {
       <p className="mb-8 text-sm text-graphite">
         Manage your handles and wallet.
       </p>
-      <RegisterFlow />
+      <AccountView />
     </div>
   );
 }
