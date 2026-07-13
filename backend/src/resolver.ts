@@ -288,6 +288,37 @@ app.post("/notes", rateLimit(60, 10 * 60 * 1000), async (req: Request, res: Resp
   res.json({ ok: true });
 });
 
+// ── /activity: user's own send + claim history ───────────────────────────────
+
+app.post("/activity", requireAuth, async (req: Request, res: Response) => {
+  const userId = (req as Request & { userId?: string }).userId!;
+  const { type, amount, txHash, handle } = req.body as {
+    type?: string;
+    amount?: number;
+    txHash?: string;
+    handle?: string;
+  };
+  if (type !== "send" && type !== "claim")
+    return void badRequest(res, "type must be 'send' or 'claim'");
+  if (typeof amount !== "number" || amount <= 0)
+    return void badRequest(res, "amount must be a positive number (stroops)");
+
+  const ok = await store.insertActivity(userId, {
+    type,
+    amount,
+    tx_hash: txHash,
+    handle: type === "send" ? handle : undefined,
+  });
+  if (!ok) return void res.status(500).json({ error: "activity_insert_failed" });
+  res.json({ ok: true });
+});
+
+app.get("/activity", requireAuth, async (req: Request, res: Response) => {
+  const userId = (req as Request & { userId?: string }).userId!;
+  const items = await store.listActivity(userId);
+  res.json({ items });
+});
+
 // ── /commitment ───────────────────────────────────────────────────────────────
 
 // NOTE: the old POST /commitment endpoint was removed. The commitment is now

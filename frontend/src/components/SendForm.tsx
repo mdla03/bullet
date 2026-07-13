@@ -8,7 +8,7 @@ import { computeCommitment } from "@/lib/commitment";
 import { depositNote } from "@/lib/deposit";
 import { encodeClaimLink, type ClaimPayload } from "@/lib/claim_link";
 import { postNote } from "@/lib/notes";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, postActivity } from "@/lib/api";
 import {
   CheckIcon,
   CopyIcon,
@@ -216,6 +216,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
         console.warn("invite_record failed", err);
       }
 
+      postActivity({ type: "send", amount: Number(amountStroops), txHash: hash, handle: unregistered });
       setSentAsInvite(true);
       setStep("done");
     } catch (e) {
@@ -305,6 +306,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
           setNotePosted(false);
         }
       }
+      postActivity({ type: "send", amount: Number(amountStroops), txHash: hash, handle: recipient.trim() });
       setStep("done");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

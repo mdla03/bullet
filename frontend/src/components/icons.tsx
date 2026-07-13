@@ -85,6 +85,24 @@ export function WalletIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+export function ArrowUpRightIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="M7 7h10v10" />
+      <path d="M7 17 17 7" />
+    </Icon>
+  );
+}
+
+export function ArrowDownLeftIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="M17 17H7V7" />
+      <path d="M17 7 7 17" />
+    </Icon>
+  );
+}
+
 // Brand icons (Simple Icons, simpleicons.org, CC0) — path data copied verbatim, 24x24, fill.
 function BrandIcon({ children, ...props }: SVGProps<SVGSVGElement>) {
   return (
