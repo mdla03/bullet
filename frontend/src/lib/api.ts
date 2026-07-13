@@ -30,6 +30,34 @@ export interface MeResponse {
   wallet: { stellar_address: string; bullet_pubkey: string } | null;
 }
 
+export interface ActivityItem {
+  id: string;
+  type: "send" | "claim";
+  amount: number;
+  tx_hash: string | null;
+  handle: string | null;
+  created_at: string;
+}
+
+export async function postActivity(row: {
+  type: "send" | "claim";
+  amount: number;
+  txHash?: string;
+  handle?: string;
+}): Promise<void> {
+  await apiFetch("/activity", {
+    method: "POST",
+    body: JSON.stringify(row),
+  }).catch(() => {}); // best-effort
+}
+
+export async function getActivity(): Promise<ActivityItem[]> {
+  const res = await apiFetch("/activity");
+  if (!res.ok) return [];
+  const json = (await res.json()) as { items: ActivityItem[] };
+  return json.items;
+}
+
 export async function getMe(): Promise<MeResponse> {
   const res = await apiFetch("/me");
   if (!res.ok) throw new Error(`/me failed (${res.status})`);

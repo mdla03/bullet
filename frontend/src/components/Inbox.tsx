@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import type { Session } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
-import { getMe } from "@/lib/api";
+import { getMe, getActivity, postActivity, type ActivityItem } from "@/lib/api";
 import { KEY_DOMAIN_MESSAGE, signatureToHex } from "@/lib/register";
 import {
   deriveBulletKeys,
@@ -17,6 +17,8 @@ import { type ClaimPayload } from "@/lib/claim_link";
 import { claimNote } from "@/lib/claim_tx";
 import { isNullifierUsed, nullifierHexFromSecret } from "@/lib/nullifier";
 import {
+  ArrowDownLeftIcon,
+  ArrowUpRightIcon,
   CheckIcon,
   ExternalLinkIcon,
   LoaderIcon,
@@ -69,6 +71,9 @@ export function Inbox() {
   const [refreshing, setRefreshing] = useState(false);
   const [claims, setClaims] = useState<Record<string, ClaimStatus>>({});
   const [claimingAll, setClaimingAll] = useState(false);
+  const [tab, setTab] = useState<"claimable" | "history">("claimable");
+  const [activity, setActivity] = useState<ActivityItem[] | null>(null);
+  const [loadingActivity, setLoadingActivity] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -264,6 +269,7 @@ export function Inbox() {
 
       set({ state: "done", tx: hash });
       markClaimed(note.id); // best-effort; the nullifier is the real record
+      postActivity({ type: "claim", amount: toStroops(note.payload), txHash: hash });
       return true;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -275,6 +281,17 @@ export function Inbox() {
       }
       set({ state: "error", message: msg });
       return false;
+    }
+  }
+
+  async function loadActivity() {
+    setLoadingActivity(true);
+    try {
+      setActivity(await getActivity());
+    } catch {
+      setActivity([]);
+    } finally {
+      setLoadingActivity(false);
     }
   }
 
@@ -375,122 +392,221 @@ export function Inbox() {
 
   return (
     <div className="space-y-5">
-      {/* Summary header */}
-      <div className="flex flex-wrap items-end justify-between gap-3 rounded-2xl border border-fog bg-white p-5">
-        <div>
-          <p className="text-4xl font-bold tracking-tight">
-            ${total} <span className="text-2xl">USDC</span>
-          </p>
-          <p className="mt-1 text-sm text-graphite">
-            claimable · {claimable.length}{" "}
-            {claimable.length === 1 ? "note" : "notes"}
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
+      {/* Tab bar */}
+      <div className="flex gap-1 rounded-full border border-fog bg-white p-1">
+        {(["claimable", "history"] as const).map((t) => (
           <button
-            onClick={refresh}
-            disabled={refreshing || claimingAll}
-            className="text-xs text-graphite underline-offset-2 hover:text-ink hover:underline disabled:opacity-50"
+            key={t}
+            onClick={() => {
+              setTab(t);
+              if (t === "history" && activity === null) loadActivity();
+            }}
+            className={`flex-1 rounded-full px-4 py-2 text-sm font-medium transition-colors ${
+              tab === t
+                ? "bg-ink text-paper"
+                : "text-graphite hover:text-ink"
+            }`}
           >
-            {refreshing ? "Scanning…" : "Refresh"}
+            {t === "claimable" ? "Claimable" : "History"}
           </button>
-          {claimable.length > 1 && (
-            <button
-              onClick={claimAll}
-              disabled={claimingAll}
-              className="rounded-full bg-signal px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-signal/85 disabled:opacity-50"
-            >
-              {claimingAll ? "Claiming…" : "Claim all"}
-            </button>
-          )}
-        </div>
+        ))}
       </div>
 
-      {/* Ledger */}
-      {notes.length === 0 ? (
-        <div className="rounded-2xl border border-fog bg-white px-6 py-10 text-center">
-          <p className="font-medium">No notes yet.</p>
-          <p className="mt-1 text-sm text-graphite">
-            Payments sent to your handle will appear here.
-          </p>
-        </div>
-      ) : (
-        <ul className="divide-y divide-fog rounded-2xl border border-fog bg-white">
-          {notes.map((note) => {
-            const status = claims[note.id];
-            const claimed = !!note.claimedAt || status?.state === "done";
-            const busy =
-              status &&
-              (status.state === "proving" ||
-                status.state === "signing" ||
-                status.state === "submitting");
-            return (
-              <li
-                key={note.id}
-                className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-4"
+      {/* Claimable tab */}
+      {tab === "claimable" && (
+        <>
+          {/* Summary header */}
+          <div className="flex flex-wrap items-end justify-between gap-3 rounded-2xl border border-fog bg-white p-5">
+            <div>
+              <p className="text-4xl font-bold tracking-tight">
+                ${total} <span className="text-2xl">USDC</span>
+              </p>
+              <p className="mt-1 text-sm text-graphite">
+                claimable · {claimable.length}{" "}
+                {claimable.length === 1 ? "note" : "notes"}
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={refresh}
+                disabled={refreshing || claimingAll}
+                className="text-xs text-graphite underline-offset-2 hover:text-ink hover:underline disabled:opacity-50"
               >
-                <div className="min-w-0 flex-1">
-                  <p className="flex items-baseline gap-3">
-                    <span
-                      className={`text-lg font-bold tracking-tight ${claimed ? "text-graphite" : ""}`}
-                    >
-                      ${toStroops(note.payload) / 10_000_000} USDC
-                    </span>
-                    <span className="font-mono text-xs text-graphite">
-                      note {note.id.slice(0, 4)}…
-                    </span>
-                  </p>
-                  <p className="text-xs text-graphite">
-                    received {timeAgo(note.createdAt)}
-                    {note.payload.recipientHandle && (
-                      <>
-                        {" · sent to "}
-                        <span className="text-ink">
-                          {note.payload.recipientHandle}
-                        </span>
-                      </>
-                    )}
-                  </p>
-                </div>
+                {refreshing ? "Scanning…" : "Refresh"}
+              </button>
+              {claimable.length > 1 && (
+                <button
+                  onClick={claimAll}
+                  disabled={claimingAll}
+                  className="rounded-full bg-signal px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-signal/85 disabled:opacity-50"
+                >
+                  {claimingAll ? "Claiming…" : "Claim all"}
+                </button>
+              )}
+            </div>
+          </div>
 
-                {claimed ? (
-                  <span className="flex items-center gap-1.5 text-sm font-medium text-signal">
-                    <CheckIcon className="h-4 w-4" />
-                    claimed
-                    {status?.state === "done" && (
+          {/* Ledger */}
+          {notes.length === 0 ? (
+            <div className="rounded-2xl border border-fog bg-white px-6 py-10 text-center">
+              <p className="font-medium">No notes yet.</p>
+              <p className="mt-1 text-sm text-graphite">
+                Payments sent to your handle will appear here.
+              </p>
+            </div>
+          ) : (
+            <ul className="divide-y divide-fog rounded-2xl border border-fog bg-white">
+              {notes.map((note) => {
+                const status = claims[note.id];
+                const claimed = !!note.claimedAt || status?.state === "done";
+                const busy =
+                  status &&
+                  (status.state === "proving" ||
+                    status.state === "signing" ||
+                    status.state === "submitting");
+                return (
+                  <li
+                    key={note.id}
+                    className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-4"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="flex items-baseline gap-3">
+                        <span
+                          className={`text-lg font-bold tracking-tight ${claimed ? "text-graphite" : ""}`}
+                        >
+                          ${toStroops(note.payload) / 10_000_000} USDC
+                        </span>
+                        <span className="font-mono text-xs text-graphite">
+                          note {note.id.slice(0, 4)}…
+                        </span>
+                      </p>
+                      <p className="text-xs text-graphite">
+                        received {timeAgo(note.createdAt)}
+                        {note.payload.recipientHandle && (
+                          <>
+                            {" · sent to "}
+                            <span className="text-ink">
+                              {note.payload.recipientHandle}
+                            </span>
+                          </>
+                        )}
+                      </p>
+                    </div>
+
+                    {claimed ? (
+                      <span className="flex items-center gap-1.5 text-sm font-medium text-signal">
+                        <CheckIcon className="h-4 w-4" />
+                        claimed
+                        {status?.state === "done" && (
+                          <a
+                            href={`https://stellar.expert/explorer/testnet/tx/${status.tx}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="ml-1 text-graphite hover:text-ink"
+                            aria-label="View claim on stellar.expert"
+                          >
+                            <ExternalLinkIcon className="h-3.5 w-3.5" />
+                          </a>
+                        )}
+                      </span>
+                    ) : busy ? (
+                      <span className="flex items-center gap-2 text-sm text-graphite">
+                        <LoaderIcon className="h-4 w-4 animate-spin" />
+                        {CLAIM_LABELS[status.state]}
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => claimOne(note)}
+                        disabled={claimingAll}
+                        className="rounded-full border border-fog bg-white px-4 py-1.5 text-sm font-semibold transition-colors hover:border-graphite disabled:opacity-50"
+                      >
+                        Claim
+                      </button>
+                    )}
+
+                    {status?.state === "error" && (
+                      <p className="w-full text-xs text-red-700">{status.message}</p>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+
+          <p className="text-xs text-graphite">
+            Each claim is its own transaction with its own proof. Nothing on-chain
+            connects a claim to the deposit that funded it.
+          </p>
+        </>
+      )}
+
+      {/* History tab */}
+      {tab === "history" && (
+        <>
+          {loadingActivity ? (
+            <div className="flex items-center gap-2 rounded-2xl border border-fog bg-white px-5 py-4 text-sm text-graphite">
+              <LoaderIcon className="h-4 w-4 animate-spin" />
+              Loading history…
+            </div>
+          ) : !activity || activity.length === 0 ? (
+            <div className="rounded-2xl border border-fog bg-white px-6 py-10 text-center">
+              <p className="font-medium">No activity yet.</p>
+              <p className="mt-1 text-sm text-graphite">
+                Sends and claims will appear here.
+              </p>
+            </div>
+          ) : (
+            <ul className="divide-y divide-fog rounded-2xl border border-fog bg-white">
+              {activity.map((item) => {
+                const usdc = item.amount / 10_000_000;
+                const isSend = item.type === "send";
+                return (
+                  <li
+                    key={item.id}
+                    className="flex items-center gap-3 px-5 py-4"
+                  >
+                    <div
+                      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
+                        isSend ? "bg-paper" : "bg-signal/10"
+                      }`}
+                    >
+                      {isSend ? (
+                        <ArrowUpRightIcon className="h-4 w-4 text-graphite" />
+                      ) : (
+                        <ArrowDownLeftIcon className="h-4 w-4 text-signal" />
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium">
+                        {isSend ? "Sent" : "Claimed"}{" "}
+                        <span className="font-bold">${usdc} USDC</span>
+                        {isSend && item.handle && (
+                          <span className="text-graphite">
+                            {" "}to {item.handle}
+                          </span>
+                        )}
+                      </p>
+                      <p className="text-xs text-graphite">
+                        {timeAgo(item.created_at)}
+                      </p>
+                    </div>
+                    {item.tx_hash && (
                       <a
-                        href={`https://stellar.expert/explorer/testnet/tx/${status.tx}`}
+                        href={`https://stellar.expert/explorer/testnet/tx/${item.tx_hash}`}
                         target="_blank"
                         rel="noreferrer"
-                        className="ml-1 text-graphite hover:text-ink"
-                        aria-label="View claim on stellar.expert"
+                        className="shrink-0 text-graphite hover:text-ink"
+                        aria-label="View on stellar.expert"
                       >
                         <ExternalLinkIcon className="h-3.5 w-3.5" />
                       </a>
                     )}
-                  </span>
-                ) : busy ? (
-                  <span className="flex items-center gap-2 text-sm text-graphite">
-                    <LoaderIcon className="h-4 w-4 animate-spin" />
-                    {CLAIM_LABELS[status.state]}
-                  </span>
-                ) : (
-                  <button
-                    onClick={() => claimOne(note)}
-                    disabled={claimingAll}
-                    className="rounded-full border border-fog bg-white px-4 py-1.5 text-sm font-semibold transition-colors hover:border-graphite disabled:opacity-50"
-                  >
-                    Claim
-                  </button>
-                )}
-
-                {status?.state === "error" && (
-                  <p className="w-full text-xs text-red-700">{status.message}</p>
-                )}
-              </li>
-            );
-          })}
-        </ul>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </>
       )}
 
       {error && (
@@ -498,11 +614,6 @@ export function Inbox() {
           {error}
         </div>
       )}
-
-      <p className="text-xs text-graphite">
-        Each claim is its own transaction with its own proof. Nothing on-chain
-        connects a claim to the deposit that funded it.
-      </p>
     </div>
   );
 }

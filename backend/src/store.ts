@@ -117,6 +117,44 @@ export async function insertNote(row: {
   return !error;
 }
 
+// ── activity ──────────────────────────────────────────────────────────────────
+
+export interface Activity {
+  id: string;
+  type: "send" | "claim";
+  amount: number;
+  tx_hash: string | null;
+  handle: string | null;
+  created_at: string;
+}
+
+export async function insertActivity(
+  userId: string,
+  row: { type: "send" | "claim"; amount: number; tx_hash?: string; handle?: string }
+): Promise<boolean> {
+  const { error } = await serviceClient.from("activity").insert({
+    user_id: userId,
+    type: row.type,
+    amount: row.amount,
+    tx_hash: row.tx_hash ?? null,
+    handle: row.handle ?? null,
+  });
+  return !error;
+}
+
+export async function listActivity(userId: string): Promise<Activity[]> {
+  const { data, error } = await serviceClient
+    .from("activity")
+    .select("id, type, amount, tx_hash, handle, created_at")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(100);
+  if (error) return [];
+  return (data ?? []) as Activity[];
+}
+
+// ── wallet ────────────────────────────────────────────────────────────────────
+
 export type AttachWalletResult =
   | { ok: true; wallet: Wallet }
   | { conflict: true; detail: string };
