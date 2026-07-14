@@ -24,6 +24,14 @@ import {
   LoaderIcon,
   WalletIcon,
 } from "@/components/icons";
+import { Skeleton } from "@/components/Skeleton";
+
+const PAGE_SIZE = 10;
+
+const TABS = [
+  { key: "claimable", label: "Claimable" },
+  { key: "history", label: "History" },
+] as const;
 import { proveBrowser } from "@/lib/prove_browser";
 import { claimInvite } from "@/lib/invite_claim";
 
@@ -77,12 +85,13 @@ export function Inbox() {
   const [keys, setKeys] = useState<BulletKeys | null>(null);
   const [notes, setNotes] = useState<InboxNote[] | null>(null);
   const [unlocking, setUnlocking] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
   const [claims, setClaims] = useState<Record<string, ClaimStatus>>({});
   const [claimingAll, setClaimingAll] = useState(false);
   const [tab, setTab] = useState<"claimable" | "history">("claimable");
   const [activity, setActivity] = useState<ActivityItem[] | null>(null);
   const [loadingActivity, setLoadingActivity] = useState(false);
+  const [claimableShown, setClaimableShown] = useState(PAGE_SIZE);
+  const [historyShown, setHistoryShown] = useState(PAGE_SIZE);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -150,17 +159,18 @@ export function Inbox() {
     }
   }
 
-  async function refresh() {
+  // Re-scan notes when the tab comes back into focus. Cheaper than polling.
+  useEffect(() => {
     if (!keys) return;
-    setRefreshing(true);
-    try {
-      await loadNotes(keys, address);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setRefreshing(false);
-    }
-  }
+    const onFocus = () => {
+      loadNotes(keys, address).catch((e) => {
+        console.warn("[inbox] refresh on focus failed", e);
+      });
+    };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [keys, address]);
 
   // Fetch notes, then reconcile against the chain: a note whose nullifier is
   // already spent (e.g. claimed via its backup link) is stamped claimed so it
@@ -312,23 +322,24 @@ export function Inbox() {
 
   if (session === undefined || (session && wallet === undefined)) {
     return (
-      <div className="flex items-center gap-2 rounded-2xl border border-fog bg-white px-5 py-4 text-sm text-graphite">
-        <LoaderIcon className="h-4 w-4 animate-spin" />
-        Checking your session…
+      <div className="space-y-3 rounded-2xl border border-fog bg-white p-6">
+        <Skeleton className="h-6 w-32" />
+        <Skeleton className="h-4 w-full" />
+        <Skeleton className="h-11 rounded-full" />
       </div>
     );
   }
 
   if (!session) {
     return (
-      <div className="space-y-4 rounded-2xl border border-fog bg-white px-6 py-8 text-center">
-        <p className="font-medium">Your inbox lives behind your account.</p>
+      <div className="space-y-4 rounded-2xl border border-fog bg-white p-6">
+        <h2 className="text-xl font-bold tracking-tight">Sign in to see your inbox</h2>
         <p className="text-sm text-graphite">
-          Sign in to see the notes waiting for your handle.
+          Notes sent to your handle wait here until you claim them.
         </p>
         <Link
           href="/register"
-          className="inline-block rounded-full bg-ink px-6 py-3 font-semibold text-paper transition-colors hover:bg-ink/85"
+          className="flex w-full items-center justify-center rounded-full bg-ink px-5 py-3 font-semibold text-paper transition-colors hover:bg-ink/85"
         >
           Sign in
         </Link>
@@ -338,15 +349,14 @@ export function Inbox() {
 
   if (!wallet) {
     return (
-      <div className="space-y-4 rounded-2xl border border-fog bg-white px-6 py-8 text-center">
-        <p className="font-medium">One step left: attach your wallet.</p>
+      <div className="space-y-4 rounded-2xl border border-fog bg-white p-6">
+        <h2 className="text-xl font-bold tracking-tight">Attach a wallet</h2>
         <p className="text-sm text-graphite">
-          Your inbox is encrypted to keys derived from your wallet. Attach it
-          once and your notes appear here.
+          Notes are encrypted to keys derived from your wallet.
         </p>
         <Link
           href="/register"
-          className="inline-block rounded-full bg-ink px-6 py-3 font-semibold text-paper transition-colors hover:bg-ink/85"
+          className="flex w-full items-center justify-center rounded-full bg-ink px-5 py-3 font-semibold text-paper transition-colors hover:bg-ink/85"
         >
           Finish setup
         </Link>
@@ -357,12 +367,11 @@ export function Inbox() {
   if (!keys || !notes) {
     return (
       <div className="space-y-4">
-        <div className="space-y-3 rounded-2xl border border-fog bg-white p-6">
-          <p className="font-medium">Unlock your inbox</p>
+        <div className="space-y-4 rounded-2xl border border-fog bg-white p-6">
+          <h2 className="text-xl font-bold tracking-tight">Unlock inbox</h2>
           <p className="text-sm text-graphite">
-            Notes are encrypted to keys only your wallet can re-derive. One
-            Freighter signature unlocks them. Nothing is submitted on-chain
-            and nothing is spent.
+            One Freighter signature derives your reading keys. Nothing is
+            submitted, nothing is spent.
           </p>
           <button
             onClick={unlock}
@@ -389,236 +398,189 @@ export function Inbox() {
   const claimable = notes.filter(
     (n) => !n.claimedAt && claims[n.id]?.state !== "done"
   );
-  // Group claimable by token for the summary header.
-  const totals: Record<number, number> = {};
-  for (const n of claimable) {
-    const tId = n.payload.tokenId ?? 0;
-    totals[tId] = (totals[tId] ?? 0) + toStroops(n.payload);
-  }
-  const summaryParts = Object.entries(totals).map(([tid, stroops]) => {
-    const label = TOKEN_LABELS[Number(tid)] ?? "USDC";
-    const units = stroops / 10_000_000;
-    return [0, 2].includes(Number(tid)) ? `$${units} ${label}` : `${units} ${label}`;
-  });
+  const tabIndex = TABS.findIndex((t) => t.key === tab);
 
   return (
-    <div className="space-y-5">
-      {/* Tab bar */}
-      <div className="flex gap-1 rounded-full border border-fog bg-white p-1">
-        {(["claimable", "history"] as const).map((t) => (
+    <div className="space-y-4">
+      {/* Sliding tab bar (matches Send token toggle) */}
+      <div className="relative flex rounded-full border border-fog bg-white p-1">
+        <div
+          className="absolute bottom-1 top-1 rounded-full bg-ink transition-[left] duration-300 ease-out"
+          style={{
+            width: `calc((100% - 8px) / ${TABS.length})`,
+            left: `calc(4px + ${tabIndex} * (100% - 8px) / ${TABS.length})`,
+          }}
+          aria-hidden
+        />
+        {TABS.map((t) => (
           <button
-            key={t}
+            key={t.key}
             onClick={() => {
-              setTab(t);
-              if (t === "history" && activity === null) loadActivity();
+              setTab(t.key);
+              if (t.key === "history" && activity === null) loadActivity();
             }}
-            className={`flex-1 rounded-full px-4 py-2 text-sm font-medium transition-colors ${
-              tab === t
-                ? "bg-ink text-paper"
-                : "text-graphite hover:text-ink"
+            className={`relative z-10 flex-1 rounded-full px-4 py-2 text-sm font-medium transition-colors duration-200 ${
+              tab === t.key ? "text-paper" : "text-graphite hover:text-ink"
             }`}
           >
-            {t === "claimable" ? "Claimable" : "History"}
+            {t.label}
           </button>
         ))}
       </div>
 
-      {/* Claimable tab */}
       {tab === "claimable" && (
         <>
-          {/* Summary header */}
-          <div className="flex flex-wrap items-end justify-between gap-3 rounded-2xl border border-fog bg-white p-5">
-            <div>
-              <p className="text-4xl font-bold tracking-tight">
-                {summaryParts.join(" + ") || "0"}
-              </p>
+          {claimable.length === 0 ? (
+            <div className="rounded-2xl border border-fog bg-white p-8 text-center">
+              <p className="font-medium">Nothing to claim</p>
               <p className="mt-1 text-sm text-graphite">
-                claimable · {claimable.length}{" "}
-                {claimable.length === 1 ? "note" : "notes"}
+                New payments to your handle land here.
               </p>
             </div>
-            <div className="flex items-center gap-3">
-              <button
-                onClick={refresh}
-                disabled={refreshing || claimingAll}
-                className="text-xs text-graphite underline-offset-2 hover:text-ink hover:underline disabled:opacity-50"
-              >
-                {refreshing ? "Scanning…" : "Refresh"}
-              </button>
+          ) : (
+            <>
               {claimable.length > 1 && (
                 <button
                   onClick={claimAll}
                   disabled={claimingAll}
-                  className="rounded-full bg-signal px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-signal/85 disabled:opacity-50"
+                  className="flex w-full items-center justify-center rounded-full bg-ink px-5 py-3 font-semibold text-paper transition-colors hover:bg-ink/85 disabled:opacity-50"
                 >
-                  {claimingAll ? "Claiming…" : "Claim all"}
+                  {claimingAll ? (
+                    <LoaderIcon className="h-5 w-5 animate-spin" />
+                  ) : (
+                    `Claim all (${claimable.length})`
+                  )}
                 </button>
               )}
-            </div>
-          </div>
-
-          {/* Ledger */}
-          {notes.length === 0 ? (
-            <div className="rounded-2xl border border-fog bg-white px-6 py-10 text-center">
-              <p className="font-medium">No notes yet.</p>
-              <p className="mt-1 text-sm text-graphite">
-                Payments sent to your handle will appear here.
-              </p>
-            </div>
-          ) : (
-            <ul className="divide-y divide-fog rounded-2xl border border-fog bg-white">
-              {notes.map((note) => {
-                const status = claims[note.id];
-                const claimed = !!note.claimedAt || status?.state === "done";
-                const busy =
-                  status &&
-                  (status.state === "proving" ||
-                    status.state === "signing" ||
-                    status.state === "submitting");
-                return (
-                  <li
-                    key={note.id}
-                    className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-4"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <p className="flex items-baseline gap-3">
-                        <span
-                          className={`text-lg font-bold tracking-tight ${claimed ? "text-graphite" : ""}`}
-                        >
+              <ul className="divide-y divide-fog rounded-2xl border border-fog bg-white">
+                {claimable.slice(0, claimableShown).map((note) => {
+                  const status = claims[note.id];
+                  const busy =
+                    status &&
+                    (status.state === "proving" ||
+                      status.state === "signing" ||
+                      status.state === "submitting");
+                  return (
+                    <li key={note.id} className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-base font-bold tracking-tight">
                           {formatNoteAmount(note.payload)}
+                        </p>
+                        <p className="text-xs text-graphite">
+                          {timeAgo(note.createdAt)}
+                          {note.payload.recipientHandle && (
+                            <>
+                              {" · "}
+                              <span className="text-ink">{note.payload.recipientHandle}</span>
+                            </>
+                          )}
+                        </p>
+                      </div>
+                      {busy ? (
+                        <span className="flex items-center gap-2 text-xs text-graphite">
+                          <LoaderIcon className="h-4 w-4 animate-spin" />
+                          {CLAIM_LABELS[status.state]}
                         </span>
-                        <span className="font-mono text-xs text-graphite">
-                          note {note.id.slice(0, 4)}…
-                        </span>
-                      </p>
-                      <p className="text-xs text-graphite">
-                        received {timeAgo(note.createdAt)}
-                        {note.payload.recipientHandle && (
-                          <>
-                            {" · sent to "}
-                            <span className="text-ink">
-                              {note.payload.recipientHandle}
-                            </span>
-                          </>
-                        )}
-                      </p>
-                    </div>
-
-                    {claimed ? (
-                      <span className="flex items-center gap-1.5 text-sm font-medium text-signal">
-                        <CheckIcon className="h-4 w-4" />
-                        claimed
-                        {status?.state === "done" && (
-                          <a
-                            href={`https://stellar.expert/explorer/testnet/tx/${status.tx}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="ml-1 text-graphite hover:text-ink"
-                            aria-label="View claim on stellar.expert"
-                          >
-                            <ExternalLinkIcon className="h-3.5 w-3.5" />
-                          </a>
-                        )}
-                      </span>
-                    ) : busy ? (
-                      <span className="flex items-center gap-2 text-sm text-graphite">
-                        <LoaderIcon className="h-4 w-4 animate-spin" />
-                        {CLAIM_LABELS[status.state]}
-                      </span>
-                    ) : (
-                      <button
-                        onClick={() => claimOne(note)}
-                        disabled={claimingAll}
-                        className="rounded-full border border-fog bg-white px-4 py-1.5 text-sm font-semibold transition-colors hover:border-graphite disabled:opacity-50"
-                      >
-                        Claim
-                      </button>
-                    )}
-
-                    {status?.state === "error" && (
-                      <p className="w-full text-xs text-red-700">{status.message}</p>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
+                      ) : (
+                        <button
+                          onClick={() => claimOne(note)}
+                          disabled={claimingAll}
+                          className="rounded-full bg-ink px-4 py-1.5 text-sm font-semibold text-paper transition-colors hover:bg-ink/85 disabled:opacity-50"
+                        >
+                          Claim
+                        </button>
+                      )}
+                      {status?.state === "error" && (
+                        <p className="w-full text-xs text-red-700">{status.message}</p>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+              {claimable.length > claimableShown && (
+                <button
+                  onClick={() => setClaimableShown((n) => n + PAGE_SIZE)}
+                  className="flex w-full items-center justify-center rounded-full border border-fog bg-white px-5 py-2.5 text-sm font-medium text-graphite transition-colors hover:border-graphite hover:text-ink"
+                >
+                  Show more ({claimable.length - claimableShown})
+                </button>
+              )}
+            </>
           )}
-
-          <p className="text-xs text-graphite">
-            Each claim is its own transaction with its own proof. Nothing on-chain
-            connects a claim to the deposit that funded it.
-          </p>
         </>
       )}
 
-      {/* History tab */}
       {tab === "history" && (
         <>
-          {loadingActivity ? (
-            <div className="flex items-center gap-2 rounded-2xl border border-fog bg-white px-5 py-4 text-sm text-graphite">
-              <LoaderIcon className="h-4 w-4 animate-spin" />
-              Loading history…
+          {loadingActivity || !activity ? (
+            <div className="space-y-2 rounded-2xl border border-fog bg-white p-4">
+              <Skeleton className="h-10 rounded-md" />
+              <Skeleton className="h-10 rounded-md" />
+              <Skeleton className="h-10 rounded-md" />
             </div>
-          ) : !activity || activity.length === 0 ? (
-            <div className="rounded-2xl border border-fog bg-white px-6 py-10 text-center">
-              <p className="font-medium">No activity yet.</p>
+          ) : activity.length === 0 ? (
+            <div className="rounded-2xl border border-fog bg-white p-8 text-center">
+              <p className="font-medium">No activity yet</p>
               <p className="mt-1 text-sm text-graphite">
                 Sends and claims will appear here.
               </p>
             </div>
           ) : (
-            <ul className="divide-y divide-fog rounded-2xl border border-fog bg-white">
-              {activity.map((item) => {
-                const units = item.amount / 10_000_000;
-                const isSend = item.type === "send";
-                const tid = item.token_id ?? 0;
-                const label = TOKEN_LABELS[tid] ?? "USDC";
-                const amtLabel = [0, 2].includes(tid) ? `$${units} ${label}` : `${units} ${label}`;
-                return (
-                  <li
-                    key={item.id}
-                    className="flex items-center gap-3 px-5 py-4"
-                  >
-                    <div
-                      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
-                        isSend ? "bg-paper" : "bg-signal/10"
-                      }`}
-                    >
-                      {isSend ? (
-                        <ArrowUpRightIcon className="h-4 w-4 text-graphite" />
-                      ) : (
-                        <ArrowDownLeftIcon className="h-4 w-4 text-signal" />
-                      )}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium">
-                        {isSend ? "Sent" : "Claimed"}{" "}
-                        <span className="font-bold">{amtLabel}</span>
-                        {isSend && item.handle && (
-                          <span className="text-graphite">
-                            {" "}to {item.handle}
-                          </span>
-                        )}
-                      </p>
-                      <p className="text-xs text-graphite">
-                        {timeAgo(item.created_at)}
-                      </p>
-                    </div>
-                    {item.tx_hash && (
-                      <a
-                        href={`https://stellar.expert/explorer/testnet/tx/${item.tx_hash}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="shrink-0 text-graphite hover:text-ink"
-                        aria-label="View on stellar.expert"
+            <>
+              <ul className="divide-y divide-fog rounded-2xl border border-fog bg-white">
+                {activity.slice(0, historyShown).map((item) => {
+                  const units = item.amount / 10_000_000;
+                  const isSend = item.type === "send";
+                  const tid = item.token_id ?? 0;
+                  const label = TOKEN_LABELS[tid] ?? "USDC";
+                  const amtLabel = [0, 2].includes(tid) ? `$${units} ${label}` : `${units} ${label}`;
+                  return (
+                    <li key={item.id} className="flex items-center gap-3 px-4 py-3">
+                      <div
+                        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
+                          isSend ? "bg-paper" : "bg-signal/10"
+                        }`}
                       >
-                        <ExternalLinkIcon className="h-3.5 w-3.5" />
-                      </a>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
+                        {isSend ? (
+                          <ArrowUpRightIcon className="h-4 w-4 text-graphite" />
+                        ) : (
+                          <ArrowDownLeftIcon className="h-4 w-4 text-signal" />
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium">
+                          {isSend ? "Sent" : "Claimed"}{" "}
+                          <span className="font-bold">{amtLabel}</span>
+                          {isSend && item.handle && (
+                            <span className="text-graphite"> to {item.handle}</span>
+                          )}
+                        </p>
+                        <p className="text-xs text-graphite">{timeAgo(item.created_at)}</p>
+                      </div>
+                      {item.tx_hash && (
+                        <a
+                          href={`https://stellar.expert/explorer/testnet/tx/${item.tx_hash}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="shrink-0 text-graphite hover:text-ink"
+                          aria-label="View on stellar.expert"
+                        >
+                          <ExternalLinkIcon className="h-3.5 w-3.5" />
+                        </a>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+              {activity.length > historyShown && (
+                <button
+                  onClick={() => setHistoryShown((n) => n + PAGE_SIZE)}
+                  className="flex w-full items-center justify-center rounded-full border border-fog bg-white px-5 py-2.5 text-sm font-medium text-graphite transition-colors hover:border-graphite hover:text-ink"
+                >
+                  Show more ({activity.length - historyShown})
+                </button>
+              )}
+            </>
           )}
         </>
       )}

@@ -4,12 +4,8 @@ export const metadata = { title: "Inbox · bullet" };
 
 export default function InboxPage() {
   return (
-    <div className="mx-auto max-w-lg">
-      <h1 className="mb-2 text-2xl font-bold tracking-tight">Your inbox</h1>
-      <p className="mb-8 text-sm text-graphite">
-        Payments to your handle arrive here as private notes. Unlock with your
-        wallet to see and claim them.
-      </p>
+    <div className="mx-auto max-w-sm space-y-4">
+      <h1 className="text-3xl font-bold tracking-tight">Inbox</h1>
       <Inbox />
     </div>
   );
