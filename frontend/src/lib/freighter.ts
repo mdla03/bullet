@@ -20,6 +20,19 @@ export async function freighterRequestAccess(): Promise<{ address: string }> {
   return { address: res.address };
 }
 
+/** Returns the address ONLY if this site is already whitelisted in Freighter.
+ * Does not trigger the connect popup. Returns null on any error. */
+export async function freighterGetAddressIfAllowed(): Promise<string | null> {
+  try {
+    const { getAddress } = await import("@stellar/freighter-api");
+    const res = await withTimeout(getAddress(), 3_000, "Freighter address");
+    if ("error" in res && res.error) return null;
+    return res.address || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function freighterSignTransaction(
   xdr: string,
   networkPassphrase: string

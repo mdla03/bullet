@@ -1,9 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import Link from "next/link";
+import { useEffect, useState } from "react";
 import { decodeClaimLink, type ClaimPayload } from "@/lib/claim_link";
 import { claimNote } from "@/lib/claim_tx";
 import { proveBrowser } from "@/lib/prove_browser";
+import { createClient } from "@/lib/supabase/client";
+import { getMe } from "@/lib/api";
+import { freighterGetAddressIfAllowed } from "@/lib/freighter";
+import { AlertCircleIcon, ChevronDownIcon, InboxIcon } from "@/components/icons";
 
 const TOKEN_LABELS: Record<number, string> = { 0: "USDC", 1: "XLM", 2: "USDT" };
 const TOKEN_DECIMALS: Record<number, number> = { 0: 10_000_000, 1: 10_000_000, 2: 10_000_000 };
@@ -42,6 +47,31 @@ export function ClaimView({ encoded }: { encoded: string }) {
   const [txHash, setTxHash] = useState("");
   const [proveDetail, setProveDetail] = useState("");
   const [error, setError] = useState("");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+
+  // If the visitor is signed in with a linked wallet AND Freighter has this
+  // origin whitelisted (returns address without a popup), skip the manual
+  // Connect Wallet step and jump straight to "matched".
+  useEffect(() => {
+    if (step !== "ready") return;
+    let cancelled = false;
+    (async () => {
+      const supabase = createClient();
+      const { data } = await supabase.auth.getSession();
+      if (cancelled || !data.session) return;
+      const me = await getMe().catch(() => null);
+      const linkedAddress = me?.wallet?.stellar_address;
+      if (cancelled || !linkedAddress) return;
+      const freighterAddress = await freighterGetAddressIfAllowed();
+      if (cancelled || !freighterAddress) return;
+      if (freighterAddress !== linkedAddress) return;
+      setConnectedAddress(freighterAddress);
+      setState((s) => ({ ...s, step: "matched" }));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [step]);
 
   async function handleConnect() {
     setError("");
@@ -115,19 +145,38 @@ export function ClaimView({ encoded }: { encoded: string }) {
 
   if (step === "no_link") {
     return (
-      <div className="rounded-2xl border border-fog bg-white px-6 py-8 text-center space-y-2">
-        <p className="font-medium">No claim link found.</p>
-        <p className="text-sm text-graphite">
-          Ask your sender to share the claim link with you.
-        </p>
+      <div className="mx-auto max-w-xs space-y-4">
+        <div className="flex flex-col items-center gap-3 rounded-2xl border border-fog bg-white p-8 text-center">
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-paper">
+            <InboxIcon className="h-5 w-5 text-graphite" />
+          </div>
+          <p className="font-medium">No claim link found</p>
+        </div>
+        <Link
+          href="/"
+          className="flex w-full items-center justify-center rounded-full bg-ink px-5 py-3 font-semibold text-paper transition-colors hover:bg-ink/85"
+        >
+          Back home
+        </Link>
       </div>
     );
   }
 
   if (step === "invalid") {
     return (
-      <div className="rounded-2xl border border-red-300 bg-red-50 px-6 py-8 text-center">
-        <p className="text-red-700">Invalid claim link.</p>
+      <div className="mx-auto max-w-xs space-y-4">
+        <div className="flex flex-col items-center gap-3 rounded-2xl border border-fog bg-white p-8 text-center">
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-paper">
+            <AlertCircleIcon className="h-5 w-5 text-graphite" />
+          </div>
+          <p className="font-medium">Invalid claim link</p>
+        </div>
+        <Link
+          href="/"
+          className="flex w-full items-center justify-center rounded-full bg-ink px-5 py-3 font-semibold text-paper transition-colors hover:bg-ink/85"
+        >
+          Back home
+        </Link>
       </div>
     );
   }
@@ -159,19 +208,39 @@ export function ClaimView({ encoded }: { encoded: string }) {
     <div className="space-y-6">
       {/* Note card */}
       <div className="rounded-2xl border border-fog bg-white px-6 py-6">
-        <p className="text-sm font-bold tracking-tight">bullet</p>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/wordmark.svg" alt="bullet" className="h-5 w-auto" />
         <p className="mt-4 text-5xl font-bold tracking-tight">
           {amountStr} {tokenLabel}
         </p>
         <p className="mt-1 text-graphite">sent to you, silently</p>
-        <div className="mt-5 space-y-1 text-sm text-graphite">
-          <p>
-            Network: <span className="text-ink">{network}</span>
-          </p>
-          <p>
-            Contract:{" "}
-            <span className="font-mono text-ink">{shortContract}</span>
-          </p>
+        <div className="mt-5 border-t border-fog pt-4">
+          <button
+            type="button"
+            onClick={() => setAdvancedOpen((o) => !o)}
+            aria-expanded={advancedOpen}
+            className="flex w-full items-center justify-between text-xs font-medium text-graphite transition-colors hover:text-ink"
+          >
+            <span>Advanced</span>
+            <ChevronDownIcon
+              className={`h-3.5 w-3.5 transition-transform duration-300 ${advancedOpen ? "rotate-180" : ""}`}
+            />
+          </button>
+          <div
+            className={`grid overflow-hidden transition-[grid-template-rows,opacity] duration-300 ease-out ${
+              advancedOpen ? "mt-3 grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
+            }`}
+          >
+            <div className="min-h-0 space-y-1 text-sm text-graphite">
+              <p>
+                Network: <span className="text-ink">{network}</span>
+              </p>
+              <p>
+                Contract:{" "}
+                <span className="font-mono text-ink">{shortContract}</span>
+              </p>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -181,20 +250,6 @@ export function ClaimView({ encoded }: { encoded: string }) {
           {error}
         </div>
       )}
-
-      {/* Connected address */}
-      {(step === "matched" ||
-        step === "proving" ||
-        step === "signing" ||
-        step === "submitting") &&
-        connectedAddress && (
-          <p className="text-xs text-graphite">
-            Connected:{" "}
-            <span className="font-mono">
-              {connectedAddress.slice(0, 12)}…{connectedAddress.slice(-4)}
-            </span>
-          </p>
-        )}
 
       {/* Connect button */}
       {(step === "ready" || step === "error") && (
@@ -220,7 +275,7 @@ export function ClaimView({ encoded }: { encoded: string }) {
       {step === "matched" && (
         <button
           onClick={handleClaim}
-          className="w-full rounded-full bg-signal px-4 py-3 font-semibold text-white transition-colors hover:bg-signal/85"
+          className="w-full rounded-full bg-ink px-4 py-3 font-semibold text-paper transition-colors hover:bg-ink/85"
         >
           Claim {amountStr} {tokenLabel}
         </button>
@@ -230,9 +285,9 @@ export function ClaimView({ encoded }: { encoded: string }) {
       {(step === "proving" || step === "signing" || step === "submitting") && (
         <button
           disabled
-          className="w-full rounded-full bg-signal px-4 py-3 font-semibold text-white opacity-60"
+          className="w-full rounded-full bg-ink px-4 py-3 font-semibold text-paper opacity-60"
         >
-          <span className="mr-2 inline-block h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent align-middle" />
+          <span className="mr-2 inline-block h-4 w-4 animate-spin rounded-full border-2 border-paper border-t-transparent align-middle" />
           {STEP_LABELS[step]}
         </button>
       )}
