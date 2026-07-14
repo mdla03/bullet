@@ -47,10 +47,9 @@ export function ClaimView({ encoded }: { encoded: string }) {
     setError("");
     setState((s) => ({ ...s, step: "connecting" }));
     try {
-      const { requestAccess } = await import("@stellar/freighter-api");
-      const addrRes = await requestAccess();
-      if ("error" in addrRes) throw new Error(`Freighter: ${addrRes.error}`);
-      setConnectedAddress(addrRes.address);
+      const { freighterRequestAccess } = await import("@/lib/freighter");
+      const { address } = await freighterRequestAccess();
+      setConnectedAddress(address);
       setState((s) => ({ ...s, step: "matched" }));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -80,7 +79,7 @@ export function ClaimView({ encoded }: { encoded: string }) {
 
       // 2. Sign + submit claim tx via Freighter (root already posted server-side inside /prove)
       setState((s) => ({ ...s, step: "signing" }));
-      const { signTransaction } = await import("@stellar/freighter-api");
+      const { freighterSignTransaction } = await import("@/lib/freighter");
 
       // Convert decimal recipientDigest to 32-byte big-endian hex for contract.
       const rdHex = BigInt(p.recipientDigest).toString(16).padStart(64, "0");
@@ -96,13 +95,10 @@ export function ClaimView({ encoded }: { encoded: string }) {
         BigInt(p.amount),
         async (xdr) => {
           setState((s) => ({ ...s, step: "submitting" }));
-          const signRes = await signTransaction(xdr, {
-            networkPassphrase:
-              process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ??
-              "Test SDF Network ; September 2015",
-          });
-          if ("error" in signRes) throw new Error(`Freighter: ${signRes.error}`);
-          return signRes.signedTxXdr;
+          return freighterSignTransaction(
+            xdr,
+            process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ?? "Test SDF Network ; September 2015"
+          );
         },
         p.tokenId ?? 0
       );

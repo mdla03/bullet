@@ -140,12 +140,10 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
     setClaimLink("");
     setTxHash("");
     try {
-      const { requestAccess, signTransaction } = await import(
-        "@stellar/freighter-api"
+      const { freighterRequestAccess, freighterSignTransaction } = await import(
+        "@/lib/freighter"
       );
-      const addrRes = await requestAccess();
-      if ("error" in addrRes) throw new Error(`Freighter: ${addrRes.error}`);
-      const senderAddress = addrRes.address;
+      const { address: senderAddress } = await freighterRequestAccess();
 
       // Get a per-invite custody Stellar wallet from the backend.
       setStep("computing");
@@ -187,13 +185,10 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
         amountStroops,
         async (xdr) => {
           setStep("submitting");
-          const signRes = await signTransaction(xdr, {
-            networkPassphrase:
-              process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ??
-              "Test SDF Network ; September 2015",
-          });
-          if ("error" in signRes) throw new Error(`Freighter: ${signRes.error}`);
-          return signRes.signedTxXdr;
+          return freighterSignTransaction(
+            xdr,
+            process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ?? "Test SDF Network ; September 2015"
+          );
         },
         selectedToken.id
       );
@@ -245,14 +240,10 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
 
     try {
       // 1. Connect Freighter wallet
-      const { requestAccess, signTransaction } = await import(
-        "@stellar/freighter-api"
+      const { freighterRequestAccess, freighterSignTransaction } = await import(
+        "@/lib/freighter"
       );
-      const addrRes = await requestAccess();
-      if ("error" in addrRes) {
-        throw new Error(`Freighter: ${addrRes.error}`);
-      }
-      const senderAddress = addrRes.address;
+      const { address: senderAddress } = await freighterRequestAccess();
 
       // 2. Derive per-payment stealth recipientDigest via ECDH with recipient's bullet key.
       setStep("computing");
@@ -286,13 +277,10 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
         amountStroops,
         async (xdr) => {
           setStep("submitting");
-          const signRes = await signTransaction(xdr, {
-            networkPassphrase:
-              process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ??
-              "Test SDF Network ; September 2015",
-          });
-          if ("error" in signRes) throw new Error(`Freighter: ${signRes.error}`);
-          return signRes.signedTxXdr;
+          return freighterSignTransaction(
+            xdr,
+            process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ?? "Test SDF Network ; September 2015"
+          );
         },
         selectedToken.id
       );
