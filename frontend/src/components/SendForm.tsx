@@ -76,7 +76,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
   const [expiryDays, setExpiryDays] = useState<15 | 30>(30);
   const [resolving, setResolving] = useState(false);
   const [selectedToken, setSelectedToken] = useState(TOKENS[0]);
-  const [selectedAmount, setSelectedAmount] = useState(TOKENS[0].presets[1]); // 10
+  const [selectedAmount, setSelectedAmount] = useState<number | null>(null);
   const [step, setStep] = useState<Step>("idle");
   const [claimLink, setClaimLink] = useState("");
   const [notePosted, setNotePosted] = useState(false);
@@ -318,7 +318,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
     }
   }
 
-  const displayAmt = selectedToken.id === 0 ? `$${selectedAmount}` : `${selectedAmount}`;
+  const displayAmt = selectedAmount != null ? `${selectedToken.prefix}${selectedAmount}` : "";
   const shareMessage = `I sent you ${displayAmt} ${selectedToken.label} on Bullet (private payments on Stellar). Claim it here: ${claimLink}. Keep this link private, it contains your claim secret.`;
 
   // ---- Success state ----
@@ -497,7 +497,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
                     key={t.id}
                     onClick={() => {
                       setSelectedToken(t);
-                      setSelectedAmount(t.presets[1] ?? t.presets[0]);
+                      setSelectedAmount(null);
                     }}
                     disabled={busy}
                     className={`flex-1 rounded-full px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50 ${
@@ -564,11 +564,14 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
           ) : (
             <button
               onClick={unregistered ? handleSendInvite : handleSend}
-              className="w-full rounded-full bg-ink px-4 py-3 font-semibold text-paper transition-colors hover:bg-ink/85"
+              disabled={selectedAmount === null}
+              className="w-full rounded-full bg-ink px-4 py-3 font-semibold text-paper transition-colors hover:bg-ink/85 disabled:opacity-40"
             >
-              {unregistered
-                ? `Send ${displayAmt} ${selectedToken.label} as invite`
-                : `Send ${displayAmt} ${selectedToken.label} silently`}
+              {selectedAmount === null
+                ? "Select an amount"
+                : unregistered
+                  ? `Send ${displayAmt} ${selectedToken.label} as invite`
+                  : `Send ${displayAmt} ${selectedToken.label} silently`}
             </button>
           )}
         </>
