@@ -8,14 +8,14 @@ export const metadata: Metadata = {
 export default function Privacy() {
   return (
     <div className="mx-auto max-w-2xl py-12 text-left">
-      <h1 className="text-4xl font-bold tracking-tight">privacy.</h1>
+      <h1 className="text-4xl font-bold tracking-tight">Privacy</h1>
       <p className="mt-4 text-lg text-graphite">
         What Bullet hides, and what it does not. Stated plainly, because
         privacy claims you can not check are worthless.
       </p>
 
       <h2 className="mt-12 text-2xl font-bold tracking-tight">
-        what stays private.
+        What stays private
       </h2>
       <ul className="mt-4 space-y-4 text-graphite">
         <li>
@@ -44,7 +44,7 @@ export default function Privacy() {
       </ul>
 
       <h2 className="mt-12 text-2xl font-bold tracking-tight">
-        what does not.
+        What does not
       </h2>
       <ul className="mt-4 space-y-4 text-graphite">
         <li>
