@@ -5,21 +5,37 @@ import { useRouter } from "next/navigation";
 import type { Session } from "@supabase/supabase-js";
 import {
   CheckIcon,
+  CopyIcon,
+  ExternalLinkIcon,
   GoogleIcon,
   LoaderIcon,
+  MailIcon,
+  TrashIcon,
   WalletIcon,
   XBrandIcon,
 } from "@/components/icons";
+import type { SVGProps } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getMe, type MeResponse } from "@/lib/api";
+import { Skeleton } from "@/components/Skeleton";
 
-type Tab = "handles" | "wallet";
-
-function providerLabel(provider: string): string {
+function providerIcon(provider: string): (p: SVGProps<SVGSVGElement>) => React.ReactElement {
   if (provider === "twitter" || provider === "twitter_v2" || provider === "x")
-    return "X";
-  if (provider === "email") return "Email";
-  return provider.charAt(0).toUpperCase() + provider.slice(1);
+    return XBrandIcon;
+  if (provider === "google") return GoogleIcon;
+  return MailIcon;
+}
+
+// Google first, then X/twitter, then email, then anything else.
+const PROVIDER_RANK: Record<string, number> = {
+  google: 0,
+  x: 1,
+  twitter: 1,
+  twitter_v2: 1,
+  email: 2,
+};
+function providerRank(provider: string): number {
+  return PROVIDER_RANK[provider] ?? 99;
 }
 
 export function AccountView() {
@@ -28,10 +44,11 @@ export function AccountView() {
 
   const [session, setSession] = useState<Session | null | undefined>(undefined);
   const [me, setMe] = useState<MeResponse | null>(null);
-  const [tab, setTab] = useState<Tab>("handles");
   const [working, setWorking] = useState<string>("");
   const [addEmail, setAddEmail] = useState("");
   const [addEmailSent, setAddEmailSent] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [confirmingUnlink, setConfirmingUnlink] = useState("");
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -110,11 +127,20 @@ export function AccountView() {
     }
   }
 
-  if (session === undefined) {
+  if (session === undefined || (session && !me)) {
     return (
-      <div className="flex items-center gap-2 text-sm text-graphite">
-        <LoaderIcon className="h-4 w-4 animate-spin" />
-        Loading…
+      <div className="space-y-4">
+        <div className="space-y-4 rounded-2xl border border-fog bg-white p-6">
+          <Skeleton className="h-7 w-24" />
+          <div className="space-y-2">
+            <Skeleton className="h-12 rounded-xl" />
+            <Skeleton className="h-12 rounded-xl" />
+          </div>
+        </div>
+        <div className="space-y-3 rounded-2xl border border-fog bg-white p-6">
+          <Skeleton className="h-7 w-20" />
+          <Skeleton className="h-12 rounded-xl" />
+        </div>
       </div>
     );
   }
@@ -123,177 +149,181 @@ export function AccountView() {
 
   const linkedWallet = me.wallet ?? null;
   const handles = me.identities ?? [];
-
-  const tabs: { key: Tab; label: string }[] = [
-    { key: "handles", label: "Handles" },
-    { key: "wallet", label: "Wallet" },
-  ];
+  const linkedProviders = new Set(handles.map((h) => h.provider));
+  const missingOAuth = (
+    [
+      { key: "google" as const, label: "Google", Icon: GoogleIcon },
+      { key: "x" as const, label: "X", Icon: XBrandIcon },
+    ] as const
+  ).filter(
+    (p) =>
+      !(
+        linkedProviders.has(p.key) ||
+        (p.key === "x" &&
+          (linkedProviders.has("twitter") || linkedProviders.has("twitter_v2")))
+      )
+  );
+  const hasEmail = linkedProviders.has("email");
 
   return (
-    <div className="space-y-6">
-      {/* Tab bar */}
-      <div className="flex gap-1 rounded-full border border-fog bg-white p-1">
-        {tabs.map((t) => (
-          <button
-            key={t.key}
-            onClick={() => { setTab(t.key); setError(""); }}
-            className={`flex-1 rounded-full px-4 py-2 text-sm font-medium transition-colors ${
-              tab === t.key
-                ? "bg-ink text-paper"
-                : "text-graphite hover:text-ink"
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Handles tab */}
-      {tab === "handles" && (
-        <div className="space-y-4">
-          <div className="rounded-2xl border border-fog bg-white p-5">
-            <p className="text-sm font-medium">Connected handles</p>
-            <p className="mt-1 text-xs text-graphite">
-              Anyone sending to any of these lands in your inbox.
-            </p>
-            <div className="mt-3 space-y-1.5">
-              {handles.map((h) => {
-                const unlinkKey = `unlink:${h.provider}:${h.handle}`;
-                const canUnlink = handles.length > 1;
-                return (
-                  <div
-                    key={`${h.provider}:${h.handle}`}
-                    className="flex items-center gap-2 text-sm"
-                  >
-                    <CheckIcon className="h-4 w-4 shrink-0 text-signal" />
-                    <span className="text-graphite">
-                      {providerLabel(h.provider)}
-                    </span>
-                    <span className="truncate font-medium">{h.handle}</span>
-                    {canUnlink && (
-                      <button
-                        onClick={() => unlinkHandle(h.provider, h.handle ?? "")}
-                        disabled={working !== ""}
-                        className="ml-auto shrink-0 text-xs text-graphite underline-offset-2 hover:text-red-600 hover:underline disabled:opacity-50"
-                      >
-                        {working === unlinkKey ? "Removing…" : "Remove"}
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-            {(() => {
-              const linked = new Set(handles.map((h) => h.provider));
-              const missing = (
-                [
-                  { key: "google" as const, label: "Google" },
-                  { key: "x" as const, label: "X (Twitter)" },
-                ] as const
-              ).filter(
-                (p) =>
-                  !(
-                    linked.has(p.key) ||
-                    (p.key === "x" &&
-                      (linked.has("twitter") || linked.has("twitter_v2")))
-                  )
-              );
-              const hasEmail = linked.has("email");
-              if (missing.length === 0 && hasEmail) return null;
-              return (
-                <div className="mt-4 space-y-2 border-t border-fog pt-4">
-                  <p className="text-xs text-graphite">Add another handle</p>
-                  {missing.map((p) => (
+    <div className="space-y-4">
+      <div className="space-y-4 rounded-2xl border border-fog bg-white p-6">
+        <h2 className="text-xl font-bold tracking-tight">Handles</h2>
+        <div className="space-y-2">
+          {[...handles].sort((a, b) => providerRank(a.provider) - providerRank(b.provider)).map((h) => {
+            const unlinkKey = `unlink:${h.provider}:${h.handle}`;
+            const canUnlink = handles.length > 1;
+            const Icon = providerIcon(h.provider);
+            return (
+              <div
+                key={`${h.provider}:${h.handle}`}
+                className="flex items-center gap-3 rounded-xl border border-fog px-4 py-3 text-sm"
+              >
+                <Icon className="h-4 w-4 shrink-0" />
+                <span className="min-w-0 flex-1 truncate font-medium">{h.handle}</span>
+                {canUnlink && (() => {
+                  const confirming = confirmingUnlink === unlinkKey;
+                  const busy = working === unlinkKey;
+                  return (
                     <button
-                      key={p.key}
-                      onClick={() => linkProvider(p.key)}
-                      disabled={working === "oauth"}
-                      className="flex w-full items-center gap-2 rounded-full border border-fog bg-white px-4 py-2.5 text-sm font-medium transition-colors hover:border-graphite disabled:opacity-50"
+                      onClick={() => {
+                        if (busy) return;
+                        if (confirming) {
+                          setConfirmingUnlink("");
+                          unlinkHandle(h.provider, h.handle ?? "");
+                        } else {
+                          setConfirmingUnlink(unlinkKey);
+                          setTimeout(() => {
+                            setConfirmingUnlink((prev) =>
+                              prev === unlinkKey ? "" : prev
+                            );
+                          }, 3000);
+                        }
+                      }}
+                      aria-label={confirming ? `Confirm removal of ${h.handle}` : `Remove ${h.handle}`}
+                      className={`flex shrink-0 items-center justify-center rounded-full border p-2 transition-all ${
+                        confirming
+                          ? "border-red-300 bg-red-50 px-3 text-xs font-semibold text-red-600"
+                          : "border-fog text-graphite hover:border-red-300 hover:text-red-600"
+                      } ${busy ? "opacity-50" : ""}`}
                     >
-                      {working === "oauth" ? (
-                        <LoaderIcon className="h-4 w-4 animate-spin" />
-                      ) : p.key === "google" ? (
-                        <GoogleIcon className="h-4 w-4" />
+                      {busy ? (
+                        <LoaderIcon className="h-3.5 w-3.5 animate-spin" />
+                      ) : confirming ? (
+                        "Confirm?"
                       ) : (
-                        <XBrandIcon className="h-4 w-4" />
+                        <TrashIcon className="h-3.5 w-3.5" />
                       )}
-                      Connect {p.label}
                     </button>
-                  ))}
-                  {!hasEmail && (
-                    <div className="space-y-1.5 pt-1">
-                      <div className="flex gap-2">
-                        <input
-                          type="email"
-                          placeholder="you@example.com"
-                          value={addEmail}
-                          onChange={(e) => setAddEmail(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (
-                              e.key === "Enter" &&
-                              addEmail.trim() &&
-                              working !== "add_email"
-                            )
-                              addEmailIdentity();
-                          }}
-                          disabled={working === "add_email"}
-                          className="w-full rounded-full border border-fog bg-white px-4 py-2 text-sm placeholder-graphite/60 focus:border-ink focus:outline-none disabled:opacity-50"
-                        />
-                        <button
-                          onClick={addEmailIdentity}
-                          disabled={working === "add_email" || !addEmail.trim()}
-                          className="shrink-0 rounded-full border border-fog bg-white px-4 py-2 text-sm font-medium transition-colors hover:border-graphite disabled:opacity-40"
-                        >
-                          {working === "add_email" ? (
-                            <LoaderIcon className="h-4 w-4 animate-spin" />
-                          ) : (
-                            "Add email"
-                          )}
-                        </button>
-                      </div>
-                      {addEmailSent && (
-                        <p className="text-xs text-signal">
-                          Check that inbox and click the confirmation link.
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })()}
-          </div>
-        </div>
-      )}
-
-      {/* Wallet tab */}
-      {tab === "wallet" && (
-        <div className="space-y-4">
-          <div className="rounded-2xl border border-fog bg-white p-5">
-            <p className="text-sm font-medium">Connected wallet</p>
-            {linkedWallet ? (
-              <div className="mt-3 flex items-center gap-3">
-                <WalletIcon className="h-5 w-5 text-graphite" />
-                <span className="font-mono text-sm">
-                  {linkedWallet.stellar_address.slice(0, 6)}…
-                  {linkedWallet.stellar_address.slice(-6)}
-                </span>
-                <CheckIcon className="ml-auto h-4 w-4 text-signal" />
+                  );
+                })()}
               </div>
-            ) : (
-              <p className="mt-3 text-sm text-graphite">
-                No wallet linked yet.{" "}
-                <a
-                  href="/register"
-                  className="text-ink underline underline-offset-2 hover:no-underline"
+            );
+          })}
+        </div>
+
+        {(missingOAuth.length > 0 || !hasEmail) && (
+          <div className="space-y-2 border-t border-fog pt-4">
+            {missingOAuth.map((p) => (
+              <button
+                key={p.key}
+                onClick={() => linkProvider(p.key)}
+                disabled={working === "oauth"}
+                className="flex w-full items-center justify-center gap-2 rounded-full border border-fog bg-white px-4 py-2.5 text-sm font-medium transition-colors hover:border-graphite disabled:opacity-50"
+              >
+                {working === "oauth" ? (
+                  <LoaderIcon className="h-4 w-4 animate-spin" />
+                ) : (
+                  <p.Icon className="h-4 w-4" />
+                )}
+                Connect {p.label}
+              </button>
+            ))}
+            {!hasEmail && (
+              <div className="space-y-2">
+                <input
+                  type="email"
+                  placeholder="you@example.com"
+                  value={addEmail}
+                  onChange={(e) => setAddEmail(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (
+                      e.key === "Enter" &&
+                      addEmail.trim() &&
+                      working !== "add_email"
+                    )
+                      addEmailIdentity();
+                  }}
+                  disabled={working === "add_email"}
+                  className="w-full rounded-xl border border-fog bg-white px-4 py-2.5 text-sm placeholder-graphite/70 focus:border-ink focus:outline-none disabled:opacity-50"
+                />
+                <button
+                  onClick={addEmailIdentity}
+                  disabled={working === "add_email" || !addEmail.trim()}
+                  className="flex w-full items-center justify-center rounded-full border border-fog bg-white px-4 py-2.5 text-sm font-medium transition-colors hover:border-graphite disabled:opacity-40"
                 >
-                  Complete setup
-                </a>{" "}
-                to connect one.
-              </p>
+                  {working === "add_email" ? (
+                    <LoaderIcon className="h-4 w-4 animate-spin" />
+                  ) : (
+                    "Add email"
+                  )}
+                </button>
+                {addEmailSent && (
+                  <p className="text-xs text-signal">
+                    Check that inbox and click the confirmation link.
+                  </p>
+                )}
+              </div>
             )}
           </div>
-        </div>
-      )}
+        )}
+      </div>
+
+      <div className="space-y-3 rounded-2xl border border-fog bg-white p-6">
+        <h2 className="text-xl font-bold tracking-tight">Wallet</h2>
+        {linkedWallet ? (
+          <>
+            <div className="flex items-center gap-3 rounded-xl border border-fog px-4 py-3">
+              <WalletIcon className="h-4 w-4 shrink-0 text-graphite" />
+              <span className="min-w-0 flex-1 truncate font-mono text-sm">
+                {linkedWallet.stellar_address.slice(0, 6)}…
+                {linkedWallet.stellar_address.slice(-6)}
+              </span>
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(linkedWallet.stellar_address);
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 1500);
+                }}
+                aria-label="Copy address"
+                className="flex shrink-0 items-center justify-center rounded-full border border-fog p-2 text-graphite transition-colors hover:border-graphite hover:text-ink"
+              >
+                {copied ? (
+                  <CheckIcon className="h-3.5 w-3.5 text-signal" />
+                ) : (
+                  <CopyIcon className="h-3.5 w-3.5" />
+                )}
+              </button>
+            </div>
+            <a
+              href={`https://stellar.expert/explorer/testnet/account/${linkedWallet.stellar_address}`}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 text-xs text-graphite hover:text-ink"
+            >
+              <ExternalLinkIcon className="h-3.5 w-3.5" />
+              View on stellar.expert
+            </a>
+          </>
+        ) : (
+          <a
+            href="/register"
+            className="flex w-full items-center justify-center rounded-full bg-ink px-5 py-3 font-semibold text-paper transition-colors hover:bg-ink/85"
+          >
+            Attach a wallet
+          </a>
+        )}
+      </div>
 
       {error && (
         <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">

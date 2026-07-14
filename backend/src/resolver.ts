@@ -8,7 +8,7 @@ import * as tree from "./tree.js";
 import * as invite from "./invite.js";
 import * as email from "./email.js";
 import * as indexer from "./indexer.js";
-import { requireAuth } from "./supabase.js";
+import { requireAuth, serviceClient } from "./supabase.js";
 import { verifyLinkWalletSig } from "./verify.js";
 import * as StellarSdk from "@stellar/stellar-sdk";
 
@@ -136,6 +136,25 @@ app.get("/resolve", async (req: Request, res: Response) => {
   } satisfies ResolveResult);
 });
 
+// ── /auth/lookup: which providers an email is registered with ────────────────
+// Used by the sign-in flow to catch OAuth-only accounts (Google/X with no
+// email/password identity), where Supabase silently drops signInWithOtp calls
+// so no magic link ever arrives. Rate-limited per IP because this leaks
+// account-existence (mitigation, not a fix — see /resolve which already does).
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+app.get("/auth/lookup", rateLimit(20, 60 * 1000), async (req: Request, res: Response) => {
+  const email = String(req.query.email ?? "").trim().toLowerCase();
+  if (!email || email.length > 320 || !EMAIL_RE.test(email))
+    return void badRequest(res, "email required");
+  const { data, error } = await serviceClient.rpc(
+    "identity_providers_for_email",
+    { p_email: email }
+  );
+  if (error) return void res.status(500).json({ error: "lookup_failed", detail: error.message });
+  const providers = (data as string[] | null) ?? [];
+  res.json({ exists: providers.length > 0, providers });
+});
+
 // ── /me: current session user + identities + wallet ───────────────────────────
 
 app.get("/me", requireAuth, async (req: Request, res: Response) => {
@@ -147,6 +166,7 @@ app.get("/me", requireAuth, async (req: Request, res: Response) => {
     userId: user.id,
     identities: user.identities,
     wallet: user.wallet,
+    unreadCount: user.unreadCount,
   });
 });
 
