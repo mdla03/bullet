@@ -7,12 +7,12 @@ import { createClient } from "@/lib/supabase/server";
 
 // ponytail: sample commitments, purely illustrative. Real ones are Poseidon hashes.
 const SAMPLE_NOTES = [
-  { amount: 10, hash: "9f3a41c7…c41d" },
-  { amount: 1, hash: "b7e208aa…08aa" },
-  { amount: 50, hash: "4d917f3e…7f3e" },
-  { amount: 10, hash: "e05cb912…b912" },
-  { amount: 100, hash: "77a8d4c6…d4c6" },
-  { amount: 50, hash: "c2f031be…31be" },
+  { amount: 10, token: "USDC", hash: "9f3a41c7…c41d" },
+  { amount: 50, token: "XLM", hash: "b7e208aa…08aa" },
+  { amount: 50, token: "USDC", hash: "4d917f3e…7f3e" },
+  { amount: 100, token: "XLM", hash: "e05cb912…b912" },
+  { amount: 100, token: "USDC", hash: "77a8d4c6…d4c6" },
+  { amount: 10, token: "XLM", hash: "c2f031be…31be" },
 ];
 
 export default async function Home() {
@@ -29,8 +29,8 @@ export default async function Home() {
           leave no trace.
         </h1>
         <p className="animate-rise mx-auto max-w-xl text-lg text-graphite [animation-delay:100ms]">
-          Pay any X handle or email in USDC. Nothing on-chain connects you to
-          them.
+          Pay any X handle or email in USDC or XLM. Nothing on-chain connects
+          you to them.
         </p>
 
         {/* The real send box + sign-in CTA grouped so they sit close together */}
@@ -76,7 +76,7 @@ export default async function Home() {
                 className="mr-4 w-60 shrink-0 rounded-2xl border border-fog bg-white p-6 text-left"
               >
                 <p className="text-2xl font-bold tracking-tight">
-                  {note.amount} USDC
+                  {note.amount} {note.token}
                 </p>
                 <p className="mt-2 truncate font-mono text-sm text-graphite">
                   0x{note.hash}
@@ -88,7 +88,7 @@ export default async function Home() {
           <div className="pointer-events-none absolute inset-y-0 right-0 w-16 bg-gradient-to-l from-paper to-transparent" />
         </div>
         <p className="mx-auto mt-8 max-w-xl text-graphite">
-          Every deposit is a note of 1, 10, 50 or 100 USDC and a commitment
+          Every deposit is a fixed-amount note (USDC or XLM) and a commitment
           hash. One of these could be yours. Nothing connects a deposit to the
           claim that spends it.
         </p>
