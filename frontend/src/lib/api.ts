@@ -60,6 +60,21 @@ export async function getActivity(): Promise<ActivityItem[]> {
   return json.items;
 }
 
+/**
+ * Look up which auth providers an email is registered with. Public endpoint.
+ * Used by the sign-in flow to detect OAuth-only accounts before wasting a
+ * magic-link send that Supabase would silently drop.
+ */
+export async function lookupEmailProviders(
+  email: string
+): Promise<{ exists: boolean; providers: string[] }> {
+  const res = await fetch(
+    `${RESOLVER_URL}/auth/lookup?email=${encodeURIComponent(email)}`
+  );
+  if (!res.ok) return { exists: false, providers: [] };
+  return res.json();
+}
+
 export async function getMe(): Promise<MeResponse> {
   const res = await apiFetch("/me");
   if (!res.ok) throw new Error(`/me failed (${res.status})`);
