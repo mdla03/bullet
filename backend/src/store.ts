@@ -60,10 +60,26 @@ export async function getUser(userId: string): Promise<UserProfile | null> {
     serviceClient.from("wallets").select("*").eq("user_id", userId).maybeSingle(),
   ]);
 
-  if (profileRes.error || !profileRes.data) return null;
+  if (profileRes.error) return null;
+
+  // Heal a missing profile row lazily. The trigger normally auto-creates one
+  // on auth.users insert, but OTP/magic-link signups occasionally race the
+  // trigger or land users here before it fires, surfacing a spurious 404 in
+  // the UI. Upsert-and-refetch is idempotent under concurrent calls.
+  let profile = profileRes.data;
+  if (!profile) {
+    const { data: created, error } = await serviceClient
+      .from("profiles")
+      .upsert({ id: userId }, { onConflict: "id" })
+      .select("id, created_at")
+      .single();
+    if (error || !created) return null;
+    profile = created;
+  }
+
   return {
-    id: profileRes.data.id,
-    createdAt: profileRes.data.created_at,
+    id: profile.id,
+    createdAt: profile.created_at,
     identities: (handlesRes.data ?? []) as Handle[],
     wallet: (walletRes.data ?? null) as Wallet | null,
   };
