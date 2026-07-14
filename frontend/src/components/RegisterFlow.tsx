@@ -11,7 +11,7 @@ import {
   XBrandIcon,
 } from "@/components/icons";
 import { createClient } from "@/lib/supabase/client";
-import { apiFetch, getMe, type MeResponse } from "@/lib/api";
+import { apiFetch, getMe, lookupEmailProviders, type MeResponse } from "@/lib/api";
 import {
   KEY_DOMAIN_MESSAGE,
   buildLinkWalletChallenge,
@@ -21,7 +21,7 @@ import {
 
 const PROVIDERS = [
   { key: "google", label: "Google", icon: GoogleIcon, enabled: true },
-  { key: "x", label: "X (Twitter)", icon: XBrandIcon, enabled: true },
+  { key: "x", label: "X", icon: XBrandIcon, enabled: true },
 ] as const;
 
 const OAUTH_ERRORS: Record<string, string> = {
@@ -36,12 +36,16 @@ function providerLabel(provider: string): string {
   return provider.charAt(0).toUpperCase() + provider.slice(1);
 }
 
+type PreviewStep = "inbox" | "sent" | "oauth" | "wallet" | "confirm" | "done";
+
 export function RegisterFlow({
   oauthError,
   autoProvider,
+  preview,
 }: {
   oauthError?: string;
   autoProvider?: "google" | "x";
+  preview?: PreviewStep;
 }) {
   const supabase = createClient();
 
@@ -49,17 +53,61 @@ export function RegisterFlow({
   const [me, setMe] = useState<MeResponse | null>(null);
   const [address, setAddress] = useState("");
   const [working, setWorking] = useState<
-    "" | "oauth" | "email" | "connect" | "link" | "add_email" | `unlink:${string}`
+    "" | "oauth" | "email" | "connect" | "link"
   >("");
   const [email, setEmail] = useState("");
   const [emailSent, setEmailSent] = useState(false);
-  const [addEmail, setAddEmail] = useState("");
-  const [addEmailSent, setAddEmailSent] = useState(false);
+  const [sentAt, setSentAt] = useState(0);
+  const [resendIn, setResendIn] = useState(0);
+  // provider === null means we know the email is OAuth-only but not which one;
+  // UI then offers both Google and X.
+  const [oauthOnly, setOauthOnly] = useState<{ provider: "google" | "x" | null } | null>(null);
   const [error, setError] = useState(
     oauthError ? (OAUTH_ERRORS[oauthError] ?? "Sign-in failed. Start again.") : ""
   );
 
   useEffect(() => {
+    // ponytail: /register?preview=<step> mocks the state so we can eyeball
+    // each card without wiring a real session. Dev aid only.
+    if (preview) {
+      const fakeSession = {
+        user: { id: "preview-user", email: "you@example.com" },
+      } as unknown as Session;
+      const mockMe = (wallet: MeResponse["wallet"]): MeResponse => ({
+        authenticated: true,
+        userId: "preview-user",
+        identities: [
+          { provider: "email", handle: "you@example.com" },
+          { provider: "google", handle: "you@gmail.com" },
+        ],
+        wallet,
+      });
+      if (preview === "sent") {
+        setEmail("you@example.com");
+        setEmailSent(true);
+      } else if (preview === "oauth") {
+        setEmail("you@example.com");
+        setOauthOnly({ provider: "google" });
+      } else if (preview === "wallet") {
+        setSession(fakeSession);
+        setMe(mockMe(null));
+      } else if (preview === "confirm") {
+        setSession(fakeSession);
+        setMe(mockMe(null));
+        setAddress("GABCDEF1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZFWH3UA");
+      } else if (preview === "done") {
+        setSession(fakeSession);
+        setMe(
+          mockMe({
+            stellar_address: "GABCDEF1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZFWH3UA",
+            bullet_pubkey: "a".repeat(64),
+          })
+        );
+      } else {
+        setSession(null);
+      }
+      return;
+    }
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
     const { data: sub } = supabase.auth.onAuthStateChange((_e, s) =>
       setSession(s)
@@ -80,14 +128,33 @@ export function RegisterFlow({
     try {
       setMe(await getMe());
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      // /me can transiently 404 right after signup (profile row not created
+      // yet). The backend lazy-heals; a raw error banner here reads as broken.
+      console.warn("[refreshMe]", e);
     }
   }, []);
 
   useEffect(() => {
+    if (preview) return; // preview seeds `me` directly; don't overwrite.
     if (session) refreshMe();
     else setMe(null);
-  }, [session, refreshMe]);
+  }, [session, refreshMe, preview]);
+
+  // Resend cooldown ticker. Client-side is UX only; Supabase enforces the real
+  // rate limit server-side (default 60s per email), so a devtools user can't
+  // actually spam OTPs by editing this state.
+  // ponytail: 60s hard-coded, tighten via env if we ever need per-env tuning.
+  useEffect(() => {
+    if (!sentAt) return;
+    const tick = () => {
+      const left = Math.max(0, 60 - Math.floor((Date.now() - sentAt) / 1000));
+      setResendIn(left);
+      if (left === 0) clearInterval(id);
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [sentAt]);
 
   async function signIn(provider: (typeof PROVIDERS)[number]["key"]) {
     setError("");
@@ -103,14 +170,33 @@ export function RegisterFlow({
   }
 
   async function signInWithEmail() {
+    if (resendIn > 0) return;
     setError("");
-    setEmailSent(false);
     setWorking("email");
+    const trimmed = email.trim();
+
+    // Catch OAuth-only accounts before Supabase silently drops the OTP.
+    // Skipped when we're already on the "check inbox" screen (resend path):
+    // the user has confirmed the flow, no need to re-check.
+    if (!emailSent) {
+      const { providers } = await lookupEmailProviders(trimmed).catch(() => ({
+        providers: [] as string[],
+      }));
+      const hasEmail = providers.includes("email");
+      const oauth = providers.find((p) =>
+        ["google", "twitter", "twitter_v2"].includes(p)
+      );
+      if (providers.length > 0 && !hasEmail && oauth) {
+        setWorking("");
+        setOauthOnly({ provider: oauth === "google" ? "google" : "x" });
+        return;
+      }
+    }
+
     // Try sign-in first (shouldCreateUser: false). If Supabase says the user
     // doesn't exist, retry as signup so new users still get a link. Doing it
     // this order avoids Supabase silently dropping magic links for existing
     // OAuth-only accounts under the anti-enumeration user_repeated_signup guard.
-    const trimmed = email.trim();
     const opts = { emailRedirectTo: `${window.location.origin}/auth/callback` };
     let { error: err } = await supabase.auth.signInWithOtp({
       email: trimmed,
@@ -124,69 +210,32 @@ export function RegisterFlow({
       err = retry.error;
     }
     setWorking("");
-    if (err)
+    if (err) {
+      // Supabase's phrasing when an email is registered but has no email
+      // identity (OAuth-only) OR when OTP signup is disabled. Either way, the
+      // right next step is to try the OAuth provider(s), not to retry OTP.
+      // We don't know which provider from Supabase; call lookup for the exact
+      // one, fall back to offering both.
+      if (/signups?.*not allowed|user_repeated_signup|user already registered/i.test(err.message)) {
+        const { providers } = await lookupEmailProviders(trimmed).catch(() => ({
+          providers: [] as string[],
+        }));
+        const oauth = providers.find((p) =>
+          ["google", "twitter", "twitter_v2"].includes(p)
+        );
+        setOauthOnly({
+          provider: oauth === "google" ? "google" : oauth ? "x" : null,
+        });
+        return;
+      }
       setError(
         err.message?.trim()
           ? err.message
           : "Couldn't send the link. Email delivery is misconfigured. Try again shortly."
       );
-    else setEmailSent(true);
-  }
-
-  async function linkProvider(provider: "google" | "x") {
-    setError("");
-    setWorking("oauth");
-    const { error: err } = await supabase.auth.linkIdentity({
-      provider,
-      options: { redirectTo: `${window.location.origin}/auth/callback` },
-    });
-    if (err) {
-      // Common: 'Identity is already linked to another user'
-      setError(err.message);
-      setWorking("");
-    }
-  }
-
-  async function addEmailIdentity() {
-    setError("");
-    setAddEmailSent(false);
-    setWorking("add_email");
-    const { error: err } = await supabase.auth.updateUser({
-      email: addEmail.trim(),
-    });
-    setWorking("");
-    if (err) setError(err.message);
-    else setAddEmailSent(true);
-  }
-
-  async function unlinkHandle(provider: string, handle: string) {
-    setError("");
-    setWorking(`unlink:${provider}:${handle}`);
-    try {
-      const { data, error: e1 } = await supabase.auth.getUserIdentities();
-      if (e1) throw new Error(e1.message);
-      const identities = data?.identities ?? [];
-      // Match by provider AND handle (email or username) so the correct
-      // identity is removed when multiple identities share a provider.
-      const identity = identities.find((i) => {
-        if (i.provider !== provider) return false;
-        const d = i.identity_data as Record<string, unknown> | undefined;
-        if (!d) return false;
-        return d.email === handle || d.user_name === handle ||
-          d.preferred_username === handle;
-      }) ?? identities.find((i) => i.provider === provider);
-      if (!identity) throw new Error("Identity not found for this handle");
-      if (identities.length <= 1)
-        throw new Error(
-          "Can't remove your last sign-in method. Add another first."
-        );
-      const { error: e2 } = await supabase.auth.unlinkIdentity(identity);
-      if (e2) throw new Error(e2.message);
-      await refreshMe();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setWorking("");
+    } else {
+      setEmailSent(true);
+      setSentAt(Date.now());
     }
   }
 
@@ -213,7 +262,8 @@ export function RegisterFlow({
   }
 
   async function linkWallet() {
-    if (!me) return;
+    const userId = me?.userId ?? session?.user.id;
+    if (!userId) return;
     setError("");
     setWorking("link");
     try {
@@ -222,7 +272,7 @@ export function RegisterFlow({
       const domainSig = await freighterSignMessage(KEY_DOMAIN_MESSAGE, address);
       const zeekPayPubKey = deriveBulletPubKey(signatureToHex(domainSig));
 
-      const challenge = buildLinkWalletChallenge(me.userId);
+      const challenge = buildLinkWalletChallenge(userId);
       const linkSig = await freighterSignMessage(challenge, address);
       const signature = signatureToHex(linkSig);
 
@@ -230,10 +280,15 @@ export function RegisterFlow({
         method: "POST",
         body: JSON.stringify({ stellarAddress: address, zeekPayPubKey, signature }),
       });
-      const body = (await res.json()) as { detail?: string; error?: string };
+      // Railway/Vercel error pages come back as HTML; guard against JSON.parse
+      // crashing so the user sees a real reason instead of "Unexpected token <".
+      const raw = await res.text();
+      const body = raw.startsWith("{")
+        ? (JSON.parse(raw) as { detail?: string; error?: string })
+        : {};
       if (!res.ok)
         throw new Error(
-          body.detail ?? body.error ?? `Link failed (${res.status})`
+          body.detail ?? body.error ?? `Link failed (${res.status}). Backend may be down or a stale build is deployed.`
         );
       await refreshMe();
     } catch (e) {
@@ -257,74 +312,51 @@ export function RegisterFlow({
   const handles = me?.identities ?? [];
   const primaryHandle = handles[0]?.handle ?? session?.user.email ?? "";
   const stepIndex = !session ? 0 : !linkedWallet ? 1 : 2;
-  const steps = ["Account", "Wallet", "Done"];
+  const stepCount = 3;
 
   return (
-    <div className="space-y-6">
-      {/* Step indicator */}
-      <ol className="flex items-center gap-2 text-xs">
-        {steps.map((s, i) => (
-          <li key={s} className="flex items-center gap-2">
-            <span
-              className={`flex h-5 w-5 items-center justify-center rounded-full border text-[10px] font-semibold ${i < stepIndex
-                  ? "border-ink bg-ink text-paper"
-                  : i === stepIndex
-                    ? "border-ink text-ink"
-                    : "border-fog text-graphite"
-                }`}
-            >
-              {i < stepIndex ? <CheckIcon className="h-3 w-3" /> : i + 1}
-            </span>
-            <span className={i === stepIndex ? "text-ink" : "text-graphite"}>
-              {s}
-            </span>
-            {i < steps.length - 1 && <span className="w-4 border-t border-fog" />}
-          </li>
-        ))}
-      </ol>
-
+    <div className="space-y-4">
+      <div className="rounded-2xl border border-fog bg-white p-5">
       {/* Step 1: sign in */}
-      {!session && (
-        <div className="space-y-2">
-          <div className="space-y-2 rounded-2xl border border-fog bg-white p-4">
-            <label className="block text-sm font-medium">Email sign-in</label>
-            <div className="flex gap-2">
-              <input
-                type="email"
-                placeholder="you@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && email.trim() && working !== "email")
-                    signInWithEmail();
-                }}
-                disabled={working === "email"}
-                className="w-full rounded-xl border border-fog bg-white px-4 py-2.5 placeholder-graphite/60 focus:border-ink focus:outline-none disabled:opacity-50"
-              />
-              <button
-                onClick={signInWithEmail}
-                disabled={working === "email" || !email.trim()}
-                className="shrink-0 rounded-xl bg-ink px-5 py-2.5 font-medium text-paper transition-colors hover:bg-ink/85 disabled:opacity-40"
-              >
-                {working === "email" ? (
-                  <LoaderIcon className="h-5 w-5 animate-spin" />
-                ) : (
-                  "Send link"
-                )}
-              </button>
-            </div>
-            {emailSent && (
-              <p className="text-xs text-signal">
-                Check your inbox. The link signs you in. If it doesn't arrive in a few minutes, please check your spam folder.
-              </p>
-            )}
+      {!session && !emailSent && !oauthOnly && (
+        <div className="space-y-4">
+          <h2 className="text-xl font-bold tracking-tight">Sign in</h2>
+          <div className="space-y-2">
+            <input
+              type="email"
+              placeholder="Email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && email.trim() && working !== "email")
+                  signInWithEmail();
+              }}
+              disabled={working === "email"}
+              className="w-full rounded-xl border border-fog bg-white px-4 py-2.5 placeholder-graphite/70 focus:border-ink focus:outline-none disabled:opacity-50"
+            />
+            <button
+              onClick={signInWithEmail}
+              disabled={working === "email" || !email.trim()}
+              className="flex w-full items-center justify-center rounded-full bg-ink px-5 py-3 font-semibold text-paper transition-colors hover:bg-ink/85 disabled:opacity-40"
+            >
+              {working === "email" ? (
+                <LoaderIcon className="h-5 w-5 animate-spin" />
+              ) : (
+                "Sign in"
+              )}
+            </button>
+          </div>
+          <div className="flex items-center gap-3 text-xs text-graphite">
+            <span className="h-px flex-1 bg-fog" />
+            or
+            <span className="h-px flex-1 bg-fog" />
           </div>
           {PROVIDERS.map((p) => (
             <button
               key={p.key}
               onClick={() => p.enabled && signIn(p.key)}
               disabled={!p.enabled || working === "oauth"}
-              className={`flex w-full items-center gap-3 rounded-full border px-5 py-3 text-left font-medium transition-colors ${p.enabled
+              className={`flex w-full items-center justify-center gap-3 rounded-full border px-5 py-3 font-medium transition-colors ${p.enabled
                   ? "border-fog bg-white hover:border-graphite disabled:opacity-50"
                   : "cursor-not-allowed border-fog bg-paper text-graphite/70"
                 }`}
@@ -334,7 +366,7 @@ export function RegisterFlow({
               ) : (
                 <p.icon className="h-5 w-5" />
               )}
-              <span className="flex-1">Continue with {p.label}</span>
+              <span>Continue with {p.label}</span>
               {!p.enabled && (
                 <span className="rounded-full border border-fog bg-white px-2 py-0.5 text-[10px] text-graphite">
                   Soon
@@ -342,252 +374,202 @@ export function RegisterFlow({
               )}
             </button>
           ))}
-          <p className="pt-1 text-xs text-graphite">
-            Your handle is only used to receive payments. Bullet never posts or
-            reads your account.
+        </div>
+      )}
+
+      {/* Step 1b: oauth-only account detected */}
+      {!session && oauthOnly && (() => {
+        const known = oauthOnly.provider
+          ? PROVIDERS.filter((x) => x.key === oauthOnly.provider)
+          : PROVIDERS.slice();
+        const primary = known[0];
+        const label = oauthOnly.provider ? primary.label : "Google or X";
+        return (
+          <div className="space-y-4">
+            <h2 className="text-xl font-bold tracking-tight">
+              Continue with {label}
+            </h2>
+            <p className="text-sm text-graphite">
+              <span className="font-medium text-ink">{email}</span> is already
+              signed up with {label}. Use {oauthOnly.provider ? "that" : "one of those"} to sign in.
+            </p>
+            {known.map((p, i) => (
+              <button
+                key={p.key}
+                onClick={() => signIn(p.key)}
+                disabled={working === "oauth"}
+                className={`flex w-full items-center justify-center gap-3 rounded-full px-5 py-3 font-semibold transition-colors disabled:opacity-40 ${
+                  i === 0
+                    ? "bg-ink text-paper hover:bg-ink/85"
+                    : "border border-fog bg-white hover:border-graphite"
+                }`}
+              >
+                {working === "oauth" ? (
+                  <LoaderIcon className="h-5 w-5 animate-spin" />
+                ) : (
+                  <p.icon className="h-5 w-5" />
+                )}
+                Continue with {p.label}
+              </button>
+            ))}
+            <button
+              onClick={() => {
+                setOauthOnly(null);
+                setError("");
+              }}
+              className="flex w-full items-center justify-center rounded-full border border-fog bg-white px-5 py-3 font-medium transition-colors hover:border-graphite"
+            >
+              Use a different email
+            </button>
+          </div>
+        );
+      })()}
+
+      {/* Step 1c: check your inbox */}
+      {!session && emailSent && (
+        <div className="space-y-4">
+          <h2 className="text-xl font-bold tracking-tight">Check your inbox</h2>
+          <p className="text-sm text-graphite">
+            Sign-in link sent to{" "}
+            <span className="font-medium text-ink">{email}</span>.
           </p>
+          <button
+            onClick={signInWithEmail}
+            disabled={working === "email" || resendIn > 0}
+            className="flex w-full items-center justify-center rounded-full bg-ink px-5 py-3 font-semibold text-paper transition-colors hover:bg-ink/85 disabled:opacity-40"
+          >
+            {working === "email" ? (
+              <LoaderIcon className="h-5 w-5 animate-spin" />
+            ) : resendIn > 0 ? (
+              `Resend in ${resendIn}s`
+            ) : (
+              "Resend link"
+            )}
+          </button>
+          <button
+            onClick={() => {
+              setEmailSent(false);
+              setSentAt(0);
+              setResendIn(0);
+              setError("");
+            }}
+            className="flex w-full items-center justify-center rounded-full border border-fog bg-white px-5 py-3 font-medium transition-colors hover:border-graphite"
+          >
+            Use a different email
+          </button>
         </div>
       )}
 
       {/* Step 2: attach a wallet */}
-      {session && !linkedWallet && (
-        <div className="space-y-3">
-          <div className="flex items-center gap-3 rounded-xl border border-fog bg-white px-4 py-3">
-            <CheckIcon className="h-4 w-4 shrink-0 text-signal" />
-            <span className="min-w-0 flex-1 truncate text-sm">
-              Signed in as{" "}
-              <span className="font-medium">{primaryHandle || "…"}</span>
-            </span>
-            <button
-              onClick={signOut}
-              className="shrink-0 text-xs text-graphite underline-offset-2 hover:text-ink hover:underline"
-            >
-              Sign out
-            </button>
-          </div>
-
-          {handles.length > 1 && (
-            <div className="space-y-1 rounded-xl border border-fog bg-white px-4 py-3 text-sm">
-              {handles.map((h) => (
-                <p
-                  key={`${h.provider}:${h.handle}`}
-                  className="flex items-center gap-2"
-                >
-                  <CheckIcon className="h-4 w-4 text-signal" />
-                  <span className="text-graphite">
-                    {providerLabel(h.provider)}
-                  </span>
-                  <span className="font-medium">{h.handle}</span>
-                </p>
-              ))}
-            </div>
-          )}
-
-          {!address ? (
-            <>
-              <p className="text-sm text-graphite">
-                Connect the Stellar wallet that will claim payments sent to{" "}
-                <span className="text-ink">{primaryHandle || "you"}</span>.
-              </p>
-              <button
-                onClick={connectWallet}
-                disabled={working === "connect"}
-                className="flex w-full items-center justify-center gap-2 rounded-full bg-ink px-4 py-3 font-semibold text-paper transition-colors hover:bg-ink/85 disabled:opacity-50"
-              >
-                {working === "connect" ? (
-                  <LoaderIcon className="h-5 w-5 animate-spin" />
-                ) : (
-                  <WalletIcon className="h-5 w-5" />
-                )}
-                Connect Freighter
-              </button>
-            </>
-          ) : (
-            <>
-              <div className="flex items-center gap-3 rounded-xl border border-fog bg-white px-4 py-3">
-                <WalletIcon className="h-5 w-5" />
-                <span className="font-mono text-sm text-graphite">
-                  {address.slice(0, 6)}…{address.slice(-6)}
-                </span>
-                <CheckIcon className="ml-auto h-4 w-4 text-signal" />
-              </div>
-              <p className="text-xs text-graphite">
-                Two Freighter signatures follow: one derives your Bullet keys,
-                one proves this wallet is yours. No transaction is submitted
-                and nothing is spent.
-              </p>
-              <button
-                onClick={linkWallet}
-                disabled={working === "link"}
-                className="flex w-full items-center justify-center gap-2 rounded-full bg-ink px-4 py-3 font-semibold text-paper transition-colors hover:bg-ink/85 disabled:opacity-50"
-              >
-                {working === "link" && (
-                  <LoaderIcon className="h-5 w-5 animate-spin" />
-                )}
-                {working === "link" ? "Waiting for Freighter…" : "Sign and link wallet"}
-              </button>
-              <button
-                onClick={() => setAddress("")}
-                className="w-full text-center text-xs text-graphite underline-offset-2 hover:text-ink hover:underline"
-              >
-                Use a different wallet
-              </button>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* Step 3: done */}
-      {session && linkedWallet && (
-        <div className="space-y-5">
-          <div className="rounded-2xl border border-signal/30 bg-white p-5">
-            <p className="flex items-center gap-2 font-semibold text-signal">
-              <CheckIcon className="h-5 w-5" />
-              {primaryHandle || "You"} can now get paid on Bullet
-            </p>
-            <p className="mt-1 text-sm text-graphite">
-              Payments arrive as private notes in your inbox. Only the wallet{" "}
-              <span className="font-mono">
-                {linkedWallet.stellar_address.slice(0, 4)}…
-                {linkedWallet.stellar_address.slice(-4)}
-              </span>{" "}
-              can claim them.
-            </p>
-          </div>
-
-          <div className="rounded-2xl border border-fog bg-white p-5">
-            <p className="text-sm font-medium">Handles that can receive payments</p>
-            <p className="mt-1 text-xs text-graphite">
-              Anyone sending to any of these lands in your inbox.
-            </p>
-            <div className="mt-3 space-y-1.5">
-              {handles.map((h) => {
-                const unlinkKey = `unlink:${h.provider}:${h.handle}`;
-                const canUnlink = handles.length > 1;
-                return (
-                  <div
-                    key={`${h.provider}:${h.handle}`}
-                    className="flex items-center gap-2 text-sm"
-                  >
-                    <CheckIcon className="h-4 w-4 shrink-0 text-signal" />
-                    <span className="text-graphite">
-                      {providerLabel(h.provider)}
-                    </span>
-                    <span className="truncate font-medium">{h.handle}</span>
-                    {canUnlink && (
-                      <button
-                        onClick={() => unlinkHandle(h.provider, h.handle ?? "")}
-                        disabled={working !== ""}
-                        className="ml-auto shrink-0 text-xs text-graphite underline-offset-2 hover:text-red-600 hover:underline disabled:opacity-50"
-                      >
-                        {working === unlinkKey ? "Removing…" : "Remove"}
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-            {(() => {
-              const linked = new Set(handles.map((h) => h.provider));
-              const missing = (
-                [
-                  { key: "google" as const, label: "Google" },
-                  { key: "x" as const, label: "X (Twitter)" },
-                ] as const
-              ).filter(
-                (p) =>
-                  !(
-                    linked.has(p.key) ||
-                    (p.key === "x" &&
-                      (linked.has("twitter") || linked.has("twitter_v2")))
-                  )
-              );
-              const hasEmail = linked.has("email");
-              if (missing.length === 0 && hasEmail) return null;
-              return (
-                <div className="mt-4 space-y-2 border-t border-fog pt-4">
-                  <p className="text-xs text-graphite">Add another handle</p>
-                  {missing.map((p) => (
-                    <button
-                      key={p.key}
-                      onClick={() => linkProvider(p.key)}
-                      disabled={working === "oauth"}
-                      className="flex w-full items-center gap-2 rounded-full border border-fog bg-white px-4 py-2.5 text-sm font-medium transition-colors hover:border-graphite disabled:opacity-50"
-                    >
-                      {working === "oauth" ? (
-                        <LoaderIcon className="h-4 w-4 animate-spin" />
-                      ) : p.key === "google" ? (
-                        <GoogleIcon className="h-4 w-4" />
-                      ) : (
-                        <XBrandIcon className="h-4 w-4" />
-                      )}
-                      Connect {p.label}
-                    </button>
-                  ))}
-                  {!hasEmail && (
-                    <div className="space-y-1.5 pt-1">
-                      <div className="flex gap-2">
-                        <input
-                          type="email"
-                          placeholder="you@example.com"
-                          value={addEmail}
-                          onChange={(e) => setAddEmail(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (
-                              e.key === "Enter" &&
-                              addEmail.trim() &&
-                              working !== "add_email"
-                            )
-                              addEmailIdentity();
-                          }}
-                          disabled={working === "add_email"}
-                          className="w-full rounded-full border border-fog bg-white px-4 py-2 text-sm placeholder-graphite/60 focus:border-ink focus:outline-none disabled:opacity-50"
-                        />
-                        <button
-                          onClick={addEmailIdentity}
-                          disabled={working === "add_email" || !addEmail.trim()}
-                          className="shrink-0 rounded-full border border-fog bg-white px-4 py-2 text-sm font-medium transition-colors hover:border-graphite disabled:opacity-40"
-                        >
-                          {working === "add_email" ? (
-                            <LoaderIcon className="h-4 w-4 animate-spin" />
-                          ) : (
-                            "Add email"
-                          )}
-                        </button>
-                      </div>
-                      {addEmailSent && (
-                        <p className="text-xs text-signal">
-                          Check that inbox and click the confirmation link.
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })()}
-          </div>
-          <div className="flex gap-2">
-            <Link
-              href="/inbox"
-              className="flex-1 rounded-full bg-ink px-4 py-3 text-center font-semibold text-paper transition-colors hover:bg-ink/85"
-            >
-              Open inbox
-            </Link>
-            <Link
-              href="/send"
-              className="flex-1 rounded-full border border-fog bg-white px-4 py-3 text-center font-medium transition-colors hover:border-graphite"
-            >
-              Send money
-            </Link>
-          </div>
+      {session && !linkedWallet && !address && (
+        <div className="space-y-4">
+          <h2 className="text-xl font-bold tracking-tight">Attach a wallet</h2>
+          <p className="text-sm text-graphite">
+            Bullet needs a Stellar wallet to claim payments sent to{" "}
+            <span className="font-medium text-ink">{primaryHandle || "you"}</span>.
+          </p>
+          <button
+            onClick={connectWallet}
+            disabled={working === "connect"}
+            className="flex w-full items-center justify-center gap-2 rounded-full bg-ink px-5 py-3 font-semibold text-paper transition-colors hover:bg-ink/85 disabled:opacity-50"
+          >
+            {working === "connect" ? (
+              <LoaderIcon className="h-5 w-5 animate-spin" />
+            ) : (
+              <WalletIcon className="h-5 w-5" />
+            )}
+            Connect Freighter
+          </button>
           <button
             onClick={signOut}
-            className="w-full text-center text-xs text-graphite underline-offset-2 hover:text-ink hover:underline"
+            className="flex w-full items-center justify-center rounded-full border border-fog bg-white px-5 py-3 font-medium text-graphite transition-colors hover:border-graphite hover:text-ink"
           >
             Sign out
           </button>
         </div>
       )}
+
+      {/* Step 2b: confirm the connected wallet */}
+      {session && !linkedWallet && address && (
+        <div className="space-y-4">
+          <h2 className="text-xl font-bold tracking-tight">Confirm this wallet</h2>
+          <p className="text-sm text-graphite">
+            Freighter will ask you to sign twice: once to derive your Bullet
+            keys, once to prove ownership.
+          </p>
+          <div className="flex items-center gap-3 rounded-xl border border-fog px-4 py-3">
+            <WalletIcon className="h-4 w-4 shrink-0 text-graphite" />
+            <span className="min-w-0 flex-1 truncate font-mono text-sm">
+              {address.slice(0, 6)}…{address.slice(-6)}
+            </span>
+            <CheckIcon className="h-4 w-4 shrink-0 text-signal" />
+          </div>
+          <button
+            onClick={linkWallet}
+            disabled={working === "link"}
+            className="flex w-full items-center justify-center gap-2 rounded-full bg-ink px-5 py-3 font-semibold text-paper transition-colors hover:bg-ink/85 disabled:opacity-50"
+          >
+            {working === "link" && (
+              <LoaderIcon className="h-5 w-5 animate-spin" />
+            )}
+            {working === "link" ? "Waiting for Freighter…" : "Sign and link wallet"}
+          </button>
+          <button
+            onClick={() => setAddress("")}
+            className="flex w-full items-center justify-center rounded-full border border-fog bg-white px-5 py-3 font-medium transition-colors hover:border-graphite"
+          >
+            Use a different wallet
+          </button>
+        </div>
+      )}
+
+      {/* Step 3: done */}
+      {session && linkedWallet && (
+        <div className="space-y-4">
+          <h2 className="text-xl font-bold tracking-tight">You&apos;re ready</h2>
+          <p className="text-sm text-graphite">
+            Payments to your handles land in your inbox. Only your wallet can
+            claim them.
+          </p>
+          <div className="space-y-1.5">
+            {handles.map((h) => (
+              <div
+                key={`${h.provider}:${h.handle}`}
+                className="flex items-center gap-2 rounded-xl border border-fog px-4 py-2.5 text-sm"
+              >
+                <CheckIcon className="h-4 w-4 shrink-0 text-signal" />
+                <span className="text-graphite">{providerLabel(h.provider)}</span>
+                <span className="min-w-0 flex-1 truncate font-medium">{h.handle}</span>
+              </div>
+            ))}
+          </div>
+          <Link
+            href="/inbox"
+            className="flex w-full items-center justify-center rounded-full bg-ink px-5 py-3 text-center font-semibold text-paper transition-colors hover:bg-ink/85"
+          >
+            Open inbox
+          </Link>
+          <Link
+            href="/send"
+            className="flex w-full items-center justify-center rounded-full border border-fog bg-white px-5 py-3 text-center font-medium transition-colors hover:border-graphite"
+          >
+            Send money
+          </Link>
+        </div>
+      )}
+
+        <div
+          className="mt-5 flex items-center justify-center gap-2 border-t border-fog pt-4"
+          aria-label={`Step ${stepIndex + 1} of ${stepCount}`}
+        >
+          {Array.from({ length: stepCount }).map((_, i) => (
+            <span
+              key={i}
+              className={`h-1.5 rounded-full transition-all ${i === stepIndex ? "w-6 bg-ink" : i < stepIndex ? "w-1.5 bg-ink" : "w-1.5 bg-fog"}`}
+            />
+          ))}
+        </div>
+      </div>
 
       {error && (
         <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
