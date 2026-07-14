@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import type { Session } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 import { getMe } from "@/lib/api";
-import { ChevronDownIcon, LogOutIcon } from "@/components/icons";
+import { ChevronDownIcon, LogOutIcon, RefreshIcon } from "@/components/icons";
 
 export default function IslandNav() {
   const [scrolled, setScrolled] = useState(false);
@@ -14,6 +14,7 @@ export default function IslandNav() {
   const [session, setSession] = useState<Session | null | undefined>(undefined);
   const [unread, setUnread] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const lastY = useRef(0);
   const menuRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
@@ -77,6 +78,18 @@ export default function IslandNav() {
     setMenuOpen(false);
     router.replace("/");
     router.refresh();
+  }
+
+  async function refresh() {
+    setRefreshing(true);
+    try {
+      await refreshUnread();
+      router.refresh();
+    } finally {
+      // Keep the spin visible long enough to read as an intentional action,
+      // even when the API returns instantly.
+      setTimeout(() => setRefreshing(false), 400);
+    }
   }
 
   return (
@@ -153,9 +166,20 @@ export default function IslandNav() {
                   Account
                 </Link>
                 <button
+                  onClick={refresh}
+                  disabled={refreshing}
+                  role="menuitem"
+                  className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm font-medium hover:bg-paper disabled:opacity-60"
+                >
+                  <RefreshIcon
+                    className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`}
+                  />
+                  Refresh
+                </button>
+                <button
                   onClick={signOut}
                   role="menuitem"
-                  className="flex w-full items-center gap-2 border-t border-fog px-4 py-2.5 text-left text-sm font-medium text-red-600 hover:bg-red-50"
+                  className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm font-medium text-red-600 hover:bg-red-50"
                 >
                   <LogOutIcon className="h-4 w-4" />
                   Sign out
