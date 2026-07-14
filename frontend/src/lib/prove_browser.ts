@@ -1,8 +1,8 @@
 // Browser-side Groth16 prover. Mirrors backend/src/prove.ts byte layout so the
 // on-chain verifier accepts the resulting proof.
 //
-// Flow: client already has {secret, recipientDigest, amount} from the claim link.
-// (1) Compute commitment = Poseidon([secret, recipientDigest, amount]).
+// Flow: client already has {secret, recipientDigest, amount, tokenId} from the claim link.
+// (1) Compute commitment = Poseidon([secret, recipientDigest, amount, tokenId]).
 // (2) Ask resolver for the Merkle path against the current tree.
 // (3) Compute nullifier = Poseidon([secret]) so the secret never leaves the tab.
 // (4) Run snarkjs.groth16.fullProve locally against claim.wasm + claim.zkey.
@@ -60,18 +60,20 @@ const fr = (dec: string): string => be(dec, 32);
  * @param secretDec  decimal string of the secret (BigInt("0x"+hex).toString() from the link)
  * @param recipientDigest decimal string from the claim link
  * @param amount decimal string of the stroop amount (e.g. "100000000" for 10 USDC)
+ * @param tokenId token identifier string ("0" = USDC, "1" = XLM)
  * @param onStage optional callback receiving 'loading' | 'proving' for UI hooks
  */
 export async function proveBrowser(
   secretDec: string,
   recipientDigest: string,
   amount: string,
+  tokenId: string = "0",
   onStage?: (stage: "loading" | "path" | "proving") => void
 ): Promise<BrowserProveResult> {
   onStage?.("loading");
   const [{ wasm, zkey }, commitment] = await Promise.all([
     loadAssets(),
-    Promise.resolve(poseidon([secretDec, recipientDigest, amount])),
+    Promise.resolve(poseidon([secretDec, recipientDigest, amount, tokenId])),
   ]);
 
   onStage?.("path");
@@ -98,10 +100,8 @@ export async function proveBrowser(
       root,
       nullifier,
       recipientDigest,
-      // The compiled WASM still uses "denom" as the signal name (circom not yet
-      // recompiled after rename). Pass the stroop value under the old key until
-      // the circuit is rebuilt with `amount`.
-      denom: amount,
+      amount,
+      tokenId,
       secret: secretDec,
       pathElements,
       pathIndices,
@@ -110,7 +110,7 @@ export async function proveBrowser(
     zkey
   );
 
-  void publicSignals; // circuit's public inputs; we already have them.
+  void publicSignals;
 
   return {
     proof_a: g1(proof.pi_a),

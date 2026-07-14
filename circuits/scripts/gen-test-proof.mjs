@@ -28,7 +28,8 @@ const HELPER_SYM = path.join(BUILD, "compute_hashes.sym");
 // ── test inputs (arbitrary, deterministic) ───────────────────────────────────
 const SECRET = "12345";
 const RECIPIENT_DIGEST = "42";  // small test value (< BLS12-381 r)
-const DENOM = "10";             // matches Denom::Ten (as_u32() == 10)
+const AMOUNT = "10";            // raw stroop value for test
+const TOKEN_ID = "0";           // 0 = USDC
 const PATH_ELEMENTS = Array(20).fill("0");  // all siblings are zero
 const PATH_INDICES = Array(20).fill(0);     // leaf is at index 0 (always left)
 
@@ -47,7 +48,8 @@ if (!fs.existsSync(HELPER_WASM)) {
 const helperInput = {
   secret: SECRET,
   recipientDigest: RECIPIENT_DIGEST,
-  denom: DENOM,
+  amount: AMOUNT,
+  tokenId: TOKEN_ID,
 };
 const helperInputPath = path.join(BUILD, "_helper_input.json");
 const helperWtnsPath = path.join(BUILD, "_helper.wtns");
@@ -108,7 +110,8 @@ const realInput = {
   root: computedRoot,
   nullifier: computedNullifier,
   recipientDigest: RECIPIENT_DIGEST,
-  denom: DENOM,
+  amount: AMOUNT,
+  tokenId: TOKEN_ID,
   secret: SECRET,
   pathElements,
   pathIndices: PATH_INDICES,

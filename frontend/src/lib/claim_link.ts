@@ -2,6 +2,7 @@ export interface ClaimPayload {
   secret: string;           // hex, 64 chars (32 bytes)
   recipientDigest: string;  // decimal bigint string
   amount: number;           // raw stroop value (e.g. 100000000 for 10 USDC)
+  tokenId?: number;         // 0 = USDC (default), 1 = XLM
   // Context fields below are OPTIONAL: they are kept in the encrypted inbox
   // note but omitted from the URL link to keep it short. The claim page falls
   // back to env (contract id) / defaults (network) when they are absent.
@@ -30,11 +31,12 @@ export function encodeClaimLink(
   payload: ClaimPayload,
   frontendUrl: string
 ): string {
-  const link = {
+  const link: Record<string, unknown> = {
     secret: payload.secret,
     recipientDigest: payload.recipientDigest,
     amount: payload.amount,
   };
+  if (payload.tokenId) link.tokenId = payload.tokenId;
   return `${frontendUrl}/c?p=${b64urlEncode(link)}`;
 }
 

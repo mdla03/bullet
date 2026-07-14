@@ -5,6 +5,9 @@ import { decodeClaimLink, type ClaimPayload } from "@/lib/claim_link";
 import { claimNote } from "@/lib/claim_tx";
 import { proveBrowser } from "@/lib/prove_browser";
 
+const TOKEN_LABELS: Record<number, string> = { 0: "USDC", 1: "XLM" };
+const TOKEN_DECIMALS: Record<number, number> = { 0: 10_000_000, 1: 10_000_000 };
+
 type Step =
   | "no_link"
   | "invalid"
@@ -68,6 +71,7 @@ export function ClaimView({ encoded }: { encoded: string }) {
         BigInt("0x" + p.secret).toString(),
         p.recipientDigest,
         String(p.amount),
+        String(p.tokenId ?? 0),
         (stage) => {
           if (stage === "proving") setProveDetail("Generating proof (~15-30 s)…");
           else if (stage === "path") setProveDetail("Fetching Merkle path…");
@@ -99,7 +103,8 @@ export function ClaimView({ encoded }: { encoded: string }) {
           });
           if ("error" in signRes) throw new Error(`Freighter: ${signRes.error}`);
           return signRes.signedTxXdr;
-        }
+        },
+        p.tokenId ?? 0
       );
 
       setTxHash(hash);
@@ -135,6 +140,12 @@ export function ClaimView({ encoded }: { encoded: string }) {
 
   // Link-minted payloads omit contractId/network to stay short; fall back to
   // env / the demo default for display.
+  const tId = payload.tokenId ?? 0;
+  const tokenLabel = TOKEN_LABELS[tId] ?? "USDC";
+  const decimals = TOKEN_DECIMALS[tId] ?? 10_000_000;
+  const displayAmount = payload.amount / decimals;
+  const amountStr = tId === 0 ? `$${displayAmount}` : `${displayAmount}`;
+
   const contractId =
     payload.contractId ?? process.env.NEXT_PUBLIC_CONTRACT_ID ?? "";
   const network = payload.network ?? "testnet";
@@ -154,7 +165,7 @@ export function ClaimView({ encoded }: { encoded: string }) {
       <div className="rounded-2xl border border-fog bg-white px-6 py-6">
         <p className="text-sm font-bold tracking-tight">bullet</p>
         <p className="mt-4 text-5xl font-bold tracking-tight">
-          ${payload.amount / 10_000_000} USDC
+          {amountStr} {tokenLabel}
         </p>
         <p className="mt-1 text-graphite">sent to you, silently</p>
         <div className="mt-5 space-y-1 text-sm text-graphite">
@@ -215,7 +226,7 @@ export function ClaimView({ encoded }: { encoded: string }) {
           onClick={handleClaim}
           className="w-full rounded-full bg-signal px-4 py-3 font-semibold text-white transition-colors hover:bg-signal/85"
         >
-          Claim ${payload.amount / 10_000_000} USDC
+          Claim {amountStr} {tokenLabel}
         </button>
       )}
 
@@ -237,7 +248,7 @@ export function ClaimView({ encoded }: { encoded: string }) {
       {step === "done" && (
         <div className="space-y-3 rounded-2xl border border-signal/30 bg-white px-4 py-4">
           <p className="text-sm font-medium text-signal">
-            ${payload.amount / 10_000_000} USDC claimed
+            {amountStr} {tokenLabel} claimed
           </p>
           {txHash && (
             <p className="text-xs text-graphite">
