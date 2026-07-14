@@ -29,6 +29,14 @@ export async function appendLeaf(
   if (error) throw new Error(`appendLeaf: ${error.message}`);
 }
 
+/** Delete all leaves and reset cursor. Used when switching contracts. */
+export async function clearAll(): Promise<void> {
+  const { error: e1 } = await serviceClient.from("merkle_leaves").delete().gte("leaf_index", 0);
+  if (e1) throw new Error(`clearAll leaves: ${e1.message}`);
+  const { error: e2 } = await serviceClient.from("merkle_state").delete().eq("id", true);
+  if (e2) throw new Error(`clearAll state: ${e2.message}`);
+}
+
 /** Last fully-processed ledger, or null if never set. */
 export async function getCursor(): Promise<number | null> {
   const { data, error } = await serviceClient
