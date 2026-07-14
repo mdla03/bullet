@@ -281,7 +281,7 @@ export function Inbox() {
 
       set({ state: "done", tx: hash });
       markClaimed(note.id); // best-effort; the nullifier is the real record
-      postActivity({ type: "claim", amount: toStroops(note.payload), txHash: hash });
+      postActivity({ type: "claim", amount: toStroops(note.payload), tokenId: p.tokenId ?? 0, txHash: hash });
       return true;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -440,7 +440,7 @@ export function Inbox() {
           <div className="flex flex-wrap items-end justify-between gap-3 rounded-2xl border border-fog bg-white p-5">
             <div>
               <p className="text-4xl font-bold tracking-tight">
-                {summaryParts.join(" + ") || "$0 USDC"}
+                {summaryParts.join(" + ") || "0"}
               </p>
               <p className="mt-1 text-sm text-graphite">
                 claimable · {claimable.length}{" "}
@@ -581,8 +581,9 @@ export function Inbox() {
               {activity.map((item) => {
                 const units = item.amount / 10_000_000;
                 const isSend = item.type === "send";
-                // ponytail: activity doesn't store tokenId yet; assume USDC for now
-                const amtLabel = `$${units} USDC`;
+                const tid = item.token_id ?? 0;
+                const label = TOKEN_LABELS[tid] ?? "USDC";
+                const amtLabel = tid === 0 ? `$${units} ${label}` : `${units} ${label}`;
                 return (
                   <li
                     key={item.id}
