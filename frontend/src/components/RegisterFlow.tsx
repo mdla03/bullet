@@ -51,16 +51,12 @@ function providerRank(provider: string): number {
   return PROVIDER_RANK[provider] ?? 99;
 }
 
-type PreviewStep = "inbox" | "sent" | "oauth" | "wallet" | "confirm" | "done";
-
 export function RegisterFlow({
   oauthError,
   autoProvider,
-  preview,
 }: {
   oauthError?: string;
   autoProvider?: "google" | "x";
-  preview?: PreviewStep;
 }) {
   const supabase = createClient();
 
@@ -82,48 +78,6 @@ export function RegisterFlow({
   );
 
   useEffect(() => {
-    // ponytail: /register?preview=<step> mocks the state so we can eyeball
-    // each card without wiring a real session. Dev aid only.
-    if (preview) {
-      const fakeSession = {
-        user: { id: "preview-user", email: "you@example.com" },
-      } as unknown as Session;
-      const mockMe = (wallet: MeResponse["wallet"]): MeResponse => ({
-        authenticated: true,
-        userId: "preview-user",
-        identities: [
-          { provider: "email", handle: "you@example.com" },
-          { provider: "google", handle: "you@gmail.com" },
-        ],
-        wallet,
-        unreadCount: 0,
-      });
-      if (preview === "sent") {
-        setEmail("you@example.com");
-        setEmailSent(true);
-      } else if (preview === "oauth") {
-        setEmail("you@example.com");
-        setOauthOnly({ provider: "google" });
-      } else if (preview === "wallet") {
-        setSession(fakeSession);
-        setMe(mockMe(null));
-      } else if (preview === "confirm") {
-        setSession(fakeSession);
-        setMe(mockMe(null));
-        setAddress("GABCDEF1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZFWH3UA");
-      } else if (preview === "done") {
-        setSession(fakeSession);
-        setMe(
-          mockMe({
-            stellar_address: "GABCDEF1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZFWH3UA",
-            bullet_pubkey: "a".repeat(64),
-          })
-        );
-      } else {
-        setSession(null);
-      }
-      return;
-    }
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
     const { data: sub } = supabase.auth.onAuthStateChange((_e, s) =>
       setSession(s)
@@ -151,10 +105,9 @@ export function RegisterFlow({
   }, []);
 
   useEffect(() => {
-    if (preview) return; // preview seeds `me` directly; don't overwrite.
     if (session) refreshMe();
     else setMe(null);
-  }, [session, refreshMe, preview]);
+  }, [session, refreshMe]);
 
   // Resend cooldown ticker. Client-side is UX only; Supabase enforces the real
   // rate limit server-side (default 60s per email), so a devtools user can't
