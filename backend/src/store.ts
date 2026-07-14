@@ -87,7 +87,6 @@ export async function markNoteClaimedIfOwned(
     .update({ claimed_at: new Date().toISOString() })
     .eq("id", noteId)
     .eq("recipient_pubkey", wallet.bullet_pubkey)
-    .is("claimed_at", null)
     .select("id")
     .maybeSingle();
   if (error) return false;
