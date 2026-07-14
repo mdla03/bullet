@@ -200,14 +200,16 @@ export function start(): void {
   // Hydrate from Postgres first, then begin polling.
   // If REINDEX_ON_BOOT=1, reset cursor to START_LEDGER so the first poll
   // rescans from the beginning — no admin token needed.
-  hydrate()
-    .then(async () => {
+  (async () => {
       if (process.env.REINDEX_ON_BOOT === "1") {
+        console.log("[indexer] REINDEX_ON_BOOT: clearing Postgres tree + cursor");
+        await store.clearAll();
         const from = START_LEDGER > 0 ? START_LEDGER : 1;
-        console.log(`[indexer] REINDEX_ON_BOOT: resetting cursor to ledger ${from}`);
-        await store.setCursor(Math.max(0, from - 1));
+        console.log(`[indexer] REINDEX_ON_BOOT: will rescan from ledger ${from}`);
+        hydrated = false;
       }
-    })
+      await hydrate();
+    })()
     .catch((e) => console.error("[indexer] hydrate error:", String(e).slice(0, 400)))
     .finally(() => void tick());
   console.log(`[indexer] started; polling every ${POLL_MS}ms`);
