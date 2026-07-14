@@ -2,10 +2,11 @@
 
 **send. silently.**
 
-Bullet is a ZK-private payment rail on Stellar. Send USDC to any X handle
-or email. Nothing on-chain connects your deposit to their claim.
+Bullet is a ZK-private payment rail on Stellar. Send USDC, USDT, or XLM
+to any X handle or email. Nothing on-chain connects your deposit to their
+claim.
 
-Live demo: https://bullet-frontend.vercel.app
+Live demo: https://sendbullet.xyz (also https://bullet-frontend.vercel.app)
 
 > Hackathon build (ZK track). Stellar testnet only. Own (non-MPC) trusted
 > setup. Not audited. Not for mainnet funds.
@@ -130,9 +131,10 @@ Deposits and claims are separate transactions with no shared field.
 Bullet does not oversell. What is and is not private in v1:
 
 - **Fixed denominations, not encrypted balances.** Amounts are standardized
-  (1, 10, 50, 100 USDC), not hidden. Privacy comes from every payment
-  looking the same size, not from concealing the number. Encrypted balances
-  (Pedersen commitments + range proofs) are P3.
+  per token (USDC and USDT: 1, 10, 50, 100; XLM: 10, 50, 100, 500), not
+  hidden. Privacy comes from every payment looking the same size, not from
+  concealing the number. Encrypted balances (Pedersen commitments + range
+  proofs) are P3.
 - **Anonymity scales with pool size.** At demo scale the set is small.
   We do not claim strong anonymity yet.
 - **One-time commitments per payment.** Repeat payments to the same
@@ -159,15 +161,21 @@ Bullet does not oversell. What is and is not private in v1:
 - **Contracts** — Rust + `soroban-sdk = 22.0.7` on Stellar testnet.
   `contracts/zeekpay/` (main) and `contracts/verifier/` (Groth16 verifier).
 - **ZK** — Circom 2.2.3 + snarkjs 0.7.5, Groth16 over BLS12-381,
-  depth-20 Poseidon Merkle, 11,420 constraints. `circuits/`.
-- **Backend** — Node.js + Express + TypeScript. Resolver + `/prove` +
-  `/post-root` + Supabase-backed user store. `backend/`.
+  depth-20 Poseidon Merkle, 11,420 constraints. `circuits/`. Proving runs
+  in-browser via WASM (`frontend/src/lib/prove_browser.ts`) so the claim
+  secret never reaches a server.
+- **Backend** — Node.js + Express + TypeScript. Handle resolver,
+  identity-provider lookup, wallet-link, invite custody, encrypted-notes
+  delivery, activity log, and Merkle-path lookup. The deposit indexer
+  runs alongside and is the sole writer of the on-chain Merkle root.
+  `backend/`.
 - **Frontend** — Next.js 15 + Tailwind 4, `stellar-sdk` v16 + Freighter v6.
   `frontend/`.
-- **Auth** — Supabase Auth (Google + X OAuth). Cookie sessions via
-  `@supabase/ssr` on both frontend middleware and the backend `/me`,
-  `/wallet/link` routes.
-- **Asset** — USDC on Stellar testnet via Stellar Asset Contract.
+- **Auth** — Supabase Auth. Sign in with Google, X, or an email magic
+  link. Backend routes accept a Supabase JWT via the `Authorization`
+  header; there is no cookie-based session with the backend.
+- **Assets** — USDC, USDT, and XLM on Stellar testnet via Stellar Asset
+  Contracts.
 
 ## Repo layout
 
@@ -185,12 +193,15 @@ bullet/
 
 ## Deployment
 
-- **Frontend** on Vercel: https://bullet-frontend.vercel.app
+- **Frontend** on Vercel: https://sendbullet.xyz (and https://bullet-frontend.vercel.app)
 - **Backend** on Railway: expose `NEXT_PUBLIC_RESOLVER_URL` to the frontend.
 - **Contract** on Stellar testnet:
-  `CC2RTZTQKONWFUFHZA3GT3VJGAQ2YCSEHFLIWMEZXQH65WQ5AWU5FW5R`
+  `CB5HPNJOZ3ULPNPRL5FJBHSDCHYWFAWXO6TY3JL6URZSYXMRTFQ3LUIB`
 - **USDC SAC**:
+  `CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA`
+- **XLM SAC**:
   `CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC`
+- **USDT SAC**: configured via `NEXT_PUBLIC_USDT_SAC_ID` per deployment.
 
 ## Local setup
 
@@ -210,19 +221,18 @@ pnpm build:circuits     # circom -> r1cs -> Groth16 setup -> vk -> fixture
 
 ## Development workflow
 
-Every meaningful unit of work goes through a four-stage pipeline with
-artifacts in `pipeline/<feature>/`: **Plan** (`spec.md`) -> **Code**
-(`changes.md`) -> **Test** (`test-results.md`) -> **Review**
-(`review.md`). See `SPEC.md` §9.
+Features move through a four-stage pipeline with artifacts checked in at
+`pipeline/<feature>/`: **Plan** (`spec.md`) -> **Code** (`changes.md`)
+-> **Test** (`test-results.md`) -> **Review** (`review.md`). See
+`SPEC.md` §9.
 
 ## Security notes
 
-- Never commit secrets. `.env` is gitignored; `.env.example` carries
-  placeholders only.
-- Never commit trusted-setup toxic waste. Intermediate `ptau`
-  contributions stay gitignored.
+- `.env` gitignored; `.env.example` carries placeholders only.
+- Trusted-setup toxic waste (intermediate `.ptau` files) stays gitignored.
 - `circuits/build/claim.zkey` and `circuits/build/claim_js/` are committed
-  intentionally: they are public artifacts of a public setup, needed at
-  runtime by the deployed backend. If the setup is ever re-run (MPC
-  ceremony), those files must be replaced.
-- Testnet only. Own (non-MPC) trusted setup. Not audited.
+  intentionally: they are public artifacts of a public setup needed at
+  runtime. If the setup is re-run (MPC ceremony), those files must be
+  replaced.
+- Testnet only. Own (non-MPC) trusted setup. Not audited. Not for mainnet
+  funds.
