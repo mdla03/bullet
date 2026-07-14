@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Geist_Mono, Inter } from "next/font/google";
 import Link from "next/link";
 import IslandNav from "@/components/IslandNav";
-import { XBrandIcon } from "@/components/icons";
+import { GithubIcon, XBrandIcon } from "@/components/icons";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
@@ -43,6 +43,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 className="transition-colors hover:text-ink"
               >
                 <XBrandIcon className="h-4 w-4" />
+              </a>
+              <a
+                href="https://github.com/mdla03/bullet"
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="Bullet on GitHub"
+                className="transition-colors hover:text-ink"
+              >
+                <GithubIcon className="h-4 w-4" />
               </a>
             </nav>
           </div>

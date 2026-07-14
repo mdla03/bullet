@@ -112,7 +112,7 @@ export default function HowItWorks() {
       className="flex min-h-screen w-full flex-col justify-center"
     >
       <h2 className="text-left text-3xl font-bold tracking-tight sm:text-4xl">
-        how it works.
+        How it works
       </h2>
 
       <div className="mt-12 grid gap-12 text-left md:grid-cols-[300px_1fr] md:items-center">
