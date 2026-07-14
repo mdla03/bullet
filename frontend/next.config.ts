@@ -94,6 +94,8 @@ const nextConfig: NextConfig = {
         os: false,
       };
     }
+    // Suppress "Critical dependency" warning from web-worker (snarkjs dep).
+    config.module.exprContextCritical = false;
     return config;
   },
 };
