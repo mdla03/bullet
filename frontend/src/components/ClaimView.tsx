@@ -5,8 +5,8 @@ import { decodeClaimLink, type ClaimPayload } from "@/lib/claim_link";
 import { claimNote } from "@/lib/claim_tx";
 import { proveBrowser } from "@/lib/prove_browser";
 
-const TOKEN_LABELS: Record<number, string> = { 0: "USDC", 1: "XLM" };
-const TOKEN_DECIMALS: Record<number, number> = { 0: 10_000_000, 1: 10_000_000 };
+const TOKEN_LABELS: Record<number, string> = { 0: "USDC", 1: "XLM", 2: "USDT" };
+const TOKEN_DECIMALS: Record<number, number> = { 0: 10_000_000, 1: 10_000_000, 2: 10_000_000 };
 
 type Step =
   | "no_link"
@@ -140,7 +140,7 @@ export function ClaimView({ encoded }: { encoded: string }) {
   const tokenLabel = TOKEN_LABELS[tId] ?? "USDC";
   const decimals = TOKEN_DECIMALS[tId] ?? 10_000_000;
   const displayAmount = payload.amount / decimals;
-  const amountStr = tId === 0 ? `$${displayAmount}` : `${displayAmount}`;
+  const amountStr = (tId === 0 || tId === 2) ? `$${displayAmount}` : `${displayAmount}`;
 
   const contractId =
     payload.contractId ?? process.env.NEXT_PUBLIC_CONTRACT_ID ?? "";

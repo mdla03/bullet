@@ -45,7 +45,7 @@ const CLAIM_LABELS: Record<string, string> = {
   submitting: "Submitting…",
 };
 
-const TOKEN_LABELS: Record<number, string> = { 0: "USDC", 1: "XLM" };
+const TOKEN_LABELS: Record<number, string> = { 0: "USDC", 1: "XLM", 2: "USDT" };
 
 /** Normalize legacy denom-format notes (denom: 1|10|50|100 USDC) to stroops. */
 function toStroops(p: ClaimPayload): number {
@@ -57,7 +57,7 @@ function formatNoteAmount(p: ClaimPayload): string {
   const stroops = toStroops(p);
   const units = stroops / 10_000_000;
   const label = TOKEN_LABELS[p.tokenId ?? 0] ?? "USDC";
-  return (p.tokenId ?? 0) === 0 ? `$${units} ${label}` : `${units} ${label}`;
+  return [0, 2].includes(p.tokenId ?? 0) ? `$${units} ${label}` : `${units} ${label}`;
 }
 
 function timeAgo(iso: string): string {
@@ -398,7 +398,7 @@ export function Inbox() {
   const summaryParts = Object.entries(totals).map(([tid, stroops]) => {
     const label = TOKEN_LABELS[Number(tid)] ?? "USDC";
     const units = stroops / 10_000_000;
-    return Number(tid) === 0 ? `$${units} ${label}` : `${units} ${label}`;
+    return [0, 2].includes(Number(tid)) ? `$${units} ${label}` : `${units} ${label}`;
   });
 
   return (
@@ -573,7 +573,7 @@ export function Inbox() {
                 const isSend = item.type === "send";
                 const tid = item.token_id ?? 0;
                 const label = TOKEN_LABELS[tid] ?? "USDC";
-                const amtLabel = tid === 0 ? `$${units} ${label}` : `${units} ${label}`;
+                const amtLabel = [0, 2].includes(tid) ? `$${units} ${label}` : `${units} ${label}`;
                 return (
                   <li
                     key={item.id}
