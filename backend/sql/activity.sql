@@ -10,6 +10,7 @@ create table if not exists public.activity (
   user_id     uuid not null references public.profiles(id) on delete cascade,
   type        text not null check (type in ('send', 'claim')),
   amount      bigint not null,              -- stroops (1 USDC = 10_000_000)
+  token_id    integer not null default 0,  -- 0 = USDC, 1 = XLM
   tx_hash     text,
   handle      text,                         -- recipient handle (sends only)
   created_at  timestamptz not null default now()

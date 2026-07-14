@@ -228,7 +228,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
         console.warn("invite_record failed", err);
       }
 
-      postActivity({ type: "send", amount: Number(amountStroops), txHash: hash, handle: unregistered });
+      postActivity({ type: "send", amount: Number(amountStroops), tokenId: selectedToken.id, txHash: hash, handle: unregistered });
       setSentAsInvite(true);
       setStep("done");
     } catch (e) {
@@ -321,7 +321,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
           setNotePosted(false);
         }
       }
-      postActivity({ type: "send", amount: Number(amountStroops), txHash: hash, handle: recipient.trim() });
+      postActivity({ type: "send", amount: Number(amountStroops), tokenId: selectedToken.id, txHash: hash, handle: recipient.trim() });
       setStep("done");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

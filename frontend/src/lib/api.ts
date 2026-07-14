@@ -34,6 +34,7 @@ export interface ActivityItem {
   id: string;
   type: "send" | "claim";
   amount: number;
+  token_id: number;
   tx_hash: string | null;
   handle: string | null;
   created_at: string;
@@ -42,6 +43,7 @@ export interface ActivityItem {
 export async function postActivity(row: {
   type: "send" | "claim";
   amount: number;
+  tokenId?: number;
   txHash?: string;
   handle?: string;
 }): Promise<void> {

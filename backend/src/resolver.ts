@@ -292,11 +292,12 @@ app.post("/notes", rateLimit(60, 10 * 60 * 1000), async (req: Request, res: Resp
 
 app.post("/activity", requireAuth, async (req: Request, res: Response) => {
   const userId = (req as Request & { userId?: string }).userId!;
-  const { type, amount, txHash, handle } = req.body as {
+  const { type, amount, txHash, handle, tokenId } = req.body as {
     type?: string;
     amount?: number;
     txHash?: string;
     handle?: string;
+    tokenId?: number;
   };
   if (type !== "send" && type !== "claim")
     return void badRequest(res, "type must be 'send' or 'claim'");
@@ -306,6 +307,7 @@ app.post("/activity", requireAuth, async (req: Request, res: Response) => {
   const ok = await store.insertActivity(userId, {
     type,
     amount,
+    token_id: typeof tokenId === "number" ? tokenId : 0,
     tx_hash: txHash,
     handle: type === "send" ? handle : undefined,
   });

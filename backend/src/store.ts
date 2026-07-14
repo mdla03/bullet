@@ -122,6 +122,7 @@ export interface Activity {
   id: string;
   type: "send" | "claim";
   amount: number;
+  token_id: number;
   tx_hash: string | null;
   handle: string | null;
   created_at: string;
@@ -129,12 +130,13 @@ export interface Activity {
 
 export async function insertActivity(
   userId: string,
-  row: { type: "send" | "claim"; amount: number; tx_hash?: string; handle?: string }
+  row: { type: "send" | "claim"; amount: number; token_id?: number; tx_hash?: string; handle?: string }
 ): Promise<boolean> {
   const { error } = await serviceClient.from("activity").insert({
     user_id: userId,
     type: row.type,
     amount: row.amount,
+    token_id: row.token_id ?? 0,
     tx_hash: row.tx_hash ?? null,
     handle: row.handle ?? null,
   });
@@ -144,12 +146,14 @@ export async function insertActivity(
 export async function listActivity(userId: string): Promise<Activity[]> {
   const { data, error } = await serviceClient
     .from("activity")
-    .select("id, type, amount, tx_hash, handle, created_at")
+    .select("id, type, amount, token_id, tx_hash, handle, created_at")
     .eq("user_id", userId)
     .order("created_at", { ascending: false })
     .limit(100);
   if (error) return [];
-  return (data ?? []) as Activity[];
+  return ((data ?? []) as (Omit<Activity, "token_id"> & { token_id?: number | null })[]).map(
+    (r) => ({ ...r, token_id: r.token_id ?? 0 })
+  );
 }
 
 // ── wallet ────────────────────────────────────────────────────────────────────
