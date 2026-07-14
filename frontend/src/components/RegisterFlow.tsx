@@ -202,10 +202,9 @@ export function RegisterFlow({
     setError("");
     setWorking("connect");
     try {
-      const { requestAccess } = await import("@stellar/freighter-api");
-      const res = await requestAccess();
-      if ("error" in res && res.error) throw new Error(`Freighter: ${res.error}`);
-      setAddress(res.address);
+      const { freighterRequestAccess } = await import("@/lib/freighter");
+      const { address: addr } = await freighterRequestAccess();
+      setAddress(addr);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -218,24 +217,14 @@ export function RegisterFlow({
     setError("");
     setWorking("link");
     try {
-      const { signMessage } = await import("@stellar/freighter-api");
+      const { freighterSignMessage } = await import("@/lib/freighter");
 
-      const domainRes = await signMessage(KEY_DOMAIN_MESSAGE, { address });
-      if (domainRes.error || !domainRes.signedMessage)
-        throw new Error(
-          `Freighter: ${domainRes.error?.message ?? "signature rejected"}`
-        );
-      const zeekPayPubKey = deriveBulletPubKey(
-        signatureToHex(domainRes.signedMessage)
-      );
+      const domainSig = await freighterSignMessage(KEY_DOMAIN_MESSAGE, address);
+      const zeekPayPubKey = deriveBulletPubKey(signatureToHex(domainSig));
 
       const challenge = buildLinkWalletChallenge(me.userId);
-      const linkRes = await signMessage(challenge, { address });
-      if (linkRes.error || !linkRes.signedMessage)
-        throw new Error(
-          `Freighter: ${linkRes.error?.message ?? "signature rejected"}`
-        );
-      const signature = signatureToHex(linkRes.signedMessage);
+      const linkSig = await freighterSignMessage(challenge, address);
+      const signature = signatureToHex(linkSig);
 
       const res = await apiFetch("/wallet/link", {
         method: "POST",

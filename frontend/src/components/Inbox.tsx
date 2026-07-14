@@ -124,32 +124,25 @@ export function Inbox() {
     setError("");
     setUnlocking(true);
     try {
-      const { requestAccess, signMessage } = await import(
-        "@stellar/freighter-api"
+      const { freighterRequestAccess, freighterSignMessage } = await import(
+        "@/lib/freighter"
       );
-      const res = await requestAccess();
-      if ("error" in res && res.error) throw new Error(`Freighter: ${res.error}`);
-      if (res.address !== wallet.stellar_address)
+      const { address: addr } = await freighterRequestAccess();
+      if (addr !== wallet.stellar_address)
         throw new Error(
           `This isn't the wallet linked to your account. Switch Freighter to ${wallet.stellar_address.slice(0, 6)}…${wallet.stellar_address.slice(-6)} and try again.`
         );
 
-      const sigRes = await signMessage(KEY_DOMAIN_MESSAGE, {
-        address: res.address,
-      });
-      if (sigRes.error || !sigRes.signedMessage)
-        throw new Error(
-          `Freighter: ${sigRes.error?.message ?? "signature rejected"}`
-        );
-      const derived = deriveBulletKeys(signatureToHex(sigRes.signedMessage));
+      const signed = await freighterSignMessage(KEY_DOMAIN_MESSAGE, addr);
+      const derived = deriveBulletKeys(signatureToHex(signed));
       if (derived.pubKeyHex !== wallet.bullet_pubkey)
         throw new Error(
           "This wallet's signature doesn't match your registered Bullet key."
         );
 
-      setAddress(res.address);
+      setAddress(addr);
       setKeys(derived);
-      await loadNotes(derived, res.address);
+      await loadNotes(derived, addr);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -253,7 +246,7 @@ export function Inbox() {
           p.tokenId ?? 0
         );
       } else {
-        const { signTransaction } = await import("@stellar/freighter-api");
+        const { freighterSignTransaction } = await import("@/lib/freighter");
         // Convert decimal recipientDigest to 32-byte big-endian hex for contract.
         const rdHex = BigInt(p.recipientDigest).toString(16).padStart(64, "0");
         hash = await claimNote(
@@ -267,13 +260,10 @@ export function Inbox() {
           BigInt(p.amount),
           async (xdr) => {
             set({ state: "submitting" });
-            const signRes = await signTransaction(xdr, {
-              networkPassphrase:
-                process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ??
-                "Test SDF Network ; September 2015",
-            });
-            if ("error" in signRes) throw new Error(`Freighter: ${signRes.error}`);
-            return signRes.signedTxXdr;
+            return freighterSignTransaction(
+              xdr,
+              process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ?? "Test SDF Network ; September 2015"
+            );
           },
           p.tokenId ?? 0
         );
