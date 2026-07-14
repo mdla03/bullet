@@ -19,9 +19,11 @@ import {
 const RESOLVER_URL =
   process.env.NEXT_PUBLIC_RESOLVER_URL ?? "http://localhost:3001";
 const CONTRACT_ID = process.env.NEXT_PUBLIC_CONTRACT_ID ?? "";
+// Claim links live in messages the sender pastes to the recipient. Localhost
+// URLs are useless there, so prefer the configured public URL over
+// window.location.origin. Falls back to the prod domain if neither is set.
 function getFrontendUrl() {
-  if (typeof window !== "undefined") return window.location.origin;
-  return process.env.NEXT_PUBLIC_FRONTEND_URL ?? "https://bullet-frontend.vercel.app";
+  return process.env.NEXT_PUBLIC_FRONTEND_URL ?? "https://sendbullet.xyz";
 }
 
 // Token configuration: id, label, unit presets, decimals (stroops).
@@ -59,16 +61,20 @@ function CopyButton({ text, label }: { text: string; label: string }) {
       onClick={() => {
         navigator.clipboard.writeText(text);
         setCopied(true);
-        setTimeout(() => setCopied(false), 1500);
+        setTimeout(() => setCopied(false), 1800);
       }}
-      className="inline-flex items-center gap-1.5 rounded-md border border-fog bg-white px-2.5 py-1.5 text-xs font-medium transition-colors hover:border-graphite"
+      className={`flex w-full items-center justify-center gap-2 rounded-full border px-5 py-2.5 text-sm font-medium transition-colors ${
+        copied
+          ? "border-signal/40 bg-signal/10 text-signal"
+          : "border-fog bg-white hover:border-graphite"
+      }`}
     >
       {copied ? (
-        <CheckIcon className="h-3.5 w-3.5 text-signal" />
+        <CheckIcon className="h-4 w-4" />
       ) : (
-        <CopyIcon className="h-3.5 w-3.5" />
+        <CopyIcon className="h-4 w-4" />
       )}
-      {copied ? "Copied" : label}
+      {copied ? "Copied to clipboard!" : label}
     </button>
   );
 }
@@ -231,6 +237,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
       }
 
       postActivity({ type: "send", amount: Number(amountStroops), tokenId: selectedToken.id, txHash: hash, handle: unregistered });
+      window.dispatchEvent(new Event("bullet:send-complete"));
       setSentAsInvite(true);
       setStep("done");
     } catch (e) {
@@ -317,6 +324,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
         }
       }
       postActivity({ type: "send", amount: Number(amountStroops), tokenId: selectedToken.id, txHash: hash, handle: recipient.trim() });
+      window.dispatchEvent(new Event("bullet:send-complete"));
       setStep("done");
     } catch (e) {
       setError(humanizeSendError(e instanceof Error ? e.message : String(e)));
@@ -325,35 +333,32 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
   }
 
   const displayAmt = selectedAmount != null ? `${selectedToken.prefix}${selectedAmount}` : "";
-  const shareMessage = `I sent you ${displayAmt} ${selectedToken.label} on Bullet (private payments on Stellar). Claim it here: ${claimLink}. Keep this link private, it contains your claim secret.`;
 
   // ---- Success state ----
   if (step === "done") {
     return (
       <div className="space-y-4">
-        <div className="rounded-2xl border border-fog bg-white p-5 space-y-4">
-          <div className="flex items-center gap-2">
-            <CheckIcon className="h-5 w-5 text-signal" />
-            <h2 className="text-xl font-bold tracking-tight">Sent</h2>
-          </div>
-          <p className="text-sm text-graphite">
-            <span className="font-medium text-ink">{displayAmt} {selectedToken.label}</span>{" "}
-            {sentAsInvite ? "held for " : "delivered silently to "}
-            <span className="font-medium text-ink">{recipient.trim()}</span>
-            {sentAsInvite && `. Held for ${expiryDays} days, then refunded if unclaimed.`}
-          </p>
-
-          <div className="space-y-2">
-            <p className="text-xs font-medium text-graphite">
-              {notePosted ? "Backup claim link" : "Deliver the claim link"}
+        <div className="overflow-hidden rounded-2xl border border-fog bg-white">
+          <div className="flex flex-col items-center gap-3 px-6 pb-5 pt-8 text-center">
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-signal/10">
+              <CheckIcon className="h-6 w-6 text-signal" />
+            </div>
+            <p className="text-sm font-medium text-graphite">Sent</p>
+            <p className="text-3xl font-bold tracking-tight">
+              {displayAmt} {selectedToken.label}
             </p>
-            <div className="break-all rounded-xl border border-fog bg-paper px-3 py-2.5 font-mono text-xs text-graphite">
-              {claimLink}
-            </div>
-            <div className="flex gap-2">
-              <CopyButton text={claimLink} label="Copy link" />
-              <CopyButton text={shareMessage} label="Copy message" />
-            </div>
+            <p className="text-sm text-graphite">
+              to <span className="font-medium text-ink">{recipient.trim()}</span>
+              {sentAsInvite && (
+                <>
+                  {" · "}refunded after {expiryDays} days if unclaimed
+                </>
+              )}
+            </p>
+          </div>
+
+          <div className="border-t border-fog px-5 py-4">
+            <CopyButton text={claimLink} label={notePosted ? "Copy backup link" : "Copy claim link"} />
           </div>
 
           {txHash && (
@@ -361,7 +366,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
               href={`https://stellar.expert/explorer/testnet/tx/${txHash}`}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-1.5 text-xs text-graphite hover:text-ink"
+              className="flex items-center justify-center gap-1.5 border-t border-fog px-5 py-3 text-xs text-graphite transition-colors hover:bg-paper hover:text-ink"
             >
               <ExternalLinkIcon className="h-3.5 w-3.5" />
               View on stellar.expert

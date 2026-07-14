@@ -5,7 +5,7 @@ import { getActivity, type ActivityItem } from "@/lib/api";
 import { ArrowUpRightIcon, ExternalLinkIcon } from "@/components/icons";
 import { Skeleton } from "@/components/Skeleton";
 
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 5;
 const TOKEN_LABELS: Record<number, string> = { 0: "USDC", 1: "XLM", 2: "USDT" };
 
 function timeAgo(iso: string): string {
@@ -22,9 +22,19 @@ export function SendHistory() {
   const [shown, setShown] = useState(PAGE_SIZE);
 
   useEffect(() => {
-    getActivity()
-      .then((rows) => setItems(rows.filter((r) => r.type === "send")))
-      .catch(() => setItems([]));
+    const load = () => {
+      getActivity()
+        .then((rows) => setItems(rows.filter((r) => r.type === "send")))
+        .catch(() => setItems([]));
+    };
+    load();
+    // Refetch when SendForm dispatches this after a successful send/invite.
+    window.addEventListener("bullet:send-complete", load);
+    window.addEventListener("focus", load);
+    return () => {
+      window.removeEventListener("bullet:send-complete", load);
+      window.removeEventListener("focus", load);
+    };
   }, []);
 
   if (items === null) {
