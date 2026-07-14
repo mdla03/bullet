@@ -28,6 +28,7 @@ export interface MeResponse {
   userId: string;
   identities: { provider: string; handle?: string }[];
   wallet: { stellar_address: string; bullet_pubkey: string } | null;
+  unreadCount: number;
 }
 
 export interface ActivityItem {

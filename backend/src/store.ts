@@ -29,6 +29,7 @@ export interface UserProfile {
   createdAt: string;
   identities: Handle[];
   wallet: Wallet | null;
+  unreadCount: number;
 }
 
 function normalizeKey(q: string): string {
@@ -77,11 +78,23 @@ export async function getUser(userId: string): Promise<UserProfile | null> {
     profile = created;
   }
 
+  const wallet = (walletRes.data ?? null) as Wallet | null;
+  let unreadCount = 0;
+  if (wallet) {
+    const { count } = await serviceClient
+      .from("notes")
+      .select("id", { count: "exact", head: true })
+      .eq("recipient_pubkey", wallet.bullet_pubkey)
+      .is("claimed_at", null);
+    unreadCount = count ?? 0;
+  }
+
   return {
     id: profile.id,
     createdAt: profile.created_at,
     identities: (handlesRes.data ?? []) as Handle[],
-    wallet: (walletRes.data ?? null) as Wallet | null,
+    wallet,
+    unreadCount,
   };
 }
 

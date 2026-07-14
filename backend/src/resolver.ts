@@ -166,6 +166,7 @@ app.get("/me", requireAuth, async (req: Request, res: Response) => {
     userId: user.id,
     identities: user.identities,
     wallet: user.wallet,
+    unreadCount: user.unreadCount,
   });
 });
 

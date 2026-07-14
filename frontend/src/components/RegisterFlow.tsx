@@ -81,6 +81,7 @@ export function RegisterFlow({
           { provider: "google", handle: "you@gmail.com" },
         ],
         wallet,
+        unreadCount: 0,
       });
       if (preview === "sent") {
         setEmail("you@example.com");
