@@ -13,7 +13,7 @@ const STEPS = [
   },
   {
     title: "Pick an amount. Pay.",
-    body: "Fixed sizes only: 1, 10, 50 or 100 USDC, so no amount stands out. Sign once.",
+    body: "Fixed sizes only (USDC or XLM), so no amount stands out. Sign once.",
   },
   {
     title: "A note appears on-chain.",

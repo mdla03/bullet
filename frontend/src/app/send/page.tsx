@@ -18,8 +18,8 @@ export default async function SendPage({
           silently.
         </h1>
         <p className="mx-auto max-w-sm text-base text-graphite">
-          Pay any handle or email in USDC. Nothing on-chain links you to the
-          recipient.
+          Pay any handle or email in USDC or XLM. Nothing on-chain links you
+          to the recipient.
         </p>
       </div>
       <div className="w-full space-y-6 text-left">

@@ -12,9 +12,10 @@ function hexToBuffer(hex: string): Buffer {
 
 /**
  * Build, sign (via Freighter callback), submit, and poll the Soroban
- * claim(proof_a, proof_b, proof_c, root, nullifier, recipient_digest, recipient, amount) tx.
+ * claim(proof_a, proof_b, proof_c, root, nullifier, recipient_digest, recipient, amount, token_id) tx.
  * `amount` is the raw stroop value (e.g. 100_000_000n for 10 USDC).
  * `recipientDigest` is the 64-char hex (32-byte BE) passed explicitly to the contract.
+ * `tokenId` identifies the token (0 = USDC, 1 = XLM).
  * Returns the transaction hash on SUCCESS.
  */
 export async function claimNote(
@@ -26,7 +27,8 @@ export async function claimNote(
   nullifier: string,
   recipientDigest: string,
   amount: bigint,
-  signTx: (xdr: string) => Promise<string>
+  signTx: (xdr: string) => Promise<string>,
+  tokenId: number = 0
 ): Promise<string> {
   const rpc = new StellarSdk.rpc.Server(RPC_URL);
   const contract = new StellarSdk.Contract(CONTRACT_ID);
@@ -40,6 +42,7 @@ export async function claimNote(
   const recipientDigestVal = xdr.ScVal.scvBytes(hexToBuffer(recipientDigest));
   const recipientVal = StellarSdk.nativeToScVal(connectedAddress, { type: "address" });
   const amountVal = StellarSdk.nativeToScVal(amount, { type: "i128" });
+  const tokenIdVal = StellarSdk.nativeToScVal(tokenId, { type: "u32" });
 
   const operation = contract.call(
     "claim",
@@ -50,7 +53,8 @@ export async function claimNote(
     nullifierVal,
     recipientDigestVal,
     recipientVal,
-    amountVal
+    amountVal,
+    tokenIdVal
   );
 
   const account = await rpc.getAccount(connectedAddress);

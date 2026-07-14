@@ -22,12 +22,14 @@ function bigIntToBytes32BE(n: bigint): Uint8Array {
  * Build, prepare, sign (via Freighter), and submit a deposit transaction.
  * Returns the transaction hash on success.
  * `amount` is the raw stroop value (e.g. 100_000_000n for 10 USDC).
+ * `tokenId` identifies the token (0 = USDC, 1 = XLM).
  */
 export async function depositNote(
   senderAddress: string,
   commitment: bigint,
   amount: bigint,
-  signTx: (xdr: string) => Promise<string>
+  signTx: (xdr: string) => Promise<string>,
+  tokenId: number = 0
 ): Promise<string> {
   const rpc = new StellarSdk.rpc.Server(RPC_URL);
   const contract = new StellarSdk.Contract(CONTRACT_ID);
@@ -38,8 +40,9 @@ export async function depositNote(
     Buffer.from(bigIntToBytes32BE(commitment))
   );
   const fromVal = StellarSdk.nativeToScVal(senderAddress, { type: "address" });
+  const tokenIdVal = StellarSdk.nativeToScVal(tokenId, { type: "u32" });
 
-  const operation = contract.call("deposit", fromVal, amountVal, commitmentVal);
+  const operation = contract.call("deposit", fromVal, amountVal, commitmentVal, tokenIdVal);
 
   const account = await rpc.getAccount(senderAddress);
   const tx = new StellarSdk.TransactionBuilder(account, {
