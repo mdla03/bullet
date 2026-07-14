@@ -46,6 +46,12 @@ const SEND_STEPS: { key: Step; label: string }[] = [
   { key: "submitting", label: "Submitting to Stellar" },
 ];
 
+function humanizeSendError(raw: string): string {
+  if (/Account not found:/i.test(raw))
+    return "Your Stellar wallet isn't funded on testnet yet. Grab free XLM from friendbot.stellar.org and try again.";
+  return raw;
+}
+
 function CopyButton({ text, label }: { text: string; label: string }) {
   const [copied, setCopied] = useState(false);
   return (
@@ -228,7 +234,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
       setSentAsInvite(true);
       setStep("done");
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(humanizeSendError(e instanceof Error ? e.message : String(e)));
       setStep("error");
     }
   }
@@ -313,7 +319,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
       postActivity({ type: "send", amount: Number(amountStroops), tokenId: selectedToken.id, txHash: hash, handle: recipient.trim() });
       setStep("done");
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(humanizeSendError(e instanceof Error ? e.message : String(e)));
       setStep("error");
     }
   }
@@ -381,9 +387,8 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
   const avatarInitial = recipientLabel.replace(/^@/, "").charAt(0).toUpperCase();
 
   return (
+    <div className="space-y-4">
     <div className="space-y-5 rounded-2xl border border-fog bg-white p-6">
-      <h2 className="text-xl font-bold tracking-tight">Send</h2>
-
       {!showAmountStep ? (
         <div className="space-y-3">
           <input
@@ -539,9 +544,10 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
           )}
         </>
       )}
+    </div>
 
       {error && (
-        <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div className="break-words rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
         </div>
       )}
