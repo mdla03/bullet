@@ -26,10 +26,18 @@ function getFrontendUrl() {
   return process.env.NEXT_PUBLIC_FRONTEND_URL ?? "https://bullet-frontend.vercel.app";
 }
 
-// USDC whole-unit presets shown in the UI. Internally converted to stroops.
-const USDC_PRESETS = [1, 10, 50, 100] as const;
-type UsdcPreset = (typeof USDC_PRESETS)[number];
-const USDC_DECIMALS = 10_000_000n;
+// Token configuration: id, label, unit presets, decimals (stroops).
+interface TokenConfig {
+  id: number;
+  label: string;
+  prefix: string;  // "$" for USDC, "" for XLM
+  presets: readonly number[];
+  decimals: bigint;
+}
+const TOKENS: TokenConfig[] = [
+  { id: 0, label: "USDC", prefix: "$", presets: [1, 10, 50, 100], decimals: 10_000_000n },
+  { id: 1, label: "XLM",  prefix: "",  presets: [10, 50, 100, 500], decimals: 10_000_000n },
+];
 
 type Step = "idle" | "computing" | "signing" | "submitting" | "done" | "error";
 
@@ -66,7 +74,8 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
   const [unregistered, setUnregistered] = useState<string | null>(null);
   const [expiryDays, setExpiryDays] = useState<15 | 30>(30);
   const [resolving, setResolving] = useState(false);
-  const [selectedUsdc, setSelectedUsdc] = useState<UsdcPreset>(10);
+  const [selectedToken, setSelectedToken] = useState(TOKENS[0]);
+  const [selectedAmount, setSelectedAmount] = useState(TOKENS[0].presets[1]); // 10
   const [step, setStep] = useState<Step>("idle");
   const [claimLink, setClaimLink] = useState("");
   const [notePosted, setNotePosted] = useState(false);
@@ -160,13 +169,14 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
         .join("");
       const secretBigInt = BigInt("0x" + secret);
 
-      const amountStroops = BigInt(selectedUsdc) * USDC_DECIMALS;
+      const amountStroops = BigInt(selectedAmount) * selectedToken.decimals;
 
       // Commitment computed locally so the claim secret never leaves the tab.
       const commitment = computeCommitment(
         secretBigInt.toString(),
         recipientDigest.toString(),
-        amountStroops.toString()
+        amountStroops.toString(),
+        String(selectedToken.id)
       );
       const commitmentBigInt = BigInt(commitment);
 
@@ -184,7 +194,8 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
           });
           if ("error" in signRes) throw new Error(`Freighter: ${signRes.error}`);
           return signRes.signedTxXdr;
-        }
+        },
+        selectedToken.id
       );
       setTxHash(hash);
 
@@ -192,6 +203,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
         secret,
         recipientDigest: recipientDigest.toString(),
         amount: Number(amountStroops),
+        tokenId: selectedToken.id,
         contractId: CONTRACT_ID,
         network: "testnet",
         recipientHandle: unregistered,
@@ -255,13 +267,14 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
         .join("");
       const secretBigInt = BigInt("0x" + secret);
 
-      const amountStroops = BigInt(selectedUsdc) * USDC_DECIMALS;
+      const amountStroops = BigInt(selectedAmount) * selectedToken.decimals;
 
       // 4. Compute commitment locally so the claim secret never leaves the tab.
       const commitment = computeCommitment(
         secretBigInt.toString(),
         recipientDigestDec,
-        amountStroops.toString()
+        amountStroops.toString(),
+        String(selectedToken.id)
       );
       const commitmentBigInt = BigInt(commitment);
 
@@ -280,7 +293,8 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
           });
           if ("error" in signRes) throw new Error(`Freighter: ${signRes.error}`);
           return signRes.signedTxXdr;
-        }
+        },
+        selectedToken.id
       );
       setTxHash(hash);
 
@@ -289,6 +303,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
         secret,
         recipientDigest: recipientDigestDec,
         amount: Number(amountStroops),
+        tokenId: selectedToken.id,
         contractId: CONTRACT_ID,
         network: "testnet",
         recipientHandle: recipient.trim(),
@@ -314,7 +329,8 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
     }
   }
 
-  const shareMessage = `I sent you $${selectedUsdc} USDC on Bullet (private payments on Stellar). Claim it here: ${claimLink}. Keep this link private, it contains your claim secret.`;
+  const displayAmt = selectedToken.id === 0 ? `$${selectedAmount}` : `${selectedAmount}`;
+  const shareMessage = `I sent you ${displayAmt} ${selectedToken.label} on Bullet (private payments on Stellar). Claim it here: ${claimLink}. Keep this link private, it contains your claim secret.`;
 
   // ---- Success state ----
   if (step === "done") {
@@ -322,7 +338,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
       <div className="space-y-5">
         <div className="rounded-2xl border border-signal/30 bg-white p-5">
           <p className="flex items-center gap-2 font-semibold text-signal">
-            <CheckIcon className="h-5 w-5" />${selectedUsdc} USDC{" "}
+            <CheckIcon className="h-5 w-5" />{displayAmt} {selectedToken.label}{" "}
             {sentAsInvite ? "sent as an invite to " : "sent silently to "}
             {recipient.trim()}
           </p>
@@ -479,27 +495,54 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
         </div>
       )}
 
-      {/* Amount picker */}
+      {/* Token + amount picker */}
       {(resolved || unregistered) && (
         <>
-          <div>
-            <label className="mb-1.5 block text-sm font-medium">Amount</label>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {USDC_PRESETS.map((d) => (
-                <button
-                  key={d}
-                  onClick={() => setSelectedUsdc(d)}
-                  disabled={busy}
-                  className={`rounded-xl border px-2 py-3 transition-colors disabled:opacity-50 ${
-                    selectedUsdc === d
-                      ? "border-ink bg-ink text-paper"
-                      : "border-fog bg-white text-graphite hover:border-graphite"
-                  }`}
-                >
-                  <span className="block text-lg font-bold">${d}</span>
-                  <span className="block text-[10px] tracking-wider">USDC</span>
-                </button>
-              ))}
+          <div className="space-y-3">
+            {/* Token selector */}
+            <div>
+              <label className="mb-1.5 block text-sm font-medium">Token</label>
+              <div className="flex gap-1 rounded-full border border-fog bg-white p-1">
+                {TOKENS.map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => {
+                      setSelectedToken(t);
+                      setSelectedAmount(t.presets[1] ?? t.presets[0]);
+                    }}
+                    disabled={busy}
+                    className={`flex-1 rounded-full px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50 ${
+                      selectedToken.id === t.id
+                        ? "bg-ink text-paper"
+                        : "text-graphite hover:text-ink"
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Amount presets */}
+            <div>
+              <label className="mb-1.5 block text-sm font-medium">Amount</label>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {selectedToken.presets.map((d) => (
+                  <button
+                    key={d}
+                    onClick={() => setSelectedAmount(d)}
+                    disabled={busy}
+                    className={`rounded-xl border px-2 py-3 transition-colors disabled:opacity-50 ${
+                      selectedAmount === d
+                        ? "border-ink bg-ink text-paper"
+                        : "border-fog bg-white text-graphite hover:border-graphite"
+                    }`}
+                  >
+                    <span className="block text-lg font-bold">{selectedToken.prefix}{d}</span>
+                    <span className="block text-[10px] tracking-wider">{selectedToken.label}</span>
+                  </button>
+                ))}
+              </div>
             </div>
             <p className="mt-2 flex items-start gap-1.5 text-xs text-graphite">
               <EyeOffIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -535,8 +578,8 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
               className="w-full rounded-full bg-ink px-4 py-3 font-semibold text-paper transition-colors hover:bg-ink/85"
             >
               {unregistered
-                ? `Send $${selectedUsdc} as invite`
-                : `Send $${selectedUsdc} silently`}
+                ? `Send ${displayAmt} ${selectedToken.label} as invite`
+                : `Send ${displayAmt} ${selectedToken.label} silently`}
             </button>
           )}
         </>

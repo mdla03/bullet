@@ -5,17 +5,19 @@ pragma circom 2.0.0;
 // Proof statement:
 //   prover knows `secret` such that:
 //     nullifier         = Poseidon([secret])
-//     commitment        = Poseidon([secret, recipientDigest, amount])
+//     commitment        = Poseidon([secret, recipientDigest, amount, tokenId])
 //     commitment ∈ Merkle tree at `root` (with an opening path of depth 20)
 //
 // Public inputs (LOCKED — must match derive_public_inputs in contracts/zeekpay/src/lib.rs):
-//   [root, nullifier, recipientDigest, amount]   ← order is the snarkjs public-signal order
+//   [root, nullifier, recipientDigest, amount, tokenId]
 //   `amount` is the raw stroop value (7 decimal places; e.g. 100000000 for 10 USDC).
+//   `tokenId` is a uint mapping: 0 = USDC, 1 = XLM. Bound in the commitment so a
+//   deposit of token A cannot be claimed as token B.
 //
-// Security: recipientDigest and amount are inside the commitment preimage so that
-// a front-runner cannot substitute their own recipient or amount while reusing
-// the same secret. Nullifier arity (1) differs from commitment arity (3) for
-// domain separation.
+// Security: recipientDigest, amount, and tokenId are inside the commitment preimage
+// so that a front-runner cannot substitute their own recipient, amount, or token
+// while reusing the same secret. Nullifier arity (1) differs from commitment
+// arity (4) for domain separation.
 //
 // NOTE: uses circomlib Poseidon (BN254 round constants) compiled over BLS12-381
 // (-p bls12381). The circuit is satisfiable and the proofs verify correctly, but
@@ -30,6 +32,7 @@ template Claim(DEPTH) {
     signal input nullifier;
     signal input recipientDigest;
     signal input amount;
+    signal input tokenId;
 
     // ── private inputs ────────────────────────────────────────────────────────
     signal input secret;
@@ -42,10 +45,11 @@ template Claim(DEPTH) {
     nullifierHasher.out === nullifier;
 
     // ── commitment derivation ─────────────────────────────────────────────────
-    component commitmentHasher = Poseidon(3);
+    component commitmentHasher = Poseidon(4);
     commitmentHasher.inputs[0] <== secret;
     commitmentHasher.inputs[1] <== recipientDigest;
     commitmentHasher.inputs[2] <== amount;
+    commitmentHasher.inputs[3] <== tokenId;
 
     // ── Merkle membership proof ───────────────────────────────────────────────
     component levelHashers[DEPTH];
@@ -74,4 +78,4 @@ template Claim(DEPTH) {
     levelHashes[DEPTH] === root;
 }
 
-component main {public [root, nullifier, recipientDigest, amount]} = Claim(20);
+component main {public [root, nullifier, recipientDigest, amount, tokenId]} = Claim(20);

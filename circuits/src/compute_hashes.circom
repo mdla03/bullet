@@ -13,6 +13,7 @@ template ComputeHashes() {
     signal input secret;
     signal input recipientDigest;
     signal input amount;
+    signal input tokenId;
     signal output nullifier;
     signal output root;
 
@@ -21,11 +22,12 @@ template ComputeHashes() {
     n.inputs[0] <== secret;
     nullifier <== n.out;
 
-    // commitment = Poseidon([secret, recipientDigest, amount])
-    component c = Poseidon(3);
+    // commitment = Poseidon([secret, recipientDigest, amount, tokenId])
+    component c = Poseidon(4);
     c.inputs[0] <== secret;
     c.inputs[1] <== recipientDigest;
     c.inputs[2] <== amount;
+    c.inputs[3] <== tokenId;
 
     // zero[i] = Poseidon([zero[i-1], zero[i-1]]) — empty subtree hashes
     component zeros[20];

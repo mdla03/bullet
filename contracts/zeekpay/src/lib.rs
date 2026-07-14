@@ -1,16 +1,17 @@
 //! ZeekPay main contract — Option B (off-chain Merkle).
 //!
-//! deposit: pull USDC from `from`, store commitment, emit event (cheap).
+//! deposit: pull tokens from `from`, store commitment, emit event (cheap).
 //! post_root: admin/relayer publishes an off-chain-computed Merkle root (the
 //!   Option-B trust seam — documented in README honest-limits).
 //! claim: verify a Groth16 proof (real, BLS12-381 host fns) that the caller owns
 //!   a note in the tree under a known root, with {root, nullifier, recipient,
-//!   amount} bound as public inputs; reject replayed nullifiers; pay the recipient.
+//!   amount, tokenId} bound as public inputs; reject replayed nullifiers; pay
+//!   the recipient in the correct token.
 //!
-//! SECURITY-SENSITIVE: nullifier replay = double-spend; recipient+amount binding
-//! prevents front-running / amount-mismatch drains; only contract-known roots are
-//! accepted. See src/test.rs for the verifier correctness test against a real
-//! snarkjs proof and the adversarial business-logic tests.
+//! SECURITY-SENSITIVE: nullifier replay = double-spend; recipient+amount+tokenId
+//! binding prevents front-running / amount-mismatch / cross-token drains; only
+//! contract-known roots are accepted. See src/test.rs for the verifier correctness
+//! test against a real snarkjs proof and the adversarial business-logic tests.
 #![no_std]
 
 #[cfg(test)]
@@ -60,7 +61,7 @@ pub struct VkData {
 #[contracttype]
 pub enum DataKey {
     Admin,
-    Usdc,
+    Token(u32), // token_id -> SAC address (0 = USDC, 1 = XLM)
     Vk,
     Paused,
     Index,
@@ -83,6 +84,7 @@ pub enum Error {
     VkNotSet = 8,
     NonCanonicalInput = 9,
     InvalidAmount = 10,
+    UnknownToken = 11,
 }
 
 /// BLS12-381 scalar field modulus r, big-endian. A `nullifier`/`root` is used
@@ -122,10 +124,17 @@ impl ZeekPay {
             return Err(Error::AlreadyInitialized);
         }
         env.storage().instance().set(&DataKey::Admin, &admin);
-        env.storage().instance().set(&DataKey::Usdc, &usdc_sac);
+        env.storage().instance().set(&DataKey::Token(0), &usdc_sac);
         env.storage().instance().set(&DataKey::Paused, &false);
         env.storage().instance().set(&DataKey::Index, &0u64);
         env.storage().instance().set(&DataKey::RootHead, &0u32);
+        Ok(())
+    }
+
+    /// Register an additional token. Admin only. tokenId 0 is set by initialize.
+    pub fn add_token(env: Env, token_id: u32, sac_address: Address) -> Result<(), Error> {
+        Self::require_admin(&env)?;
+        env.storage().instance().set(&DataKey::Token(token_id), &sac_address);
         Ok(())
     }
 
@@ -180,13 +189,15 @@ impl ZeekPay {
         Ok(())
     }
 
-    /// Deposit a note. Pulls `amount` stroops of USDC from `from` into the
-    /// contract pool and records the commitment. Emits Deposit (NO sender, NO amount).
+    /// Deposit a note. Pulls `amount` stroops of the specified token from `from`
+    /// into the contract pool and records the commitment. Emits Deposit (NO
+    /// sender, NO amount, NO token — all visible from the SAC transfer).
     pub fn deposit(
         env: Env,
         from: Address,
         amount: i128,
         commitment: BytesN<32>,
+        token_id: u32,
     ) -> Result<u64, Error> {
         Self::require_initialized(&env)?;
         if Self::is_paused(&env) {
@@ -197,8 +208,12 @@ impl ZeekPay {
         }
         from.require_auth();
 
-        let usdc: Address = env.storage().instance().get(&DataKey::Usdc).unwrap();
-        let client = token::Client::new(&env, &usdc);
+        let tok_addr: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Token(token_id))
+            .ok_or(Error::UnknownToken)?;
+        let client = token::Client::new(&env, &tok_addr);
         client.transfer(&from, &env.current_contract_address(), &amount);
 
         let index: u64 = env.storage().instance().get(&DataKey::Index).unwrap_or(0);
@@ -206,9 +221,6 @@ impl ZeekPay {
             .instance()
             .set(&DataKey::Index, &(index + 1));
 
-        // Deposit event carries commitment + index only. Amount is not emitted:
-        // it is already visible from the SAC transfer and adding it here would
-        // make event scraping trivially link deposit size to the commitment.
         env.events().publish(
             (soroban_sdk::symbol_short!("deposit"),),
             (commitment, index),
@@ -217,15 +229,15 @@ impl ZeekPay {
     }
 
     /// Claim a note. Verifies the Groth16 proof binding {root, nullifier,
-    /// recipientDigest, amount}; rejects replayed nullifiers and unknown roots;
-    /// pays the recipient.
+    /// recipientDigest, amount, tokenId}; rejects replayed nullifiers and
+    /// unknown roots; pays the recipient in the correct token.
     ///
     /// `recipient_digest` is the proof-bound identity commitment. For stealth
     /// payments it is ECDH-derived (unique per payment), so the contract does
     /// NOT re-derive it from `recipient`. The caller (claimer) supplies it and
     /// the proof must commit to it — a wrong digest simply fails verification.
     ///
-    /// Emits Claim (NO commitment -> no link to a deposit, NO amount).
+    /// Emits Claim (NO commitment -> no link to a deposit, NO amount, NO token).
     pub fn claim(
         env: Env,
         proof_a: BytesN<96>,
@@ -236,6 +248,7 @@ impl ZeekPay {
         recipient_digest: BytesN<32>,
         recipient: Address,
         amount: i128,
+        token_id: u32,
     ) -> Result<(), Error> {
         Self::require_initialized(&env)?;
         if Self::is_paused(&env) {
@@ -275,7 +288,7 @@ impl ZeekPay {
                 c: G1Affine::from_bytes(proof_c),
             };
             let vk = Self::load_vk(&env)?;
-            let pubs = Self::derive_public_inputs(&env, &root, &nullifier, &recipient_digest, amount);
+            let pubs = Self::derive_public_inputs(&env, &root, &nullifier, &recipient_digest, amount, token_id);
             if !verifier::verify(&env, &vk, &proof, &pubs) {
                 return Err(Error::InvalidProof);
             }
@@ -290,16 +303,18 @@ impl ZeekPay {
             NULLIFIER_BUMP_THRESHOLD,
             NULLIFIER_BUMP_TO,
         );
-        // 6. Pay recipient.
-        let usdc: Address = env.storage().instance().get(&DataKey::Usdc).unwrap();
-        let client = token::Client::new(&env, &usdc);
+        // 6. Pay recipient in the correct token.
+        let tok_addr: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Token(token_id))
+            .ok_or(Error::UnknownToken)?;
+        let client = token::Client::new(&env, &tok_addr);
         client.transfer(
             &env.current_contract_address(),
             &recipient,
             &amount,
         );
-        // Claim event carries nullifier only. Amount omitted: the SAC transfer
-        // already records it, and repeating it here aids amount-linkage analysis.
         env.events().publish(
             (soroban_sdk::symbol_short!("claim"),),
             (nullifier,),
@@ -366,7 +381,7 @@ impl ZeekPay {
 
     /// Public inputs the proof must commit to, in this exact order. The
     /// circom-circuit feature MUST match this encoding:
-    ///   [ Fr(root), Fr(nullifier), Fr(recipient_digest), Fr(amount) ]
+    ///   [ Fr(root), Fr(nullifier), Fr(recipient_digest), Fr(amount), Fr(tokenId) ]
     ///
     /// `recipient_digest` is now caller-supplied (stealth derivation): the sender
     /// computes it via ECDH so each payment has a unique digest even to the same
@@ -374,20 +389,21 @@ impl ZeekPay {
     /// A wrong digest simply fails proof verification (the proof commits to it).
     ///
     /// amount is the raw stroop value (always positive, fits in u64 for any
-    /// realistic payment).
+    /// realistic payment). tokenId is a small uint (0 = USDC, 1 = XLM).
     fn derive_public_inputs(
         env: &Env,
         root: &BytesN<32>,
         nullifier: &BytesN<32>,
         recipient_digest: &BytesN<32>,
         amount: i128,
+        token_id: u32,
     ) -> Vec<Fr> {
         let mut v: Vec<Fr> = Vec::new(env);
         v.push_back(Fr::from_bytes(root.clone()));
         v.push_back(Fr::from_bytes(nullifier.clone()));
         v.push_back(Fr::from_bytes(recipient_digest.clone()));
-        // amount fits in u64 for any realistic payment; map into the lo_lo word.
         v.push_back(Fr::from_u256(soroban_sdk::U256::from_parts(env, 0, 0, 0, amount as u64)));
+        v.push_back(Fr::from_u256(soroban_sdk::U256::from_parts(env, 0, 0, 0, token_id as u64)));
         v
     }
 

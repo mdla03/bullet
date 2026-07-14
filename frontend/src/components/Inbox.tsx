@@ -45,10 +45,19 @@ const CLAIM_LABELS: Record<string, string> = {
   submitting: "Submitting…",
 };
 
+const TOKEN_LABELS: Record<number, string> = { 0: "USDC", 1: "XLM" };
+
 /** Normalize legacy denom-format notes (denom: 1|10|50|100 USDC) to stroops. */
 function toStroops(p: ClaimPayload): number {
   if (p.amount != null) return p.amount;
   return ((p as unknown as { denom?: number }).denom ?? 0) * 10_000_000;
+}
+
+function formatNoteAmount(p: ClaimPayload): string {
+  const stroops = toStroops(p);
+  const units = stroops / 10_000_000;
+  const label = TOKEN_LABELS[p.tokenId ?? 0] ?? "USDC";
+  return (p.tokenId ?? 0) === 0 ? `$${units} ${label}` : `${units} ${label}`;
 }
 
 function timeAgo(iso: string): string {
@@ -220,7 +229,8 @@ export function Inbox() {
       const { proof_a, proof_b, proof_c, nullifier, root } = await proveBrowser(
         BigInt("0x" + p.secret).toString(),
         p.recipientDigest,
-        String(p.amount)
+        String(p.amount),
+        String(p.tokenId ?? 0)
       );
 
       set({ state: "signing" });
@@ -239,7 +249,8 @@ export function Inbox() {
           root,
           nullifier,
           rdHexInv,
-          BigInt(p.amount)
+          BigInt(p.amount),
+          p.tokenId ?? 0
         );
       } else {
         const { signTransaction } = await import("@stellar/freighter-api");
@@ -263,7 +274,8 @@ export function Inbox() {
             });
             if ("error" in signRes) throw new Error(`Freighter: ${signRes.error}`);
             return signRes.signedTxXdr;
-          }
+          },
+          p.tokenId ?? 0
         );
       }
 
@@ -387,8 +399,17 @@ export function Inbox() {
   const claimable = notes.filter(
     (n) => !n.claimedAt && claims[n.id]?.state !== "done"
   );
-  const totalStroops = claimable.reduce((sum, n) => sum + toStroops(n.payload), 0);
-  const total = totalStroops / 10_000_000;
+  // Group claimable by token for the summary header.
+  const totals: Record<number, number> = {};
+  for (const n of claimable) {
+    const tId = n.payload.tokenId ?? 0;
+    totals[tId] = (totals[tId] ?? 0) + toStroops(n.payload);
+  }
+  const summaryParts = Object.entries(totals).map(([tid, stroops]) => {
+    const label = TOKEN_LABELS[Number(tid)] ?? "USDC";
+    const units = stroops / 10_000_000;
+    return Number(tid) === 0 ? `$${units} ${label}` : `${units} ${label}`;
+  });
 
   return (
     <div className="space-y-5">
@@ -419,7 +440,7 @@ export function Inbox() {
           <div className="flex flex-wrap items-end justify-between gap-3 rounded-2xl border border-fog bg-white p-5">
             <div>
               <p className="text-4xl font-bold tracking-tight">
-                ${total} <span className="text-2xl">USDC</span>
+                {summaryParts.join(" + ") || "$0 USDC"}
               </p>
               <p className="mt-1 text-sm text-graphite">
                 claimable · {claimable.length}{" "}
@@ -474,7 +495,7 @@ export function Inbox() {
                         <span
                           className={`text-lg font-bold tracking-tight ${claimed ? "text-graphite" : ""}`}
                         >
-                          ${toStroops(note.payload) / 10_000_000} USDC
+                          {formatNoteAmount(note.payload)}
                         </span>
                         <span className="font-mono text-xs text-graphite">
                           note {note.id.slice(0, 4)}…
@@ -558,8 +579,10 @@ export function Inbox() {
           ) : (
             <ul className="divide-y divide-fog rounded-2xl border border-fog bg-white">
               {activity.map((item) => {
-                const usdc = item.amount / 10_000_000;
+                const units = item.amount / 10_000_000;
                 const isSend = item.type === "send";
+                // ponytail: activity doesn't store tokenId yet; assume USDC for now
+                const amtLabel = `$${units} USDC`;
                 return (
                   <li
                     key={item.id}
@@ -579,7 +602,7 @@ export function Inbox() {
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium">
                         {isSend ? "Sent" : "Claimed"}{" "}
-                        <span className="font-bold">${usdc} USDC</span>
+                        <span className="font-bold">{amtLabel}</span>
                         {isSend && item.handle && (
                           <span className="text-graphite">
                             {" "}to {item.handle}

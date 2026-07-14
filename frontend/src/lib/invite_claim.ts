@@ -20,6 +20,8 @@ const RPC_URL =
   "https://soroban-testnet.stellar.org";
 const CONTRACT_ID = process.env.NEXT_PUBLIC_CONTRACT_ID ?? "";
 const USDC_SAC = process.env.NEXT_PUBLIC_USDC_SAC_ID ?? "";
+const XLM_SAC = process.env.NEXT_PUBLIC_XLM_SAC_ID ?? "";
+const TOKEN_SAC: Record<number, string> = { 0: USDC_SAC, 1: XLM_SAC };
 const NETWORK_PASSPHRASE =
   process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ?? StellarSdk.Networks.TESTNET;
 
@@ -33,8 +35,9 @@ function hexToBuffer(hex: string): Buffer {
  * Returns the tx hash.
  */
 /**
- * Claim an invite note and forward USDC to the user's real wallet.
+ * Claim an invite note and forward tokens to the user's real wallet.
  * `amount` is the raw stroop value (e.g. 100_000_000n for 10 USDC).
+ * `tokenId` identifies the token (0 = USDC, 1 = XLM).
  */
 export async function claimInvite(
   custodyStellarSecret: string,
@@ -45,14 +48,14 @@ export async function claimInvite(
   root: string,
   nullifier: string,
   recipientDigest: string,
-  amount: bigint
+  amount: bigint,
+  tokenId: number = 0
 ): Promise<string> {
   const rpc = new StellarSdk.rpc.Server(RPC_URL);
   const custody = StellarSdk.Keypair.fromSecret(custodyStellarSecret);
   const custodyAddr = custody.publicKey();
 
   const contract = new StellarSdk.Contract(CONTRACT_ID);
-  const usdcContract = new StellarSdk.Contract(USDC_SAC);
   const { xdr } = StellarSdk;
 
   // TX A: contract.claim, USDC lands in the custody wallet.
@@ -65,7 +68,8 @@ export async function claimInvite(
     xdr.ScVal.scvBytes(hexToBuffer(nullifier)),
     xdr.ScVal.scvBytes(hexToBuffer(recipientDigest)),
     StellarSdk.nativeToScVal(custodyAddr, { type: "address" }),
-    StellarSdk.nativeToScVal(amount, { type: "i128" })
+    StellarSdk.nativeToScVal(amount, { type: "i128" }),
+    StellarSdk.nativeToScVal(tokenId, { type: "u32" })
   );
   const acctA = await rpc.getAccount(custodyAddr);
   const txA = new StellarSdk.TransactionBuilder(acctA, {
@@ -86,8 +90,10 @@ export async function claimInvite(
     throw new Error(`invite claim ended with status: ${finalA.status}`);
   }
 
-  // TX B: forward USDC from custody to the recipient's real wallet.
-  const transferOp = usdcContract.call(
+  // TX B: forward tokens from custody to the recipient's real wallet.
+  const sacAddr = TOKEN_SAC[tokenId] ?? USDC_SAC;
+  const tokenContract = new StellarSdk.Contract(sacAddr);
+  const transferOp = tokenContract.call(
     "transfer",
     StellarSdk.nativeToScVal(custodyAddr, { type: "address" }),
     StellarSdk.nativeToScVal(userRealWallet, { type: "address" }),
