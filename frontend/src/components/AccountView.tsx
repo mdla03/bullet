@@ -17,12 +17,25 @@ import {
 import type { SVGProps } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getMe, type MeResponse } from "@/lib/api";
+import { Skeleton } from "@/components/Skeleton";
 
 function providerIcon(provider: string): (p: SVGProps<SVGSVGElement>) => React.ReactElement {
   if (provider === "twitter" || provider === "twitter_v2" || provider === "x")
     return XBrandIcon;
   if (provider === "google") return GoogleIcon;
   return MailIcon;
+}
+
+// Google first, then X/twitter, then email, then anything else.
+const PROVIDER_RANK: Record<string, number> = {
+  google: 0,
+  x: 1,
+  twitter: 1,
+  twitter_v2: 1,
+  email: 2,
+};
+function providerRank(provider: string): number {
+  return PROVIDER_RANK[provider] ?? 99;
 }
 
 export function AccountView() {
@@ -114,11 +127,20 @@ export function AccountView() {
     }
   }
 
-  if (session === undefined) {
+  if (session === undefined || (session && !me)) {
     return (
-      <div className="flex items-center gap-2 text-sm text-graphite">
-        <LoaderIcon className="h-4 w-4 animate-spin" />
-        Loading…
+      <div className="space-y-4">
+        <div className="space-y-4 rounded-2xl border border-fog bg-white p-6">
+          <Skeleton className="h-7 w-24" />
+          <div className="space-y-2">
+            <Skeleton className="h-12 rounded-xl" />
+            <Skeleton className="h-12 rounded-xl" />
+          </div>
+        </div>
+        <div className="space-y-3 rounded-2xl border border-fog bg-white p-6">
+          <Skeleton className="h-7 w-20" />
+          <Skeleton className="h-12 rounded-xl" />
+        </div>
       </div>
     );
   }
@@ -148,7 +170,7 @@ export function AccountView() {
       <div className="space-y-4 rounded-2xl border border-fog bg-white p-6">
         <h2 className="text-xl font-bold tracking-tight">Handles</h2>
         <div className="space-y-2">
-          {handles.map((h) => {
+          {[...handles].sort((a, b) => providerRank(a.provider) - providerRank(b.provider)).map((h) => {
             const unlinkKey = `unlink:${h.provider}:${h.handle}`;
             const canUnlink = handles.length > 1;
             const Icon = providerIcon(h.provider);

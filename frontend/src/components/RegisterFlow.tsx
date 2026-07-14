@@ -3,15 +3,18 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import type { Session } from "@supabase/supabase-js";
+import type { SVGProps } from "react";
 import {
   CheckIcon,
   GoogleIcon,
   LoaderIcon,
+  MailIcon,
   WalletIcon,
   XBrandIcon,
 } from "@/components/icons";
 import { createClient } from "@/lib/supabase/client";
 import { apiFetch, getMe, lookupEmailProviders, type MeResponse } from "@/lib/api";
+import { Skeleton } from "@/components/Skeleton";
 import {
   KEY_DOMAIN_MESSAGE,
   buildLinkWalletChallenge,
@@ -29,11 +32,23 @@ const OAUTH_ERRORS: Record<string, string> = {
   access_denied: "The sign-in was cancelled. Start again when you're ready.",
 };
 
-function providerLabel(provider: string): string {
+function providerIcon(provider: string): (p: SVGProps<SVGSVGElement>) => React.ReactElement {
   if (provider === "twitter" || provider === "twitter_v2" || provider === "x")
-    return "X";
-  if (provider === "email") return "Email";
-  return provider.charAt(0).toUpperCase() + provider.slice(1);
+    return XBrandIcon;
+  if (provider === "google") return GoogleIcon;
+  return MailIcon;
+}
+
+// Sort key: Google first, then X, then email, then anything else.
+const PROVIDER_RANK: Record<string, number> = {
+  google: 0,
+  x: 1,
+  twitter: 1,
+  twitter_v2: 1,
+  email: 2,
+};
+function providerRank(provider: string): number {
+  return PROVIDER_RANK[provider] ?? 99;
 }
 
 type PreviewStep = "inbox" | "sent" | "oauth" | "wallet" | "confirm" | "done";
@@ -302,9 +317,24 @@ export function RegisterFlow({
   // ---- Loading session ----
   if (session === undefined) {
     return (
-      <div className="flex items-center gap-2 text-sm text-graphite">
-        <LoaderIcon className="h-4 w-4 animate-spin" />
-        Loading…
+      <div className="space-y-4">
+        <div className="space-y-4 rounded-2xl border border-fog bg-white p-5">
+          <Skeleton className="h-7 w-20" />
+          <Skeleton className="h-11 rounded-xl" />
+          <Skeleton className="h-11 rounded-full" />
+          <div className="flex items-center gap-3">
+            <div className="h-px flex-1 bg-fog" />
+            <Skeleton className="h-3 w-6" />
+            <div className="h-px flex-1 bg-fog" />
+          </div>
+          <Skeleton className="h-11 rounded-full" />
+          <Skeleton className="h-11 rounded-full" />
+          <div className="mt-5 flex items-center justify-center gap-2 border-t border-fog pt-4">
+            <span className="h-1.5 w-6 rounded-full bg-fog" />
+            <span className="h-1.5 w-1.5 rounded-full bg-fog" />
+            <span className="h-1.5 w-1.5 rounded-full bg-fog" />
+          </div>
+        </div>
       </div>
     );
   }
@@ -532,17 +562,21 @@ export function RegisterFlow({
             Payments to your handles land in your inbox. Only your wallet can
             claim them.
           </p>
-          <div className="space-y-1.5">
-            {handles.map((h) => (
-              <div
-                key={`${h.provider}:${h.handle}`}
-                className="flex items-center gap-2 rounded-xl border border-fog px-4 py-2.5 text-sm"
-              >
-                <CheckIcon className="h-4 w-4 shrink-0 text-signal" />
-                <span className="text-graphite">{providerLabel(h.provider)}</span>
-                <span className="min-w-0 flex-1 truncate font-medium">{h.handle}</span>
-              </div>
-            ))}
+          <div className="space-y-2">
+            {[...handles]
+              .sort((a, b) => providerRank(a.provider) - providerRank(b.provider))
+              .map((h) => {
+                const Icon = providerIcon(h.provider);
+                return (
+                  <div
+                    key={`${h.provider}:${h.handle}`}
+                    className="flex items-center gap-3 rounded-xl border border-fog px-4 py-3 text-sm"
+                  >
+                    <Icon className="h-4 w-4 shrink-0" />
+                    <span className="min-w-0 flex-1 truncate font-medium">{h.handle}</span>
+                  </div>
+                );
+              })}
           </div>
           <Link
             href="/inbox"

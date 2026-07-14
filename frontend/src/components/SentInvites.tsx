@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
-import { CheckIcon, LoaderIcon } from "@/components/icons";
+import { CheckIcon } from "@/components/icons";
 
 interface Invite {
   id: string;
@@ -44,15 +44,9 @@ export function SentInvites() {
   }, []);
 
   if (error) return null; // silent: not signed in etc.
-  if (!items) {
-    return (
-      <div className="flex items-center gap-2 text-xs text-graphite">
-        <LoaderIcon className="h-3 w-3 animate-spin" />
-        Loading sent invites…
-      </div>
-    );
-  }
-  if (items.length === 0) return null;
+  // Skip a loading skeleton: for users with no invites (the common case) it
+  // would flash and disappear, which reads worse than a brief empty spot.
+  if (!items || items.length === 0) return null;
 
   return (
     <div className="rounded-2xl border border-fog bg-white p-5">
