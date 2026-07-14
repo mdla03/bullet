@@ -168,7 +168,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
         .join("");
       const secretBigInt = BigInt("0x" + secret);
 
-      const amountStroops = BigInt(selectedAmount) * selectedToken.decimals;
+      const amountStroops = BigInt(selectedAmount!) * selectedToken.decimals;
 
       // Commitment computed locally so the claim secret never leaves the tab.
       const commitment = computeCommitment(
@@ -259,7 +259,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
         .join("");
       const secretBigInt = BigInt("0x" + secret);
 
-      const amountStroops = BigInt(selectedAmount) * selectedToken.decimals;
+      const amountStroops = BigInt(selectedAmount!) * selectedToken.decimals;
 
       // 4. Compute commitment locally so the claim secret never leaves the tab.
       const commitment = computeCommitment(
