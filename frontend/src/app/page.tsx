@@ -3,6 +3,7 @@ import HeroSendBox from "@/components/HeroSendBox";
 import HowItWorks from "@/components/HowItWorks";
 import Reveal from "@/components/Reveal";
 import { GoogleIcon, XBrandIcon } from "@/components/icons";
+import { createClient } from "@/lib/supabase/server";
 
 // ponytail: sample commitments, purely illustrative. Real ones are Poseidon hashes.
 const SAMPLE_NOTES = [
@@ -14,7 +15,10 @@ const SAMPLE_NOTES = [
   { amount: 50, hash: "c2f031be…31be" },
 ];
 
-export default function Home() {
+export default async function Home() {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  const signedIn = !!user;
   return (
     <div className="flex flex-col items-center gap-20 text-center">
       {/* Hero: fills the first screen (minus the fixed nav offset) and centers */}
@@ -32,6 +36,7 @@ export default function Home() {
         {/* The real send box + sign-in CTA grouped so they sit close together */}
         <div className="animate-rise flex flex-col items-center gap-5 [animation-delay:200ms]">
           <HeroSendBox />
+          {!signedIn && (
           <div className="flex flex-col items-center gap-2">
             <p className="text-sm text-graphite">Getting paid instead?</p>
             <div className="flex flex-wrap justify-center gap-2">
@@ -51,6 +56,7 @@ export default function Home() {
               </Link>
             </div>
           </div>
+          )}
         </div>
       </div>
 
