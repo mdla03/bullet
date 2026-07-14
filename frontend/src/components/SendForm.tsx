@@ -37,6 +37,7 @@ interface TokenConfig {
 const TOKENS: TokenConfig[] = [
   { id: 0, label: "USDC", prefix: "$", presets: [1, 10, 50, 100], decimals: 10_000_000n },
   { id: 1, label: "XLM",  prefix: "",  presets: [10, 50, 100, 500], decimals: 10_000_000n },
+  { id: 2, label: "USDT", prefix: "$", presets: [1, 10, 50, 100], decimals: 10_000_000n },
 ];
 
 type Step = "idle" | "computing" | "signing" | "submitting" | "done" | "error";

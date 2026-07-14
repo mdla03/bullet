@@ -21,7 +21,8 @@ const RPC_URL =
 const CONTRACT_ID = process.env.NEXT_PUBLIC_CONTRACT_ID ?? "";
 const USDC_SAC = process.env.NEXT_PUBLIC_USDC_SAC_ID ?? "";
 const XLM_SAC = process.env.NEXT_PUBLIC_XLM_SAC_ID ?? "";
-const TOKEN_SAC: Record<number, string> = { 0: USDC_SAC, 1: XLM_SAC };
+const USDT_SAC = process.env.NEXT_PUBLIC_USDT_SAC_ID ?? "";
+const TOKEN_SAC: Record<number, string> = { 0: USDC_SAC, 1: XLM_SAC, 2: USDT_SAC };
 const NETWORK_PASSPHRASE =
   process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ?? StellarSdk.Networks.TESTNET;
 
