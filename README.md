@@ -118,7 +118,7 @@ bullet/
 |--------------------------|------------------|-----------------|
 | Mark Daniels Aquino      | Full Stack + ZK  | @mdla03         |
 | Clarence Kyle Pagunsan   | Full Stack + ZK  | @laughable-9    |
-| Elfritz Angelo Peralta   | Full Stack + ZK  | @elfrtz         |
+| Elfritz Angelo Peralta   | Product Manager  | @elfrtz         |
 
 ## License
 
