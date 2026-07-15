@@ -1,240 +1,125 @@
 # Bullet
 
-**send. silently.**
+## Problem
 
-**send crypto as if you're sending a message**
+Sending crypto on Stellar leaves a public trail. Every transaction creates a visible `sender -> recipient` edge on-chain. Anyone watching the chain learns who paid whom, how much, and how often. This lack of payment privacy makes Stellar unsuitable for salary payments, donations, remittances, and any transfer where the sender-recipient relationship should stay confidential.
 
-Bullet is a ZK-private payment rail on Stellar. Send USDC, USDT, or XLM
-to any X handle or email. Nothing on-chain connects your deposit to their
-claim.
+## Vision
 
-Live demo: https://sendbullet.xyz (also https://bullet-frontend.vercel.app)
+A world where sending money on Stellar is as private as handing someone cash. Bullet is the foundation for a full shielded payment layer on Stellar, starting with unlinkable fixed-denomination notes today and evolving toward encrypted balances with Pedersen commitments and range proofs. The long-term goal is private, compliant payments at scale, with selective disclosure so users can prove payments to auditors without making them public.
 
-> Hackathon build (ZK track). Stellar testnet only. Own (non-MPC) trusted
-> setup. Not audited. Not for mainnet funds.
+## Purpose
 
----
+We built Bullet because privacy is a prerequisite for real financial inclusion. Workers sending money home, individuals receiving donations, and businesses paying contractors all deserve payment privacy. Stellar has the speed and cost structure for global payments but lacks privacy infrastructure. Bullet fills that gap using zero-knowledge proofs that are verified directly on-chain using Soroban's native BLS12-381 host functions.
 
-## What the ZK actually does
+## Target Users
 
-Bullet's zero-knowledge proof is load-bearing: the app does not work
-without it. Removing the proof does not just weaken privacy, it removes the
-only mechanism the contract has to authorize a claim without revealing which
-deposit is being claimed.
+- **Individuals** sending private payments to friends, family, or contacts via X handle or email, without exposing the sender-recipient relationship on-chain.
+- **Freelancers and contractors** receiving payments where the payer-payee link should not be publicly visible on a block explorer.
+- **Remittance senders** who want to send stablecoins (USDC/USDT) or XLM to recipients identified by social handle rather than wallet address, with no public trace connecting the two parties.
 
-### The problem ZK solves
+## Features
 
-A normal payment on Stellar leaves a public edge: `sender_addr -> recipient_addr`.
-Anyone watching the chain learns who paid whom, how much, and how often.
+- **ZK-private claims** -- Groth16 proofs verified on-chain via Soroban's native BLS12-381 host functions. Nothing on-chain connects a deposit to its claim.
+- **Social-handle addressing** -- Send to an X handle or email. The resolver maps handles to recipient keys. No wallet address exchange needed.
+- **Multi-token support** -- USDC, XLM, and USDT. Token ID is bound in the ZK circuit to prevent cross-token drains.
+- **Browser-side proving** -- The secret never leaves the browser. snarkjs generates Groth16 proofs in-browser via WASM in ~15-30 seconds.
+- **Private inbox** -- Sender-authored encrypted notes (X25519 ECDH) let recipients discover claimable payments without any server seeing the plaintext.
+- **Invite flow** -- Send to unregistered users via claim link. Custody keypair handles the claim, then forwards tokens to the recipient's real wallet.
+- **Nullifier-based double-spend protection** -- Each note can only be claimed once. The contract stores every nullifier permanently.
 
-Bullet's contract holds a pool of **commitments** (`Poseidon(secret, recipientDigest, denom)`).
-To claim, the recipient must convince the contract of three things at once:
+## Tech Stack
 
-1. "I know a secret whose commitment is somewhere in this pool" — without
-   naming which commitment.
-2. "That commitment is bound to me" — without revealing which recipient key
-   it was bound to.
-3. "I have not claimed this note before" — without linking the claim back to
-   the deposit.
+- **Frontend:** Next.js 15, Tailwind CSS 4, Freighter wallet integration
+- **Backend:** Node.js, Express, TypeScript, Supabase (Postgres + Auth)
+- **Blockchain:** Stellar Soroban (Rust), native BLS12-381 host functions, Stellar SDK v16
+- **ZK:** Circom 2.2.3, snarkjs 0.7.5, Groth16 over BLS12-381, depth-20 Poseidon Merkle tree
+- **Auth:** Supabase Auth (Google + X OAuth), cookie sessions via `@supabase/ssr`
 
-You cannot do this with a signature or a hash check. It has to be a proof.
-
-### The circuit (`circuits/claim.circom`)
-
-A Groth16 circuit over **BLS12-381** with 4 public inputs
-(`[root, nullifier, recipientDigest, denom]`) and one private witness
-(`[secret, pathElements[20], pathIndices[20]]`). The circuit enforces:
-
-- **Merkle membership** — the leaf `Poseidon(secret, recipientDigest, denom)`
-  hashes up through a depth-20 Poseidon-Merkle path to the public `root`.
-- **Nullifier consistency** — the public `nullifier` equals
-  `Poseidon(secret, recipientDigest)`, tying the claim to the note without
-  revealing the note.
-- **Denomination pinning** — the private witness's denom must equal the
-  public `denom` the contract will pay out.
-
-The nullifier is what makes the claim one-shot. The contract records every
-nullifier it sees; a repeat is rejected. Same secret cannot claim twice.
-
-### On-chain verification (`contracts/zeekpay/`)
-
-The Soroban contract's `claim(proof_a, proof_b, proof_c, root, nullifier, recipient, denom)`
-verifies the Groth16 proof using Stellar's native `bls12_381` host functions
-(Protocol 22 / CAP-0059). Verification measured at **~70.66% of the 100M
-per-tx instruction budget** on real testnet, with ~29% headroom.
-
-If verification passes and the nullifier is unused, the contract:
-
-1. Marks the nullifier used (single-use enforcement).
-2. Transfers `denom` USDC from the pool to `recipient`.
-3. Emits a `Claim` event.
-
-**The `recipient` address on the claim tx has no on-chain link to the
-`sender` on any deposit tx.** That is the privacy guarantee, and it exists
-only because the proof lets the contract check ownership without needing
-either address to appear together anywhere.
-
-### Impact
-
-Every ZK-shaped guarantee this project makes is verified end-to-end:
-
-- `real_proof_verifies` (in `contracts/zeekpay/src/test.rs`) generates a
-  real snarkjs proof for a real 4-input claim circuit and verifies it
-  through the on-chain BLS12-381 host functions. Not a stub, not a mock.
-- `pnpm build:circuits` runs the full pipeline: circom -> r1cs -> Groth16
-  setup -> verification key -> converted Soroban fixture.
-- The frontend hits the same code path in the browser: `POST /prove` calls
-  snarkjs Groth16 in ~15 s, the browser signs and submits the claim, and
-  the contract verifies it before releasing funds.
-
-Take the ZK out and the contract has no way to distinguish "the right
-recipient" from "anyone who wants the money." That is what "load-bearing"
-means here.
-
----
-
-## How it works, end to end
-
-```
-sender                       Soroban contract              recipient
- |  pick denom + handle          |                          |
- |  resolve handle -> pubkey     |                          |
- |  build commitment             |                          |
- |    Poseidon(secret,           |                          |
- |             recipientDigest,  |                          |
- |             denom)            |                          |
- |  deposit(commitment, denom) -->                          |
- |                               |  store commitment        |
- |                               |  emit Deposit event      |
- |                               |                          |
- |                               |  <-- scan inbox for note-|
- |                               |      (encrypted note     |
- |                               |       registry, sender   |
- |                               |       posts, recipient   |
- |                               |       decrypts)          |
- |                               |                          |
- |                               |  <-- claim(proof, root, -|
- |                               |          nullifier,      |
- |                               |          recipient,      |
- |                               |          denom)          |
- |                               |  verify Groth16 proof    |
- |                               |  check nullifier unused  |
- |                               |  mark nullifier used     |
- |                               |  pay recipient           |
- |                               |  emit Claim event        |
-```
-
-Deposits and claims are separate transactions with no shared field.
-
----
-
-## Honest privacy limits
-
-Bullet does not oversell. What is and is not private in v1:
-
-- **Fixed denominations, not encrypted balances.** Amounts are standardized
-  per token (USDC and USDT: 1, 10, 50, 100; XLM: 10, 50, 100, 500), not
-  hidden. Privacy comes from every payment looking the same size, not from
-  concealing the number. Encrypted balances (Pedersen commitments + range
-  proofs) are P3.
-- **Anonymity scales with pool size.** At demo scale the set is small.
-  We do not claim strong anonymity yet.
-- **One-time commitments per payment.** Repeat payments to the same
-  recipient land at independent spots. Strong cross-payment unlinkability
-  needs stealth derivation (P1).
-- **Merkle root is posted by a relayer (Option B trust seam).** On-chain
-  Poseidon-Merkle insertion measured at ~4x over Soroban's per-tx budget,
-  so the tree is built off-chain and an admin posts roots. A malicious
-  root-poster could admit a forged tree. Decentralizing it is future work.
-- **Trusted setup is single-contributor.** The hackathon uses our own
-  Groth16 setup. Soundness assumes our randomness did not leak.
-  Production path: MPC ceremony. Intermediate `ptau` files are toxic waste
-  and never committed.
-- **Delivery channels can be non-private.** Sender-authored encrypted
-  notes (in the Supabase `notes` table) are decryptable only by the
-  recipient's derived key, so the inbox is private. A copy-pasted claim
-  link, or an email delivery path (P1), is trusted at the sender's
-  discretion. On-chain unlinkability holds regardless.
-
----
-
-## Stack
-
-- **Contracts** — Rust + `soroban-sdk = 22.0.7` on Stellar testnet.
-  `contracts/zeekpay/` (main) and `contracts/verifier/` (Groth16 verifier).
-- **ZK** — Circom 2.2.3 + snarkjs 0.7.5, Groth16 over BLS12-381,
-  depth-20 Poseidon Merkle, 11,420 constraints. `circuits/`. Proving runs
-  in-browser via WASM (`frontend/src/lib/prove_browser.ts`) so the claim
-  secret never reaches a server.
-- **Backend** — Node.js + Express + TypeScript. Handle resolver,
-  identity-provider lookup, wallet-link, invite custody, encrypted-notes
-  delivery, activity log, and Merkle-path lookup. The deposit indexer
-  runs alongside and is the sole writer of the on-chain Merkle root.
-  `backend/`.
-- **Frontend** — Next.js 15 + Tailwind 4, `stellar-sdk` v16 + Freighter v6.
-  `frontend/`.
-- **Auth** — Supabase Auth. Sign in with Google, X, or an email magic
-  link. Backend routes accept a Supabase JWT via the `Authorization`
-  header; there is no cookie-based session with the backend.
-- **Assets** — USDC, USDT, and XLM on Stellar testnet via Stellar Asset
-  Contracts.
-
-## Repo layout
-
-```
-bullet/
-├── SPEC.md          full spec, binding P0 scope
-├── pipeline/        Plan -> Code -> Test -> Review artifacts per feature
-├── contracts/       Cargo workspace: zeekpay, verifier
-├── circuits/        Circom src, build, scripts
-├── backend/         resolver + prove + post-root + Supabase user store
-├── frontend/        Next.js app (Vercel)
-├── shared/          shared TS types
-└── scripts/         top-level dev scripts (deploy, e2e demo)
-```
-
-## Deployment
-
-- **Frontend** on Vercel: https://sendbullet.xyz (and https://bullet-frontend.vercel.app)
-- **Backend** on Railway: expose `NEXT_PUBLIC_RESOLVER_URL` to the frontend.
-- **Contract** on Stellar testnet:
-  `CB5HPNJOZ3ULPNPRL5FJBHSDCHYWFAWXO6TY3JL6URZSYXMRTFQ3LUIB`
-- **USDC SAC**:
-  `CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA`
-- **XLM SAC**:
-  `CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC`
-- **USDT SAC**: configured via `NEXT_PUBLIC_USDT_SAC_ID` per deployment.
-
-## Local setup
-
-Node 20+ and pnpm 9. Rust + Soroban toolchain for the contracts.
+## How to Run Locally
 
 ```bash
-cp .env.example .env    # fill in values; .env is gitignored
+git clone https://github.com/mdla03/bullet.git
+cd bullet
+cp .env.example .env    # fill in values
 pnpm install
-pnpm dev                # backend + frontend in parallel
+pnpm dev                # starts backend + frontend
 ```
 
-Circuit regen (only needed if you change `circuits/claim.circom`):
+Circuit regeneration (only needed if you change `circuits/claim.circom`):
 
 ```bash
 pnpm build:circuits     # circom -> r1cs -> Groth16 setup -> vk -> fixture
 ```
 
-## Development workflow
+Requirements: Node 20+, pnpm 9. Rust + Soroban toolchain for contracts.
 
-Features move through a four-stage pipeline with artifacts checked in at
-`pipeline/<feature>/`: **Plan** (`spec.md`) -> **Code** (`changes.md`)
--> **Test** (`test-results.md`) -> **Review** (`review.md`). See
-`SPEC.md` §9.
+## Deployment
 
-## Security notes
+### Testnet
 
-- `.env` gitignored; `.env.example` carries placeholders only.
-- Trusted-setup toxic waste (intermediate `.ptau` files) stays gitignored.
-- `circuits/build/claim.zkey` and `circuits/build/claim_js/` are committed
-  intentionally: they are public artifacts of a public setup needed at
-  runtime. If the setup is re-run (MPC ceremony), those files must be
-  replaced.
-- Testnet only. Own (non-MPC) trusted setup. Not audited. Not for mainnet
-  funds.
+- **Contract Address:** `CB5HPNJOZ3ULPNPRL5FJBHSDCHYWFAWXO6TY3JL6URZSYXMRTFQ3LUIB`
+- **USDC SAC:** `CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA`
+- **XLM SAC:** `CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC`
+- **USDT SAC:** `CBL6KD2LFMLAUKFFWNNXWOXFN73GAXLEA4WMJRLQ5L76DMYTM3KWQVJN`
+- **Frontend:** Vercel
+- **Backend:** Railway
+
+### Mainnet
+
+Not deployed. Testnet only. Own (non-MPC) trusted setup. Not audited.
+
+## Demo
+
+- Live App: https://sendbullet.xyz
+- Demo Video: https://drive.google.com/file/d/12_d1DzgBn8U-fFspGnOv7UIbnBoLdGGI/view?usp=sharing
+- Pitch Deck: https://canva.link/r7v03xtursupg3u
+
+## Architecture
+
+See `architecture_diagram.svg` for the full system diagram and `bullet_zk_architecture.pdf` for detailed technical documentation.
+
+### How the ZK proof works
+
+Bullet's zero-knowledge proof is load-bearing. Without it, the contract has no way to authorize a claim without revealing which deposit is being claimed.
+
+The Groth16 circuit (`circuits/claim.circom`) proves:
+
+1. **Merkle membership** -- `Poseidon(secret, recipientDigest, amount, tokenId)` hashes up through a depth-20 Poseidon path to a known root.
+2. **Nullifier derivation** -- `nullifier = Poseidon(secret)`, domain-separated from the commitment (arity-1 vs arity-4).
+3. **Value binding** -- `amount` and `tokenId` are inside the commitment, so a deposit of token A cannot be claimed as token B, and the claimed amount must match.
+
+Five public inputs `[root, nullifier, recipientDigest, amount, tokenId]` are verified on-chain. The secret and Merkle path stay private. Verification uses Soroban's native `bls12_381` pairing_check at ~70% of the per-tx CPU budget.
+
+### Honest privacy limits
+
+- **Fixed denominations, not encrypted balances.** Amounts are standardized (1, 10, 50, 100 USDC), not hidden. Privacy comes from every payment looking the same size. Encrypted balances are future work.
+- **Anonymity scales with pool size.** At demo scale the set is small.
+- **Merkle root posted by a relayer.** On-chain Poseidon insertion exceeds the per-tx budget, so the tree is built off-chain and an admin posts roots. Decentralizing this is future work.
+- **Trusted setup is single-contributor.** Production path is an MPC ceremony.
+- **Delivery channels can be non-private.** Claim links and email delivery are trusted at the sender's discretion. On-chain unlinkability holds regardless.
+
+## Repo layout
+
+```
+bullet/
+├── SPEC.md              full spec, binding P0 scope
+├── contracts/            Cargo workspace: zeekpay (main), verifier (Groth16)
+├── circuits/             Circom source, build artifacts, scripts
+├── backend/              resolver + indexer + Merkle tree + Supabase store
+├── frontend/             Next.js app
+├── shared/               shared TS types
+└── scripts/              deploy + e2e demo scripts
+```
+
+## Team
+
+| Name                     | Role             | GitHub          |
+|--------------------------|------------------|-----------------|
+| Mark Daniels Aquino      | Full Stack + ZK  | @mdla03         |
+| Clarence Kyle Pagunsan   | Full Stack + ZK  | @laughable-9    |
+| Elfritz Angelo Peralta   | Full Stack + ZK  | @elfrtz         |
+
+## License
+
+MIT
