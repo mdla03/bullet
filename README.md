@@ -2,6 +2,8 @@
 
 **send. silently.**
 
+**send crypto as if you're sending a message**
+
 Bullet is a ZK-private payment rail on Stellar. Send USDC, USDT, or XLM
 to any X handle or email. Nothing on-chain connects your deposit to their
 claim.
