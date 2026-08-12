@@ -1,14 +1,12 @@
 import { createBrowserClient } from "@supabase/ssr";
-
-// The publishable key is public by design (RLS enforces access); safe in the bundle.
-const SUPABASE_URL =
-  process.env.NEXT_PUBLIC_SUPABASE_URL ??
-  "https://fxtxvierohxvvusmhkoa.supabase.co";
-const SUPABASE_ANON_KEY =
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ??
-  "sb_publishable_elD3mcadGqiWcYZlUxE1sg_vqOh_Hq8";
+import { SUPABASE_ANON_KEY, SUPABASE_URL, timeoutFetch } from "./config";
 
 /** Browser-side Supabase client. Reads the session from cookies set by the server. */
 export function createClient() {
-  return createBrowserClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+    throw new Error("NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY are not set");
+  }
+  return createBrowserClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    global: { fetch: timeoutFetch() },
+  });
 }
