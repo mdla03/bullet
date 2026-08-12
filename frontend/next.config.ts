@@ -15,12 +15,9 @@ function originOf(url: string | undefined): string | null {
   }
 }
 
-// Mirror the same fallback the Supabase client uses (src/lib/supabase/*.ts)
-// so connect-src stays correct even when NEXT_PUBLIC_SUPABASE_URL is unset.
-const supabaseOrigin = originOf(
-  process.env.NEXT_PUBLIC_SUPABASE_URL ??
-    "https://fxtxvierohxvvusmhkoa.supabase.co",
-);
+// No fallback: the Supabase clients (src/lib/supabase/config.ts) have none
+// either, so when NEXT_PUBLIC_SUPABASE_URL is unset there is nothing to allow.
+const supabaseOrigin = originOf(process.env.NEXT_PUBLIC_SUPABASE_URL);
 const supabaseWs = supabaseOrigin?.replace(/^https:/, "wss:") ?? null;
 
 const connectSrc = [
