@@ -54,9 +54,13 @@ function providerRank(provider: string): number {
 export function RegisterFlow({
   oauthError,
   autoProvider,
+  changeWallet,
 }: {
   oauthError?: string;
   autoProvider?: "google" | "x";
+  /** Arrived from "Change wallet": run the wallet steps even though one is
+   *  already linked. */
+  changeWallet?: boolean;
 }) {
   const supabase = createClient();
 
@@ -73,6 +77,16 @@ export function RegisterFlow({
   // provider === null means we know the email is OAuth-only but not which one;
   // UI then offers both Google and X.
   const [oauthOnly, setOauthOnly] = useState<{ provider: "google" | "x" | null } | null>(null);
+  const [changing, setChanging] = useState(Boolean(changeWallet));
+  // Unclaimed notes on the wallet being replaced. Shown before the switch:
+  // they stay claimable only with that wallet.
+  const [unclaimedOnCurrent, setUnclaimedOnCurrent] = useState<number | null>(null);
+  // Set when the new wallet belongs to another account and merging it would
+  // delete that account. Confirmed explicitly, never silently.
+  const [pendingMerge, setPendingMerge] = useState<{
+    handles: string[];
+    stellar_address: string;
+  } | null>(null);
   const [error, setError] = useState(
     oauthError ? (OAUTH_ERRORS[oauthError] ?? "Sign-in failed. Start again.") : ""
   );
@@ -108,6 +122,23 @@ export function RegisterFlow({
     if (session) refreshMe();
     else setMe(null);
   }, [session, refreshMe]);
+
+  // Switching wallets strands unclaimed notes on the outgoing key. Count them
+  // up front so the confirm can state the real number, not a vague warning.
+  useEffect(() => {
+    const pubkey = me?.wallet?.bullet_pubkey;
+    if (!changing || !pubkey) return;
+    let cancelled = false;
+    import("@/lib/notes")
+      .then(({ countUnclaimedByPubkey }) => countUnclaimedByPubkey([pubkey]))
+      .then((counts) => {
+        if (!cancelled) setUnclaimedOnCurrent(counts[pubkey] ?? 0);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [changing, me?.wallet?.bullet_pubkey]);
 
   // Resend cooldown ticker. Client-side is UX only; Supabase enforces the real
   // rate limit server-side (default 60s per email), so a devtools user can't
@@ -230,7 +261,7 @@ export function RegisterFlow({
     }
   }
 
-  async function linkWallet() {
+  async function linkWallet(confirmMerge = false) {
     const userId = me?.userId ?? session?.user.id;
     if (!userId) return;
     setError("");
@@ -247,18 +278,36 @@ export function RegisterFlow({
 
       const res = await apiFetch("/wallet/link", {
         method: "POST",
-        body: JSON.stringify({ stellarAddress: address, zeekPayPubKey, signature }),
+        body: JSON.stringify({
+          stellarAddress: address,
+          zeekPayPubKey,
+          signature,
+          ...(confirmMerge ? { confirmMerge: true } : {}),
+        }),
       });
       // Railway/Vercel error pages come back as HTML; guard against JSON.parse
       // crashing so the user sees a real reason instead of "Unexpected token <".
       const raw = await res.text();
       const body = raw.startsWith("{")
-        ? (JSON.parse(raw) as { detail?: string; error?: string })
+        ? (JSON.parse(raw) as {
+            detail?: string;
+            error?: string;
+            account?: { handles: string[]; stellar_address: string };
+          })
         : {};
+      // This wallet belongs to another account. Linking it absorbs that
+      // account and deletes it, so ask before doing anything.
+      if (res.status === 409 && body.error === "merge_required" && body.account) {
+        setPendingMerge(body.account);
+        return;
+      }
       if (!res.ok)
         throw new Error(
           body.detail ?? body.error ?? `Link failed (${res.status}). Backend may be down or a stale build is deployed.`
         );
+      setPendingMerge(null);
+      setChanging(false);
+      setUnclaimedOnCurrent(null);
       await refreshMe();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -295,7 +344,10 @@ export function RegisterFlow({
   const linkedWallet = me?.wallet ?? null;
   const handles = me?.identities ?? [];
   const primaryHandle = handles[0]?.handle ?? session?.user.email ?? "";
-  const stepIndex = !session ? 0 : !linkedWallet ? 1 : 2;
+  // While changing wallets the flow re-enters the wallet step even though one
+  // is already linked.
+  const needsWallet = !linkedWallet || changing;
+  const stepIndex = !session ? 0 : needsWallet ? 1 : 2;
   const stepCount = 3;
 
   return (
@@ -445,13 +497,23 @@ export function RegisterFlow({
       )}
 
       {/* Step 2: attach a wallet */}
-      {session && !linkedWallet && !address && (
+      {session && needsWallet && !address && (
         <div className="space-y-4">
-          <h2 className="text-xl font-bold tracking-tight">Attach a wallet</h2>
-          <p className="text-sm text-graphite">
-            Bullet needs a Stellar wallet to claim payments sent to{" "}
-            <span className="font-medium text-ink">{primaryHandle || "you"}</span>.
-          </p>
+          <h2 className="text-xl font-bold tracking-tight">
+            {changing ? "Change wallet" : "Attach a wallet"}
+          </h2>
+          {changing && linkedWallet ? (
+            <p className="text-sm text-graphite">
+              Payments to{" "}
+              <span className="font-medium text-ink">{primaryHandle || "you"}</span> will
+              go to the new wallet. Connect it in Freighter first.
+            </p>
+          ) : (
+            <p className="text-sm text-graphite">
+              Bullet needs a Stellar wallet to claim payments sent to{" "}
+              <span className="font-medium text-ink">{primaryHandle || "you"}</span>.
+            </p>
+          )}
           <button
             onClick={connectWallet}
             disabled={working === "connect"}
@@ -464,17 +526,29 @@ export function RegisterFlow({
             )}
             Connect Freighter
           </button>
-          <button
-            onClick={signOut}
-            className="flex w-full items-center justify-center rounded-full border border-fog bg-white px-5 py-3 font-medium text-graphite transition-colors hover:border-graphite hover:text-ink"
-          >
-            Sign out
-          </button>
+          {changing ? (
+            <button
+              onClick={() => {
+                setChanging(false);
+                setAddress("");
+              }}
+              className="flex w-full items-center justify-center rounded-full border border-fog bg-white px-5 py-3 font-medium text-graphite transition-colors hover:border-graphite hover:text-ink"
+            >
+              Cancel
+            </button>
+          ) : (
+            <button
+              onClick={signOut}
+              className="flex w-full items-center justify-center rounded-full border border-fog bg-white px-5 py-3 font-medium text-graphite transition-colors hover:border-graphite hover:text-ink"
+            >
+              Sign out
+            </button>
+          )}
         </div>
       )}
 
       {/* Step 2b: confirm the connected wallet */}
-      {session && !linkedWallet && address && (
+      {session && needsWallet && address && (
         <div className="space-y-4">
           <h2 className="text-xl font-bold tracking-tight">Confirm this wallet</h2>
           <p className="text-sm text-graphite">
@@ -488,16 +562,79 @@ export function RegisterFlow({
             </span>
             <CheckIcon className="h-4 w-4 shrink-0 text-signal" />
           </div>
-          <button
-            onClick={linkWallet}
-            disabled={working === "link"}
-            className="flex w-full items-center justify-center gap-2 rounded-full bg-ink px-5 py-3 font-semibold text-paper transition-colors hover:bg-ink/85 disabled:opacity-50"
-          >
-            {working === "link" && (
-              <LoaderIcon className="h-5 w-5 animate-spin" />
-            )}
-            {working === "link" ? "Waiting for Freighter…" : "Sign and link wallet"}
-          </button>
+
+          {/* Switching: state plainly what stays behind on the old wallet. */}
+          {changing && linkedWallet && (
+            <div className="space-y-2 rounded-xl border border-amber bg-amber/10 px-4 py-3 text-sm">
+              <p>
+                Your Bullet keys come from the wallet that signs, so new payments
+                will be encrypted to{" "}
+                <span className="font-mono">
+                  {address.slice(0, 6)}…{address.slice(-6)}
+                </span>{" "}
+                instead.
+              </p>
+              {unclaimedOnCurrent !== null && unclaimedOnCurrent > 0 && (
+                <p>
+                  {unclaimedOnCurrent} unclaimed{" "}
+                  {unclaimedOnCurrent === 1 ? "note stays" : "notes stay"} on{" "}
+                  <span className="font-mono">
+                    {linkedWallet.stellar_address.slice(0, 6)}…
+                    {linkedWallet.stellar_address.slice(-6)}
+                  </span>
+                  . Nothing on-chain connects the two wallets, so only that wallet
+                  can claim them. Keep it, or claim first and switch after.
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* The new wallet already belongs to another account. */}
+          {pendingMerge ? (
+            <div className="space-y-3 rounded-xl border border-amber bg-amber/10 px-4 py-3 text-sm">
+              <p>
+                This wallet is linked to another Bullet account
+                {pendingMerge.handles.length > 0 && (
+                  <> holding {pendingMerge.handles.join(", ")}</>
+                )}
+                . Linking it moves those handles here and deletes that account.
+                This cannot be undone.
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => linkWallet(true)}
+                  disabled={working === "link"}
+                  className="flex-1 rounded-full bg-ink px-4 py-2 font-medium text-paper transition-colors hover:bg-ink/85 disabled:opacity-50"
+                >
+                  Merge and link
+                </button>
+                <button
+                  onClick={() => {
+                    setPendingMerge(null);
+                    setAddress("");
+                  }}
+                  className="flex-1 rounded-full border border-fog bg-white px-4 py-2 font-medium transition-colors hover:border-graphite"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={() => linkWallet()}
+              disabled={working === "link"}
+              className="flex w-full items-center justify-center gap-2 rounded-full bg-ink px-5 py-3 font-semibold text-paper transition-colors hover:bg-ink/85 disabled:opacity-50"
+            >
+              {working === "link" && (
+                <LoaderIcon className="h-5 w-5 animate-spin" />
+              )}
+              {working === "link"
+                ? "Waiting for Freighter…"
+                : changing
+                  ? "Sign and switch wallet"
+                  : "Sign and link wallet"}
+            </button>
+          )}
           <button
             onClick={() => setAddress("")}
             className="flex w-full items-center justify-center rounded-full border border-fog bg-white px-5 py-3 font-medium transition-colors hover:border-graphite"
@@ -508,7 +645,7 @@ export function RegisterFlow({
       )}
 
       {/* Step 3: done */}
-      {session && linkedWallet && (
+      {session && linkedWallet && !changing && (
         <div className="space-y-4">
           <h2 className="text-xl font-bold tracking-tight">You&apos;re ready</h2>
           <p className="text-sm text-graphite">

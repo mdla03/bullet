@@ -8,7 +8,7 @@
     "dev": "tsx watch src/resolver.ts",
     "start": "tsx src/resolver.ts",
     "build": "tsc",
-    "test": "node --import tsx/esm --test src/resolver.test.ts"
+    "test": "node --import tsx/esm --test src/resolver.test.ts src/wallet_history.test.ts"
   },
   "dependencies": {
     "@sendgrid/mail": "^8.1.6",
