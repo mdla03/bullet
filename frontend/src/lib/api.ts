@@ -23,11 +23,23 @@ export async function apiFetch(path: string, init: RequestInit = {}) {
   return fetch(`${RESOLVER_URL}${path}`, { ...init, headers });
 }
 
+/** A wallet the account linked before switching. Notes addressed to its Bullet
+ *  key are claimable only by reconnecting this wallet. */
+export interface PreviousWallet {
+  stellar_address: string;
+  bullet_pubkey: string;
+  unlinked_at: string;
+}
+
 export interface MeResponse {
   authenticated: boolean;
   userId: string;
   identities: { provider: string; handle?: string }[];
-  wallet: { stellar_address: string; bullet_pubkey: string } | null;
+  wallet: {
+    stellar_address: string;
+    bullet_pubkey: string;
+    previous?: PreviousWallet[];
+  } | null;
   unreadCount: number;
 }
 

@@ -314,6 +314,28 @@ export function AccountView() {
               <ExternalLinkIcon className="h-3.5 w-3.5" />
               View on stellar.expert
             </a>
+
+            {(linkedWallet.previous ?? []).length > 0 && (
+              <div className="space-y-1 border-t border-fog pt-3">
+                <p className="text-xs text-graphite">Previously linked</p>
+                {(linkedWallet.previous ?? []).map((p) => (
+                  <p key={p.bullet_pubkey} className="font-mono text-xs text-graphite">
+                    {p.stellar_address.slice(0, 6)}…{p.stellar_address.slice(-6)}
+                  </p>
+                ))}
+                <p className="text-xs text-graphite">
+                  Notes sent before a switch stay claimable with the wallet they
+                  were sent to. Connect it in the inbox.
+                </p>
+              </div>
+            )}
+
+            <a
+              href="/register?change=1"
+              className="flex w-full items-center justify-center rounded-full border border-fog bg-white px-5 py-2.5 text-sm font-medium transition-colors hover:border-graphite"
+            >
+              Change wallet
+            </a>
           </>
         ) : (
           <a

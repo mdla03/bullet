@@ -4,9 +4,10 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import type { Session } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
-import { getMe, postActivity } from "@/lib/api";
+import { getMe, postActivity, type PreviousWallet } from "@/lib/api";
 import { KEY_DOMAIN_MESSAGE, signatureToHex } from "@/lib/register";
 import {
+  countUnclaimedByPubkey,
   deriveBulletKeys,
   fetchNotes,
   markClaimed,
@@ -33,6 +34,13 @@ import { claimInvite } from "@/lib/invite_claim";
 interface WalletRow {
   stellar_address: string;
   bullet_pubkey: string;
+  /** Wallets this account linked before switching. Their notes are claimable
+   *  only by reconnecting that wallet, so the inbox accepts them at unlock. */
+  previous: PreviousWallet[];
+}
+
+function shortAddr(a: string): string {
+  return `${a.slice(0, 6)}…${a.slice(-6)}`;
 }
 
 type ClaimStatus =
@@ -84,6 +92,7 @@ export function Inbox() {
   const [claims, setClaims] = useState<Record<string, ClaimStatus>>({});
   const [claimingAll, setClaimingAll] = useState(false);
   const [claimableShown, setClaimableShown] = useState(PAGE_SIZE);
+  const [strandedCounts, setStrandedCounts] = useState<Record<string, number>>({});
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -109,6 +118,7 @@ export function Inbox() {
               ? {
                   stellar_address: me.wallet.stellar_address,
                   bullet_pubkey: me.wallet.bullet_pubkey,
+                  previous: me.wallet.previous ?? [],
                 }
               : null
           );
@@ -121,6 +131,25 @@ export function Inbox() {
     };
   }, [session]);
 
+  // Unclaimed notes sitting on every key this account has published. Whichever
+  // wallet is unlocked, the rest show up as "connect that wallet to claim".
+  useEffect(() => {
+    if (!wallet) return;
+    const keysToCheck = [
+      wallet.bullet_pubkey,
+      ...wallet.previous.map((p) => p.bullet_pubkey),
+    ];
+    let cancelled = false;
+    countUnclaimedByPubkey(keysToCheck)
+      .then((counts) => {
+        if (!cancelled) setStrandedCounts(counts);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [wallet, notes]);
+
   async function unlock() {
     if (!wallet) return;
     setError("");
@@ -130,14 +159,22 @@ export function Inbox() {
         "@/lib/freighter"
       );
       const { address: addr } = await freighterRequestAccess();
-      if (addr !== wallet.stellar_address)
+      // Any wallet this account has linked, current or previous. A previous
+      // wallet still holds the only key that can open (and claim) notes
+      // addressed to it before the switch.
+      const known = [
+        { stellar_address: wallet.stellar_address, bullet_pubkey: wallet.bullet_pubkey },
+        ...wallet.previous,
+      ];
+      const match = known.find((w) => w.stellar_address === addr);
+      if (!match)
         throw new Error(
-          `This isn't the wallet linked to your account. Switch Freighter to ${wallet.stellar_address.slice(0, 6)}…${wallet.stellar_address.slice(-6)} and try again.`
+          `This isn't a wallet linked to your account. Switch Freighter to ${shortAddr(wallet.stellar_address)} and try again.`
         );
 
       const signed = await freighterSignMessage(KEY_DOMAIN_MESSAGE, addr);
       const derived = deriveBulletKeys(signatureToHex(signed));
-      if (derived.pubKeyHex !== wallet.bullet_pubkey)
+      if (derived.pubKeyHex !== match.bullet_pubkey)
         throw new Error(
           "This wallet's signature doesn't match your registered Bullet key."
         );
@@ -358,9 +395,36 @@ export function Inbox() {
     );
   }
 
+  // Unclaimed notes addressed to a wallet other than the one unlocked now.
+  // Their ciphertext needs that wallet's key, so all we can show is a pointer.
+  const otherWallets = [
+    { stellar_address: wallet.stellar_address, bullet_pubkey: wallet.bullet_pubkey },
+    ...wallet.previous,
+  ].filter(
+    (w) =>
+      w.bullet_pubkey !== keys?.pubKeyHex && (strandedCounts[w.bullet_pubkey] ?? 0) > 0
+  );
+
+  const strandedBanner = otherWallets.length > 0 && (
+    <div className="space-y-2 rounded-2xl border border-fog bg-white p-5">
+      <h2 className="text-sm font-medium">Notes on another wallet</h2>
+      {otherWallets.map((w) => {
+        const n = strandedCounts[w.bullet_pubkey];
+        return (
+          <p key={w.bullet_pubkey} className="text-sm text-graphite">
+            {n} unclaimed {n === 1 ? "note is" : "notes are"} addressed to{" "}
+            <span className="font-mono text-ink">{shortAddr(w.stellar_address)}</span>.
+            Connect that wallet in Freighter and unlock again to claim them.
+          </p>
+        );
+      })}
+    </div>
+  );
+
   if (!keys || !notes) {
     return (
       <div className="space-y-4">
+        {strandedBanner}
         <div className="space-y-4 rounded-2xl border border-fog bg-white p-6">
           <h2 className="text-xl font-bold tracking-tight">Unlock inbox</h2>
           <button
@@ -402,6 +466,7 @@ export function Inbox() {
 
   return (
     <div className="space-y-4">
+      {strandedBanner}
       <div className="overflow-hidden rounded-2xl border border-fog bg-white">
         <div className="flex items-center justify-between gap-3 px-5 py-4">
           <div className="min-w-0">

@@ -91,6 +91,27 @@ export async function postNote(
   }
 }
 
+/** Unclaimed note count per Bullet pubkey. Used to tell a user that notes are
+ *  stranded on a wallet they no longer have connected. Counts only: the
+ *  ciphertext needs that wallet's key to open. */
+export async function countUnclaimedByPubkey(
+  pubkeys: string[]
+): Promise<Record<string, number>> {
+  if (pubkeys.length === 0) return {};
+  const { data, error } = await supabase
+    .from("notes")
+    .select("recipient_pubkey")
+    .in("recipient_pubkey", pubkeys)
+    .is("claimed_at", null);
+  if (error) return {};
+  const counts: Record<string, number> = {};
+  for (const row of data ?? []) {
+    const k = row.recipient_pubkey as string;
+    counts[k] = (counts[k] ?? 0) + 1;
+  }
+  return counts;
+}
+
 /** Fetch and decrypt every note addressed to these keys, newest first. */
 export async function fetchNotes(keys: BulletKeys): Promise<InboxNote[]> {
   const { data, error } = await supabase

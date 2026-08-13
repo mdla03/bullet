@@ -174,10 +174,11 @@ app.get("/me", requireAuth, async (req: Request, res: Response) => {
 
 app.post("/wallet/link", requireAuth, async (req: Request, res: Response) => {
   const userId = (req as Request & { userId?: string }).userId!;
-  const { stellarAddress, zeekPayPubKey, signature } = req.body as {
+  const { stellarAddress, zeekPayPubKey, signature, confirmMerge } = req.body as {
     stellarAddress?: string;
     zeekPayPubKey?: string;
     signature?: string;
+    confirmMerge?: boolean;
   };
   if (!stellarAddress || !STELLAR_RE.test(stellarAddress))
     return void badRequest(res, "stellarAddress must be a valid Stellar public key (G…)");
@@ -188,11 +189,19 @@ app.post("/wallet/link", requireAuth, async (req: Request, res: Response) => {
   if (!verifyLinkWalletSig(userId, stellarAddress, signature))
     return void res.status(400).json({ error: "invalid_signature" });
 
-  const result = await store.attachWallet(userId, {
-    stellar_address: stellarAddress,
-    bullet_pubkey: zeekPayPubKey,
-    signature,
-  });
+  const result = await store.attachWallet(
+    userId,
+    {
+      stellar_address: stellarAddress,
+      bullet_pubkey: zeekPayPubKey,
+      signature,
+    },
+    { confirmMerge: confirmMerge === true }
+  );
+  // This wallet belongs to another account. Merging deletes that account, so
+  // the client must show what gets absorbed and re-send with confirmMerge.
+  if ("mergeRequired" in result)
+    return void res.status(409).json({ error: "merge_required", account: result.account });
   if ("conflict" in result) return void res.status(409).json({ error: "conflict", detail: result.detail });
   // Best-effort: deliver any pending invites addressed to this user's handles.
   invite.deliverInvitesFor(userId, zeekPayPubKey).catch(() => {});
