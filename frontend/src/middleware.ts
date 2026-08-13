@@ -4,7 +4,19 @@ import { SUPABASE_ANON_KEY, SUPABASE_URL, timeoutFetch } from "@/lib/supabase/co
 
 /** Refresh the Supabase session on every request so Server Components see fresh cookies. */
 export async function middleware(request: NextRequest) {
-  let response = NextResponse.next({ request });
+  // dashboard.<domain> serves the admin dashboard at its root. Every other
+  // path (auth callback, static assets) stays as-is so sign-in works there.
+  const host = (request.headers.get("host") ?? "").split(":")[0];
+  let rewriteUrl: URL | null = null;
+  if (host.startsWith("dashboard.") && request.nextUrl.pathname === "/") {
+    rewriteUrl = new URL("/dashboard", request.nextUrl);
+  }
+  const newResponse = () =>
+    rewriteUrl
+      ? NextResponse.rewrite(rewriteUrl, { request })
+      : NextResponse.next({ request });
+
+  let response = newResponse();
 
   // Without Supabase config there is no session to refresh. Skip instead of
   // letting createServerClient throw, which would 500 every request.
@@ -22,7 +34,7 @@ export async function middleware(request: NextRequest) {
         for (const { name, value } of cookiesToSet) {
           request.cookies.set(name, value);
         }
-        response = NextResponse.next({ request });
+        response = newResponse();
         for (const { name, value, options } of cookiesToSet) {
           response.cookies.set(name, value, options);
         }
