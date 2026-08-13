@@ -22,6 +22,7 @@ interface ActivityRow {
   token_id: number | null;
   tx_hash: string | null;
   created_at: string;
+  user_id: string;
 }
 
 async function loadMetrics() {
@@ -35,7 +36,7 @@ async function loadMetrics() {
       db.from("merkle_state").select("cursor_ledger").eq("id", true).maybeSingle(),
       db
         .from("activity")
-        .select("type, amount, token_id, tx_hash, created_at")
+        .select("type, amount, token_id, tx_hash, created_at, user_id")
         .order("created_at", { ascending: false })
         .limit(5000),
       count("profiles", "id"),
@@ -71,8 +72,10 @@ async function loadMetrics() {
     deposits: leaves.count ?? 0,
     cursorLedger: cursor.data?.cursor_ledger ?? null,
     latestLedger: ledger,
+    transactions: rows.length,
     sends: rows.filter((r) => r.type === "send").length,
     claims: rows.filter((r) => r.type === "claim").length,
+    activeAccounts: new Set(rows.map((r) => r.user_id)).size,
     volume: [...volume.entries()].sort((a, b) => a[0] - b[0]),
     users: profiles.count ?? 0,
     linkedWallets: wallets.count ?? 0,
@@ -134,12 +137,20 @@ export default async function DashboardPage() {
       </header>
 
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Stat
+          label="Transactions"
+          value={m.transactions}
+          note={`${m.sends} sends · ${m.claims} claims`}
+        />
         <Stat label="Deposits on-chain" value={m.deposits} note="confirmed Merkle leaves" />
-        <Stat label="Claims" value={m.claims} note="reported by app" />
-        <Stat label="Sends" value={m.sends} note="reported by app" />
+        <Stat
+          label="Active accounts"
+          value={m.activeAccounts}
+          note="sent or claimed at least once"
+        />
         <Stat label="Unclaimed notes" value={m.unclaimedNotes} />
         <Stat label="Registered users" value={m.users} />
-        <Stat label="Linked wallets" value={m.linkedWallets} />
+        <Stat label="Linked wallets" value={m.linkedWallets} note="wallet attached to account" />
         <Stat label="Pending invites" value={m.pendingInvites} />
         <Stat
           label="Indexer lag"
