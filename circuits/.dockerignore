@@ -1,0 +1,3 @@
+# Nothing is COPYed from the build context. Keep it empty so node_modules/ and
+# build/*.ptau are never uploaded to the daemon.
+*
