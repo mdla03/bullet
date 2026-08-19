@@ -62,11 +62,24 @@ pragma circom 2.0.0;
 //     64). This bound is not arbitrary: `derive_public_inputs` in
 //     contracts/zeekpay/src/lib.rs encodes amount via
 //     `U256::from_parts(env, 0, 0, 0, amount as u64)`, i.e. it silently
-//     truncates any i128 amount to its low 64 bits. Without this constraint,
-//     a prover could pick an amount >= 2^64 whose commitment binds one value
-//     while the contract's truncated encoding produces a different public
-//     input — a decoupling this constraint makes unsatisfiable in-circuit.
-//     It is a real, useful integrity check; it is not amount privacy.
+//     truncates any i128 amount to its low 64 bits. The constraint makes an
+//     in-circuit witness for `amount >= 2^64` unsatisfiable, so a prover
+//     cannot produce a proof whose own committed amount exceeds the range.
+//     It is a real integrity check; it is not amount privacy.
+//
+//     CORRECTION (2026-08-20, D1 audit): an earlier version of this comment
+//     said the constraint closes the truncation decoupling. It does not, and
+//     on its own it never could. The attack does not need an in-circuit
+//     witness for the oversized value: the attacker proves an honest small
+//     amount X and hands the contract an i128 of `2^64 + X`, which truncates
+//     back to X in `derive_public_inputs`, verifies against the honest proof,
+//     and transfers the full oversized i128. The value never passes through
+//     the circuit at all. Closing it requires a contract-side bound, now
+//     present as `AMOUNT_MAX_EXCLUSIVE` in contracts/zeekpay/src/lib.rs and
+//     pinned by `claim_amount_at_or_above_2_64_rejected` in that crate's
+//     tests. Treat this circuit constraint and that contract guard as one
+//     mechanism in two halves: keep the two bounds equal, and do not remove
+//     either on the assumption that the other covers it.
 
 include "../node_modules/circomlib/circuits/poseidon.circom";
 include "../node_modules/circomlib/circuits/bitify.circom";

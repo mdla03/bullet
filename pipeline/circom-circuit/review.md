@@ -124,6 +124,15 @@ produces a valid witness + proof; 2^64 fails witness generation inside the
 `Num2Bits` component specifically (isolated via the `compute_hashes.circom`
 helper so the failure isn't confounded with a stale Merkle root/commitment).
 
+**Range bound, correction (2026-08-20 audit):** this constraint does not, by
+itself, stop an oversized payout. The attacker proves an honest small amount
+and passes the oversized `i128` straight to the contract, where truncation
+makes it match the honest proof; the value never reaches the circuit. The
+contract-side bound `AMOUNT_MAX_EXCLUSIVE` is the other required half. See the
+audit note at the end of `spec.md` for the full write-up and for the two items
+that remain open (deposit/commitment binding, and unenforced `blinding`
+randomness).
+
 **Contract/fixture:** not touched. `circuits/scripts/convert-to-soroban.mjs`
 was not run.
 

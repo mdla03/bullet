@@ -268,8 +268,52 @@ Honest scope note (see full rationale in `circuits/src/claim.circom` header):
   template uses Baby Jubjub constants that are only a sound group over the
   BN254 scalar field, not the BLS12-381 field this circuit compiles under.
 - Range bound (2^64) matches `derive_public_inputs`'s existing
-  `amount as u64` truncation, not an arbitrary business limit.
+  `amount as u64` truncation, not an arbitrary business limit. **This bound
+  is only half the mechanism** (see the 2026-08-20 audit note below); the
+  contract-side half is `AMOUNT_MAX_EXCLUSIVE` in
+  `contracts/zeekpay/src/lib.rs`.
 - Constraint count: 11,420 → **12,133** (+713, +6.2%), still within pot14.
 - The Soroban contract, `groth16_fixture.rs`, and all other contract files
   were **not modified** — out of scope. See `BENCHMARK.md` at the repo root
-  for measured/extrapolated proving and verification cost.
+  for measured proving and verification cost.
+
+---
+
+## Audit note (2026-08-20): the range proof does not close the truncation gap
+
+The addendum above, and the original `claim.circom` header, implied the
+in-circuit `amount < 2^64` constraint closed the decoupling between the amount
+a proof authorises and the amount the contract pays out. **It does not.**
+
+`derive_public_inputs` encodes amount as `amount as u64`, truncating to the low
+64 bits, while `token::Client::transfer` moves the full `i128`. An attacker
+proves an honest small amount X, then calls `claim` with an `i128` of
+`2^64 + X`. That truncates back to X, so the honest proof verifies, and the
+contract transfers the full oversized value. The oversized number never enters
+the circuit, so no in-circuit constraint can reject it. Impact was a pool drain
+capped by the contract's balance.
+
+Closed by `AMOUNT_MAX_EXCLUSIVE` in `contracts/zeekpay/src/lib.rs`, rejecting
+`amount >= 2^64` in both `deposit` and `claim`. Pinned by
+`claim_amount_at_or_above_2_64_rejected` and
+`deposit_amount_at_or_above_2_64_rejected`, which over-fund the pool so the
+drain is blocked by the guard rather than by an insufficient balance, and
+assert on balances rather than error codes (the SAC's own error code 10 decodes
+as our `InvalidAmount`, so an error-code assertion passes even with the guard
+removed). Both were confirmed to fail without the fix.
+
+**Keep the circuit bound and the contract bound equal.** They are one mechanism
+in two halves; neither covers for the other.
+
+### Still open after this audit
+
+- **Deposits are not bound to their commitments.** `deposit` records a
+  commitment without any check that it commits to the deposited amount or
+  token, and the contract cannot perform that check, since the commitment
+  hashes a secret it does not know. Depositing 1 stroop against a commitment
+  for 10 USDC still claims 10 USDC. No circuit or contract guard fixes this on
+  its own; it is a design question for D2, and it is the risk SOW §7.1 names.
+- **`blinding` has no enforced randomness.** Harmless while `amount` is a
+  public input. If `amount` ever becomes private, a constant or reused blinding
+  makes `amountCommitment` brute-forceable over a small amount space. The
+  shipped test vector uses the constant `999999`.
