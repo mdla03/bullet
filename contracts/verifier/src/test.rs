@@ -65,6 +65,12 @@ fn cost_scaling_table() {
         (4, 6, "4 pairings + MSM-6 (5 pub inputs)"),
         (4, 7, "4 pairings + MSM-7 (6 pub in, claim.circom)"),
         (4, 8, "4 pairings + MSM-8 (7 pub inputs)"),
+        // Shielded-pool join-split shapes. 8 pub inputs is the 2-in/2-out
+        // design (root, 2 nullifiers, 2 out commitments, deposit, withdraw,
+        // tokenId); 10 and 12 are headroom for 3-in/3-out and 4-in/4-out.
+        (4, 9, "4 pairings + MSM-9  (8 pub in, join-split 2x2)"),
+        (4, 11, "4 pairings + MSM-11 (10 pub in, 3x3)"),
+        (4, 13, "4 pairings + MSM-13 (12 pub in, 4x4)"),
     ] {
         let (ok, cpu, _mem) = measure(np, ms);
         std::println!(
