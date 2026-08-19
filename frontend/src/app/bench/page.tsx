@@ -20,6 +20,11 @@
 import { notFound } from "next/navigation";
 import Bench from "./bench-client";
 
+// Evaluate the guard per request. Without this Next prerenders the route at
+// build time, bakes the not-found page as static output, and serves it with
+// HTTP 200 instead of a real 404.
+export const dynamic = "force-dynamic";
+
 export default function BenchPage() {
   if (process.env.NODE_ENV === "production") notFound();
   return <Bench />;

@@ -53,8 +53,41 @@ change (contract untouched). Ran the equivalent of `build-claim.sh`'s steps
 
 ## 3. (a) Proving time
 
-Measured with the Node.js `snarkjs` CLI on this machine (witness calculation
-+ `groth16 prove`), 3 runs:
+### 3.1 In-browser (2026-08-20) — the SOW's required measurement
+
+Real browser, real circuit wasm. Headless Chrome 151 on macOS, driven by
+`frontend/scripts/bench-browser.mjs` against the `/bench` page, which calls
+`snarkjs.groth16.fullProve` exactly as `src/lib/prove_browser.ts` does.
+
+Command (dev server running, artifacts staged per §2 of that script's header):
+
+```
+node frontend/scripts/bench-browser.mjs 25
+```
+
+| Sweep | Cold run | Median, all runs | Median, excluding cold |
+|---|---:|---:|---:|
+| 25 runs | 1,642 ms | **1,349 ms** | 1,349 ms |
+| 7 runs | 1,550 ms | 1,364 ms | 1,358 ms |
+
+Spread across the 25-run sweep was 1,298–1,642 ms. The cold run carries
+one-time wasm instantiation and costs roughly 200–300 ms extra; every run
+after it sits in a tight band.
+
+**Each sweep verifies its own last proof.** `groth16.verify` returned true
+with 6 public signals, so these timings are not measuring a prover that
+emits garbage quickly. The script exits non-zero if verification fails or
+the public-signal count is not 6.
+
+Asset load (fetch + decode of 2.61 MB wasm + 7.92 MB zkey) measured 77–92 ms,
+but that is from localhost and is a floor, not a real-world figure. Over a
+real network this phase is dominated by the ~10.5 MB download and will
+dwarf the proving time itself on a slow connection. That download is the
+number to care about for claim UX, not the 1.35 s of proving.
+
+### 3.2 Node.js CLI, for comparison
+
+Node `snarkjs` CLI (witness calculation + `groth16 prove`), 3 runs:
 
 | Run | Witness calc | Groth16 prove | Total |
 |---|---:|---:|---:|
@@ -62,15 +95,10 @@ Measured with the Node.js `snarkjs` CLI on this machine (witness calculation
 | 2 | 128 ms | 1,607 ms | 1,735 ms |
 | 3 | 127 ms | 1,602 ms | 1,730 ms |
 
-**Caveat:** this is a Node.js CLI proxy, not a literal in-browser
-measurement, and it does **not** satisfy the SOW's requirement for a recorded
-in-browser proving-time benchmark. (An earlier revision of this section said
-no frontend proving harness exists — that is wrong. `prove_browser.ts` and
-served circuit artifacts do exist; they were just not reachable from the
-container this ran in. See §6.) Expect the same order
-of magnitude in a modern browser (WASM execution, single-threaded snarkjs),
-plus one-time wasm/zkey download and instantiation overhead not captured
-here (~2.5 MB wasm + 7.55 MB zkey to fetch).
+The browser is **faster** than the Node CLI here (1.35 s vs ~1.73 s), so the
+earlier assumption that browser proving would be slower did not hold. Most of
+the CLI's extra time is process startup and file I/O per invocation, which the
+in-page loop does once.
 
 ## 4. (b) On-chain verification cost
 
@@ -137,15 +165,15 @@ failure correctly to the range constraint.
 - Real testnet deploy/invoke of the extended verifier — the deployed
   contract's `derive_public_inputs` is locked at 5 inputs and out of scope
   to change, so there is nothing to deploy against for a 6-input proof.
-- **In-browser proving time is still outstanding.** §3's figures are Node CLI,
-  not browser. Contrary to §3's earlier caveat, a browser proving path does
-  exist (`frontend/src/lib/prove_browser.ts`, snarkjs 0.7.5 in
-  `frontend/package.json`, artifacts served from `frontend/public/circuits/`);
-  it was simply not reachable from the container this ran in. Note the served
-  `claim.wasm` / `claim.zkey` there are still the **5-input** build, so
-  measuring the new circuit in-browser requires shipping the new artifacts
-  first. The SOW lists a recorded in-browser proving-time benchmark as
-  required D1 evidence, so this remains an open gap.
+- Nothing outstanding on the benchmark side. Both SOW-required numbers,
+  in-browser proving time (§3.1) and on-chain verification cost (§4), are now
+  measured rather than estimated.
+- The artifacts served at `frontend/public/circuits/claim.{wasm,zkey}` are
+  still the **5-input** build, and deliberately so: the deployed contract
+  pushes 5 `Fr`s and `verifier::verify` rejects a vk whose IC length does not
+  match. The benchmark reads its own copies from
+  `frontend/public/circuits/bench/` instead. Swapping the production artifacts
+  is part of the D2 handoff, not this change.
 
 ---
 
