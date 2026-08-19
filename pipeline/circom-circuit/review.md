@@ -125,7 +125,12 @@ produces a valid witness + proof; 2^64 fails witness generation inside the
 helper so the failure isn't confounded with a stale Merkle root/commitment).
 
 **Contract/fixture:** not touched. `circuits/scripts/convert-to-soroban.mjs`
-was not run. Cost numbers in `BENCHMARK.md` (repo root) are extrapolated from
-the real, testnet-confirmed `verifier-benchmark` cost-scaling table (no
-cargo/rustc toolchain was available in this environment to re-measure
-directly).
+was not run.
+
+**Update (2026-08-20):** on-chain verification cost is now **measured**, not
+extrapolated. The `verifier` crate's `cost_scaling_table` test was extended
+with MSM-6 and MSM-7 shapes and run on a machine with a Rust toolchain:
+6 public inputs verify at **77,665,920 CPU instructions (77.67% of the 1e8
+per-tx budget)**, a measured marginal cost of **+1,492,091 (+1.49%)** over the
+5-input shape. The earlier extrapolation was conservative by ~0.65pp. See
+`BENCHMARK.md` §4.

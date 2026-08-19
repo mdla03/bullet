@@ -62,6 +62,8 @@ fn cost_scaling_table() {
         (2u32, 0u32, "2 pairings, no MSM"),
         (4, 0, "4 pairings, no MSM"),
         (4, 2, "4 pairings + MSM-2 (Groth16, 1 pub in)"),
+        (4, 6, "4 pairings + MSM-6 (5 pub inputs)"),
+        (4, 7, "4 pairings + MSM-7 (6 pub in, claim.circom)"),
         (4, 8, "4 pairings + MSM-8 (7 pub inputs)"),
     ] {
         let (ok, cpu, _mem) = measure(np, ms);

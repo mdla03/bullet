@@ -63,50 +63,49 @@ Measured with the Node.js `snarkjs` CLI on this machine (witness calculation
 | 3 | 127 ms | 1,602 ms | 1,730 ms |
 
 **Caveat:** this is a Node.js CLI proxy, not a literal in-browser
-measurement. In-browser snarkjs integration is explicitly not built yet
-(`pipeline/circom-circuit/spec.md`, "Not built in this feature"); no
-frontend proving harness exists to measure against. Expect the same order
+measurement, and it does **not** satisfy the SOW's requirement for a recorded
+in-browser proving-time benchmark. (An earlier revision of this section said
+no frontend proving harness exists — that is wrong. `prove_browser.ts` and
+served circuit artifacts do exist; they were just not reachable from the
+container this ran in. See §6.) Expect the same order
 of magnitude in a modern browser (WASM execution, single-threaded snarkjs),
 plus one-time wasm/zkey download and instantiation overhead not captured
 here (~2.5 MB wasm + 7.55 MB zkey to fetch).
 
 ## 4. (b) On-chain verification cost
 
-**Could not be measured directly in this environment** — no `cargo`/`rustc`
-toolchain is available here, and re-measuring for real would require
-running the (out-of-scope) `contracts/zeekpay` contract or the
-benchmark-only `contracts/verifier` crate, neither of which I ran.
+**Measured** (2026-08-20) on the soroban-sdk budget meter, the same method and
+harness as `pipeline/verifier-benchmark/test-results.md`. The `cost_scaling_table`
+test in `contracts/verifier/src/test.rs` was extended with the two shapes this
+change cares about (MSM-6 and MSM-7); no new harness was written.
 
-Instead, extrapolated from the project's own real, **testnet-confirmed**
-cost-scaling data (`pipeline/verifier-benchmark/test-results.md`), which
-measures Groth16-verify cost shape (4 pairings + IC multi-scalar-mult) as a
-function of public-input count on Soroban's CPU budget meter — the same
-code path `contracts/zeekpay/src/verifier.rs` uses (`bls.g1_msm` over
-`pubs.len()` points is the only step whose cost scales with public-input
-count; `pairing_check` is a fixed 4 pairs regardless):
+Command: `cd contracts && cargo test -p verifier -- --nocapture`
 
-| Public inputs (IC size) | CPU instructions (real, testnet) | % of 1e8 budget |
-|---:|---:|---:|
-| 1 (IC=2) | 70,662,026 | 70.66% |
-| 7 (IC=8) | 79,888,324 | 79.89% |
+This measures the Groth16-verify cost shape (4 pairings + IC multi-scalar-mult)
+as a function of public-input count — the same code path
+`contracts/zeekpay/src/verifier.rs` uses. `bls.g1_msm` over `pubs.len()` points
+is the only step whose cost scales with public-input count; `pairing_check` is
+a fixed 4 pairs regardless.
 
-Linear fit between these two real points: **≈1,537,716 instructions per
-additional public input**, consistent with the project's own prior note
-("each public input adds ~1.5M via the MSM").
+| Shape | Public inputs | CPU instructions | % of 1e8 budget |
+|---|---:|---:|---:|
+| 2 pairings, no MSM | — | 51,199,469 | 51.20% |
+| 4 pairings, no MSM | — | 64,697,279 | 64.70% |
+| 4 pairings + MSM-2 | 1 | 70,205,506 | 70.21% |
+| 4 pairings + MSM-6 | 5 (shape before this change) | **76,173,829** | **76.17%** |
+| 4 pairings + MSM-7 | 6 (this change) | **77,665,920** | **77.67%** |
+| 4 pairings + MSM-8 | 7 | 79,158,015 | 79.16% |
 
-Extrapolated (not measured) for this circuit:
+**Marginal cost of `amountCommitment`: +1,492,091 instructions (+1.49% of
+budget), measured.** The 6-input circuit verifies at 77.67% of the per-tx
+limit, leaving ~22% headroom. Fits.
 
-| Public inputs | Extrapolated CPU instructions | % of 1e8 budget |
-|---:|---:|---:|
-| 5 (current production shape) | ≈76,812,891 | ≈76.81% |
-| 6 (this change, +`amountCommitment`) | ≈78,350,608 | ≈78.35% |
-
-**Marginal cost of `amountCommitment`: ≈+1.54M instructions (≈+1.54% of
-budget).** Both extrapolated figures stay under the 100M per-tx limit with
->20% headroom, consistent with the real MSM-8/7-pub-input testnet
-measurement (79.89%) sitting close by as a sanity check. This is an
-extrapolation from real data, not a fresh on-chain measurement — treat the
-absolute % as approximate.
+Note on the earlier estimate: a prior revision of this report extrapolated
+these figures by linear fit and published ≈76.81% / ≈78.35% with a marginal
+cost of ≈1,537,716. The measured values come in slightly **below** that, so
+the extrapolation was conservative — it overstated cost by ~0.65 percentage
+points at both shapes, and overstated the per-input marginal by ~3%. The
+measured numbers above supersede it. The go/no-go conclusion is unchanged.
 
 ## 5. Test vectors
 
@@ -130,14 +129,23 @@ the wrong reason (root mismatch, not the range check) — the reported result
 above uses the isolated version via `compute_hashes.circom` to attribute the
 failure correctly to the range constraint.
 
-## 6. Not run / not verifiable in this environment
+## 6. Not run
 
-- `cargo test -p zeekpay` — no Rust toolchain available here. Not needed for
-  correctness of this change since no file under `contracts/` was modified;
-  existing contract tests are unaffected by inspection, not re-execution.
+- `cargo test -p zeekpay` — not run. No file under `contracts/zeekpay/` was
+  modified, so existing contract tests are unaffected; this is by inspection,
+  not re-execution.
 - Real testnet deploy/invoke of the extended verifier — the deployed
   contract's `derive_public_inputs` is locked at 5 inputs and out of scope
   to change, so there is nothing to deploy against for a 6-input proof.
+- **In-browser proving time is still outstanding.** §3's figures are Node CLI,
+  not browser. Contrary to §3's earlier caveat, a browser proving path does
+  exist (`frontend/src/lib/prove_browser.ts`, snarkjs 0.7.5 in
+  `frontend/package.json`, artifacts served from `frontend/public/circuits/`);
+  it was simply not reachable from the container this ran in. Note the served
+  `claim.wasm` / `claim.zkey` there are still the **5-input** build, so
+  measuring the new circuit in-browser requires shipping the new artifacts
+  first. The SOW lists a recorded in-browser proving-time benchmark as
+  required D1 evidence, so this remains an open gap.
 
 ---
 
