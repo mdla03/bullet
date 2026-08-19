@@ -383,3 +383,77 @@ fn claim_bumps_nullifier_and_root_ttl() {
         );
     });
 }
+
+// ---------------------------------------------------------------------------
+// Regression: amount must fit in u64 (AMOUNT_MAX_EXCLUSIVE).
+//
+// `derive_public_inputs` encodes amount as `amount as u64`, which truncates.
+// Without the bound, a proof generated for X also verifies for a claim of
+// 2^64 + X (identical public inputs) while `transfer` moves the full i128,
+// draining the pool.
+//
+// These tests deliberately over-fund the pool. The point is that the drain
+// must be blocked by the guard, not merely by an insufficient balance. Assert
+// on balances, not on the error code: the SAC's own error code 10 decodes as
+// our `InvalidAmount`, so an error-code assertion alone passes even when the
+// guard is absent.
+// ---------------------------------------------------------------------------
+
+// 2^64 + 10 USDC. Truncates to exactly TEN_USDC in the public-input encoding.
+const INFLATED: i128 = TEN_USDC + (1i128 << 64);
+
+#[test]
+fn claim_amount_at_or_above_2_64_rejected() {
+    let s = setup();
+    let recipient = Address::generate(&s.env);
+
+    // The truncation collision the guard exists to defeat.
+    assert_eq!(INFLATED as u64, TEN_USDC as u64);
+
+    // Fund the pool so an unguarded claim would actually pay out.
+    s.usdc_admin.mint(&s.id, &(INFLATED * 2));
+    let pool_before = s.token.balance(&s.id);
+
+    let root = b32(&s.env, 0x11);
+    s.client.post_root(&root);
+    let pa = BytesN::from_array(&s.env, &[0u8; 96]);
+    let pb = BytesN::from_array(&s.env, &[0u8; 192]);
+    let pc = BytesN::from_array(&s.env, &[0u8; 96]);
+    let null = b32(&s.env, 0x22);
+
+    let _ = s.client.try_claim(
+        &pa, &pb, &pc, &root, &null, &b32(&s.env, 0x33), &recipient, &INFLATED, &0,
+    );
+
+    // The drain must not have happened.
+    assert_eq!(s.token.balance(&recipient), 0, "inflated claim paid out");
+    assert_eq!(s.token.balance(&s.id), pool_before, "pool was drained");
+    assert!(!s.client.is_nullifier_used(&null));
+
+    // Exactly 2^64 is out of range too, not only values above it.
+    let _ = s.client.try_claim(
+        &pa, &pb, &pc, &root, &null, &b32(&s.env, 0x33), &recipient, &(1i128 << 64), &0,
+    );
+    assert_eq!(s.token.balance(&recipient), 0);
+
+    // u64::MAX still pays: the bound is exclusive, matching Num2Bits(64).
+    s.client.claim(
+        &pa, &pb, &pc, &root, &null, &b32(&s.env, 0x33), &recipient, &(u64::MAX as i128), &0,
+    );
+    assert_eq!(s.token.balance(&recipient), u64::MAX as i128);
+}
+
+#[test]
+fn deposit_amount_at_or_above_2_64_rejected() {
+    let s = setup();
+    let depositor = Address::generate(&s.env);
+
+    // Fund the depositor so an unguarded deposit would actually succeed.
+    s.usdc_admin.mint(&depositor, &(INFLATED * 2));
+
+    let _ = s
+        .client
+        .try_deposit(&depositor, &INFLATED, &b32(&s.env, 0xAA), &0);
+
+    assert_eq!(s.token.balance(&s.id), 0, "oversized deposit was accepted");
+}

@@ -33,6 +33,18 @@ use verifier::{Proof, VerifyingKey};
 
 const ROOT_WINDOW: u32 = 64; // recent valid roots kept
 
+// Amounts must fit in u64. `derive_public_inputs` encodes `amount` as
+// `amount as u64`, which silently truncates: without this bound, a proof
+// generated for X also satisfies verification for a claim of 2^64 + X, while
+// `token::Client::transfer` moves the full i128. That decouples the amount the
+// proof authorises from the amount actually paid out.
+//
+// This is the contract-side half of the range proof. `claim.circom` constrains
+// the same bound in-circuit via `Num2Bits(64)`; the circuit alone cannot close
+// the gap, because the attack supplies the oversized value to the contract
+// rather than to the prover. Keep the two bounds equal.
+const AMOUNT_MAX_EXCLUSIVE: i128 = 1i128 << 64;
+
 // Persistent-entry TTL management (~5s per ledger on Stellar). `extend_to` must
 // stay under the network `max_entry_ttl` (3,110,400 on mainnet) or `extend_ttl`
 // traps, so these are chosen to be valid on both testnet and mainnet. Persistent
@@ -203,7 +215,7 @@ impl ZeekPay {
         if Self::is_paused(&env) {
             return Err(Error::Paused);
         }
-        if amount <= 0 {
+        if amount <= 0 || amount >= AMOUNT_MAX_EXCLUSIVE {
             return Err(Error::InvalidAmount);
         }
         from.require_auth();
@@ -254,7 +266,7 @@ impl ZeekPay {
         if Self::is_paused(&env) {
             return Err(Error::Paused);
         }
-        if amount <= 0 {
+        if amount <= 0 || amount >= AMOUNT_MAX_EXCLUSIVE {
             return Err(Error::InvalidAmount);
         }
         // 0. Reject non-canonical field elements (>= r). Without this, a
