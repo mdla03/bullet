@@ -234,3 +234,42 @@ match the LOCKED interface exactly, depth-20 stays fast in browser.
 - On-chain `set_vk` call with the new claim vk: deferred to `e2e-demo`.
 - In-browser snarkjs integration: deferred to `frontend-claim`.
 - Nullifier TTL/rent extension: carried open gap from soroban-contract.
+
+---
+
+## Addendum (2026-08-18): interface drift + amount commitment / range proof
+
+**Correction — this doc is stale.** Everything above describes the circuit as
+originally shipped: 4 public inputs, a single `denom` signal (1/10/50/100).
+The circuit and `derive_public_inputs` (contracts/zeekpay/src/lib.rs) have
+since evolved, undocumented, to **5 public inputs**:
+`[root, nullifier, recipientDigest, amount, tokenId]` — `denom` was split into
+an arbitrary i128 `amount` (raw stroops) plus a `tokenId` selector. Note this
+is itself a drift from top-level `SPEC.md`, whose v1 privacy model is fixed
+denominations (1/10/50/100 USDC), not arbitrary plaintext amounts; that drift
+predates this addendum and is not addressed here.
+
+**New in this change: `amountCommitment` (6th public input, appended last).**
+Adds a Poseidon-based amount commitment (`Poseidon([amount, blinding])`, new
+private input `blinding`) plus an in-circuit range proof (`amount < 2^64`, via
+`Num2Bits(64)`) binding the same `amount` signal.
+
+Honest scope note (see full rationale in `circuits/src/claim.circom` header):
+- `SPEC.md` designates Pedersen-commitment amount privacy as **P3, out of
+  scope for v1**, specifically because a flawed range proof is
+  security-critical (lets someone withdraw more than deposited). This was
+  built anyway as an explicit, written scope override by the project owner.
+- `amount` stays a plaintext public input — the contract needs it in the
+  clear for `token::Client::transfer`, and the contract is out of scope for
+  this change. **This does not hide the amount on-chain.** It is a
+  defense-in-depth integrity binding, not amount privacy.
+- The "Pedersen commitment" requested is implemented as a **Poseidon hash
+  commitment**, not literal elliptic-curve Pedersen: circomlib's Pedersen
+  template uses Baby Jubjub constants that are only a sound group over the
+  BN254 scalar field, not the BLS12-381 field this circuit compiles under.
+- Range bound (2^64) matches `derive_public_inputs`'s existing
+  `amount as u64` truncation, not an arbitrary business limit.
+- Constraint count: 11,420 → **12,133** (+713, +6.2%), still within pot14.
+- The Soroban contract, `groth16_fixture.rs`, and all other contract files
+  were **not modified** — out of scope. See `BENCHMARK.md` at the repo root
+  for measured/extrapolated proving and verification cost.

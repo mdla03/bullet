@@ -7,12 +7,18 @@ pragma circom 2.0.0;
 //     nullifier         = Poseidon([secret])
 //     commitment        = Poseidon([secret, recipientDigest, amount, tokenId])
 //     commitment ∈ Merkle tree at `root` (with an opening path of depth 20)
+//   and additionally knows `blinding` such that:
+//     amountCommitment  = Poseidon([amount, blinding])
+//     amount            < 2^64 (range proof, see below)
 //
 // Public inputs (LOCKED — must match derive_public_inputs in contracts/zeekpay/src/lib.rs):
-//   [root, nullifier, recipientDigest, amount, tokenId]
+//   [root, nullifier, recipientDigest, amount, tokenId, amountCommitment]
 //   `amount` is the raw stroop value (7 decimal places; e.g. 100000000 for 10 USDC).
 //   `tokenId` is a uint mapping: 0 = USDC, 1 = XLM. Bound in the commitment so a
 //   deposit of token A cannot be claimed as token B.
+//   `amountCommitment` is NEW — appended after the five pre-existing public
+//   signals, never inserted between them (public-input order is locked; snarkjs
+//   assigns indices by declaration order in `component main {public [...]}`).
 //
 // Security: recipientDigest, amount, and tokenId are inside the commitment preimage
 // so that a front-runner cannot substitute their own recipient, amount, or token
@@ -23,21 +29,62 @@ pragma circom 2.0.0;
 // (-p bls12381). The circuit is satisfiable and the proofs verify correctly, but
 // this is not canonical Poseidon over the BLS12-381 scalar field. Acceptable for
 // the hackathon demo; replace with a native BLS12-381 Poseidon for production.
+//
+// ── amountCommitment / range proof — honest scope note ──────────────────────
+// SPEC.md designates a fully-encrypted, Pedersen-commitment amount scheme as P3
+// ("the real destination for amount privacy"), out of scope for v1 because a
+// flawed range proof lets someone withdraw more than they deposited, and v1's
+// actual amount-privacy mechanism is fixed denominations, not encryption. This
+// addition was built as an explicit, written scope override by the project
+// owner (P0 binding-scope exception documented in the task that produced this
+// diff), added on a defense-in-depth basis:
+//   - `amount` REMAINS a plaintext public input, unchanged. The Soroban
+//     contract needs it in the clear to drive `token::Client::transfer`, and
+//     that contract is out of scope for this change, so this circuit cannot
+//     make `amount` actually hidden on-chain. Anyone reading the public
+//     inputs (or the resulting SAC transfer) sees the amount exactly as
+//     before. Do not describe this as amount-hiding in downstream copy.
+//   - `amountCommitment` is a Poseidon hash commitment, NOT a literal
+//     elliptic-curve Pedersen commitment. circomlib's Pedersen template uses
+//     Baby Jubjub curve constants that are a sound, hard-discrete-log group
+//     only over the BN254 scalar field. This circuit compiles under
+//     `-p bls12381` (locked, matching the rest of the circuit and the
+//     Soroban bls12_381 verifier) — under that modulus Baby Jubjub's
+//     constants do not describe a curve with any proven security property.
+//     Using it anyway would be a strictly worse, unverified version of the
+//     same BN254-under-BLS12-381 caveat already accepted for Poseidon above.
+//     A Poseidon-based commitment keeps the same, already-documented caveat
+//     instead of introducing a new, unverified one. Hiding relies on
+//     `blinding` being uniform prover-chosen randomness; binding relies on
+//     Poseidon collision resistance.
+//   - The range proof constrains the SAME plaintext `amount` signal that is
+//     bound into `amountCommitment`, to `0 <= amount < 2^64` (AMOUNT_BITS =
+//     64). This bound is not arbitrary: `derive_public_inputs` in
+//     contracts/zeekpay/src/lib.rs encodes amount via
+//     `U256::from_parts(env, 0, 0, 0, amount as u64)`, i.e. it silently
+//     truncates any i128 amount to its low 64 bits. Without this constraint,
+//     a prover could pick an amount >= 2^64 whose commitment binds one value
+//     while the contract's truncated encoding produces a different public
+//     input — a decoupling this constraint makes unsatisfiable in-circuit.
+//     It is a real, useful integrity check; it is not amount privacy.
 
 include "../node_modules/circomlib/circuits/poseidon.circom";
+include "../node_modules/circomlib/circuits/bitify.circom";
 
-template Claim(DEPTH) {
+template Claim(DEPTH, AMOUNT_BITS) {
     // ── public inputs (order matches derive_public_inputs) ────────────────────
     signal input root;
     signal input nullifier;
     signal input recipientDigest;
     signal input amount;
     signal input tokenId;
+    signal input amountCommitment;   // NEW — appended last, see note above
 
     // ── private inputs ────────────────────────────────────────────────────────
     signal input secret;
     signal input pathElements[DEPTH];  // Merkle sibling hashes
     signal input pathIndices[DEPTH];   // 0 = current node is left, 1 = right
+    signal input blinding;             // NEW — randomness for amountCommitment
 
     // ── nullifier derivation ──────────────────────────────────────────────────
     component nullifierHasher = Poseidon(1);
@@ -76,6 +123,18 @@ template Claim(DEPTH) {
 
     // ── root check ────────────────────────────────────────────────────────────
     levelHashes[DEPTH] === root;
+
+    // ── amount commitment (NEW, see header note) ──────────────────────────────
+    // Poseidon hash commitment: amountCommitment = Poseidon([amount, blinding]).
+    component amountCommitmentHasher = Poseidon(2);
+    amountCommitmentHasher.inputs[0] <== amount;
+    amountCommitmentHasher.inputs[1] <== blinding;
+    amountCommitmentHasher.out === amountCommitment;
+
+    // ── amount range proof (NEW, see header note) ─────────────────────────────
+    // Decomposing into AMOUNT_BITS bits only succeeds if 0 <= amount < 2^AMOUNT_BITS.
+    component amountBits = Num2Bits(AMOUNT_BITS);
+    amountBits.in <== amount;
 }
 
-component main {public [root, nullifier, recipientDigest, amount, tokenId]} = Claim(20);
+component main {public [root, nullifier, recipientDigest, amount, tokenId, amountCommitment]} = Claim(20, 64);

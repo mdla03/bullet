@@ -102,3 +102,83 @@ circom claim.circom --r1cs --wasm --sym -p bls12381
 `compute_hashes.circom` computes the Merkle root assuming leaf at index 0
 with all-zero empty subtree hashes. If a future test needs a different leaf
 index, the gen-test-proof script must be updated to use the correct path.
+
+---
+
+## Addendum (2026-08-18): amount commitment + range proof
+
+Note: by the time of this addendum the circuit already had 5 public inputs
+`[root, nullifier, recipientDigest, amount, tokenId]` (drifted from the
+4-input `denom` version this file otherwise describes — see `spec.md`
+addendum). This change adds a 6th, appended last:
+
+- `circuits/src/claim.circom`: new private input `blinding`; new public input
+  `amountCommitment = Poseidon([amount, blinding])`; new range constraint
+  `amount < 2^64` via circomlib `Num2Bits(64)` (`bitify.circom` now included).
+- `circuits/src/compute_hashes.circom`: mirrors the new signals (test helper
+  only) so `gen-test-proof.mjs` can derive a self-consistent `amountCommitment`.
+- `circuits/scripts/gen-test-proof.mjs`: supplies `blinding`, derives and
+  wires `amountCommitment` into `claim_input.json`.
+- Constraint count: 11,420 → 12,133 (measured via `circom ... --r1cs`).
+- Fresh pot14 ceremony + Groth16 setup run locally (none existed in this
+  checkout); `claim.zkey`/`claim_vk.json`/`claim_proof.json`/`claim_public.json`
+  regenerated for the new circuit shape.
+- `circuits/scripts/convert-to-soroban.mjs` was deliberately **not run** —
+  it overwrites `contracts/zeekpay/src/groth16_fixture.rs`, which is out of
+  scope for this change. The contract's existing fixture/tests are untouched
+  and unaffected.
+- Test vectors: tampered `amountCommitment` (flip last public input by 1) →
+  `snarkjs groth16 verify` returns false. Out-of-range amount (`2^64`, one
+  past the bound) → witness generation itself fails with `Assert Failed` in
+  the `Num2Bits` component (stronger than a verify-time failure: no valid
+  proof can be constructed at all). Boundary case (`2^64 - 1`) generates and
+  verifies a valid proof, confirming the bound isn't off-by-one.
+- Full rationale for the Poseidon-vs-Pedersen substitution and the
+  amount-still-public caveat is in the `claim.circom` header comment and
+  `spec.md`'s addendum. See `BENCHMARK.md` (repo root) for cost numbers.
+
+## D1 → D2 handoff: `groth16_fixture.rs` is now stale (on purpose)
+
+As of this addendum, `contracts/zeekpay/src/groth16_fixture.rs` was
+deliberately left untouched and no longer matches `circuits/build/claim_vk.json`:
+
+| | public inputs | IC entries |
+|---|---|---|
+| `circuits/build/claim_vk.json` (current, 6-input circuit) | 6 | 7 |
+| `contracts/zeekpay/src/groth16_fixture.rs` (unregenerated) | 5 | 6 |
+
+This is safe, not silently broken: `verifier::verify` in
+`contracts/zeekpay/src/verifier.rs` hard-checks
+`vk.ic.len() != pubs.len() + 1` and returns `false` (→ `Error::InvalidProof`)
+on any mismatch, before any pairing math runs. `Contract::claim` also has no
+`amount_commitment` parameter and `derive_public_inputs` only ever pushes 5
+`Fr`s, so `amountCommitment` does not influence fund movement anywhere on the
+contract side today. Confirmed by grepping the whole repo outside
+`circuits/src/` for `amountCommitment`/`amount_commitment`: no hits.
+
+**Do not treat "regenerate the fixture" as a standalone task.** Regenerating
+`groth16_fixture.rs` alone (just re-running `convert-to-soroban.mjs`) without
+also updating `claim()`/`derive_public_inputs` would produce a fixture the
+contract code doesn't know how to construct pubs for — it wouldn't fix
+anything, just move the mismatch. When D2 picks this up, do it as one
+coordinated change:
+
+1. Add an `amount_commitment: BytesN<32>` (or equivalent) parameter to
+   `Contract::claim` and thread it through `derive_public_inputs` as the 6th
+   pushed `Fr`, matching `claim.circom`'s public-input order
+   (`[root, nullifier, recipientDigest, amount, tokenId, amountCommitment]`).
+2. Re-run `node circuits/scripts/convert-to-soroban.mjs` against the current
+   `claim_vk.json` / `claim_proof.json` / `claim_public.json` to regenerate
+   `groth16_fixture.rs`, and update any Rust unit test that currently assumes
+   5 public inputs.
+3. Re-run `set_vk` on the deployed contract with the new
+   `circuits/build/groth16_soroban.json` (old proofs signed against the old
+   vk will stop verifying the moment this lands — see the warning already in
+   `build-claim.sh` about `claim.zkey` rotation).
+4. Ship the new `claim.zkey` (and `claim.wasm` if it changed) to
+   `frontend/public/circuits/`, and update proof-generation code
+   (`frontend/src/lib/claim_tx.ts` and friends) to supply `blinding` as a
+   circuit input and pass `amount_commitment` through to the `claim()` call.
+
+Until step 1-4 land together, leave `groth16_fixture.rs` as-is rather than
+partially regenerating it.

@@ -86,3 +86,46 @@ end-to-end (real circuit proof → real Soroban verifier → `true`).
 4. `set_vk` with the real claim vk (`e2e-demo` feature).
 5. `Fr::from_bytes` guard for caller-supplied values ≥ BLS12-381 r.
 6. Nullifier TTL/rent extension (carried from soroban-contract).
+
+---
+
+## Addendum (2026-08-18): amount commitment + range proof review
+
+This doc (and the "confirmed binding" section below it) describes the
+4-input `denom` interface; the real interface had already drifted to 5
+inputs (`amount`, `tokenId`) before this addendum — see `spec.md`'s
+addendum for the full correction. This review note covers only the new
+6th signal.
+
+**Scope status:** `SPEC.md` places Pedersen-commitment amount privacy in P3,
+explicitly out of scope for v1, because a flawed range proof is
+security-critical (over/under-withdrawal risk) and only meaningful at real
+volume. Built anyway on an explicit, written project-owner scope override.
+Treat this as demo-quality defense-in-depth, not a production-audited
+range proof — it has not had the security review a P3-severity primitive
+would need before real funds depend on it.
+
+**Honesty check (matches CLAUDE.md's privacy-copy rule):** `amount` remains
+a plaintext public input and drives the contract's token transfer directly.
+`amountCommitment` does **not** hide the amount in this architecture. Any
+user-facing copy describing this feature must say so plainly — do not let
+"Pedersen commitment" or "range proof" imply amount privacy that isn't
+there.
+
+**Commitment construction:** Poseidon hash commitment
+(`Poseidon([amount, blinding])`), not literal EC Pedersen — circomlib's Baby
+Jubjub constants aren't a proven-sound group over the BLS12-381 field this
+circuit compiles under (`-p bls12381`). Same accepted-caveat class as the
+existing BN254-Poseidon-over-BLS12-381 note above, not a new one.
+
+**Range bound:** `amount < 2^64`, matching `derive_public_inputs`'s
+`amount as u64` encoding (contracts/zeekpay/src/lib.rs). Verified: 2^64-1
+produces a valid witness + proof; 2^64 fails witness generation inside the
+`Num2Bits` component specifically (isolated via the `compute_hashes.circom`
+helper so the failure isn't confounded with a stale Merkle root/commitment).
+
+**Contract/fixture:** not touched. `circuits/scripts/convert-to-soroban.mjs`
+was not run. Cost numbers in `BENCHMARK.md` (repo root) are extrapolated from
+the real, testnet-confirmed `verifier-benchmark` cost-scaling table (no
+cargo/rustc toolchain was available in this environment to re-measure
+directly).

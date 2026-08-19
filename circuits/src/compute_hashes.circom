@@ -14,13 +14,21 @@ template ComputeHashes() {
     signal input recipientDigest;
     signal input amount;
     signal input tokenId;
+    signal input blinding;
     signal output nullifier;
     signal output root;
+    signal output amountCommitment;
 
     // nullifier = Poseidon([secret])
     component n = Poseidon(1);
     n.inputs[0] <== secret;
     nullifier <== n.out;
+
+    // amountCommitment = Poseidon([amount, blinding])
+    component ac = Poseidon(2);
+    ac.inputs[0] <== amount;
+    ac.inputs[1] <== blinding;
+    amountCommitment <== ac.out;
 
     // commitment = Poseidon([secret, recipientDigest, amount, tokenId])
     component c = Poseidon(4);

@@ -30,6 +30,7 @@ const SECRET = "12345";
 const RECIPIENT_DIGEST = "42";  // small test value (< BLS12-381 r)
 const AMOUNT = "10";            // raw stroop value for test
 const TOKEN_ID = "0";           // 0 = USDC
+const BLINDING = "999999";      // amountCommitment blinding factor (test value)
 const PATH_ELEMENTS = Array(20).fill("0");  // all siblings are zero
 const PATH_INDICES = Array(20).fill(0);     // leaf is at index 0 (always left)
 
@@ -50,6 +51,7 @@ const helperInput = {
   recipientDigest: RECIPIENT_DIGEST,
   amount: AMOUNT,
   tokenId: TOKEN_ID,
+  blinding: BLINDING,
 };
 const helperInputPath = path.join(BUILD, "_helper_input.json");
 const helperWtnsPath = path.join(BUILD, "_helper.wtns");
@@ -86,6 +88,7 @@ function getHelperSignal(name) {
 
 const computedNullifier = getHelperSignal("main.nullifier");
 const computedRoot = getHelperSignal("main.root");
+const computedAmountCommitment = getHelperSignal("main.amountCommitment");
 
 // For leaf at index 0 (left child all the way), pathElements[i] = zeroHashes[i]:
 //   pathElements[0] = zeroHashes[0] = 0            (empty leaf)
@@ -100,10 +103,11 @@ for (let i = 0; i < 19; i++) {
   pathElements.push(getHelperSignal(`main.zeroHashes[${i}]`));
 }
 
-console.log(`nullifier:       ${computedNullifier}`);
-console.log(`root:            ${computedRoot}`);
-console.log(`pathElements[0]: ${pathElements[0]}`);
-console.log(`pathElements[1]: ${pathElements[1]}`);
+console.log(`nullifier:        ${computedNullifier}`);
+console.log(`root:             ${computedRoot}`);
+console.log(`amountCommitment: ${computedAmountCommitment}`);
+console.log(`pathElements[0]:  ${pathElements[0]}`);
+console.log(`pathElements[1]:  ${pathElements[1]}`);
 
 // ── step 3: build real claim input ───────────────────────────────────────────
 const realInput = {
@@ -112,9 +116,11 @@ const realInput = {
   recipientDigest: RECIPIENT_DIGEST,
   amount: AMOUNT,
   tokenId: TOKEN_ID,
+  amountCommitment: computedAmountCommitment,
   secret: SECRET,
   pathElements,
   pathIndices: PATH_INDICES,
+  blinding: BLINDING,
 };
 
 const inputPath = path.join(BUILD, "claim_input.json");
