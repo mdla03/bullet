@@ -860,3 +860,57 @@ fn pool_swapped_public_inputs_rejected() {
         .unwrap();
     assert_eq!(err, Error::InvalidProof);
 }
+
+// ---------------------------------------------------------------------------
+// Contract upgrade.
+//
+// The admin gate is what these test. The upgrade itself replaces the running
+// code, which a native-registered test contract cannot exercise, so the round
+// trip is verified on testnet instead. What matters here is that a non-admin
+// cannot call it: whoever can upgrade can swap in arbitrary code and take the
+// pooled funds.
+// ---------------------------------------------------------------------------
+
+// No standalone "non-admin cannot upgrade" test. In the native test env a
+// bogus wasm hash traps inside update_current_contract_wasm whether or not the
+// admin gate is present, so an is_err() assertion passes either way, and
+// env.auths() is empty after the trapped call. `upgrade_before_init_fails`
+// below is the real guard: it asserts a specific contract error that is only
+// reachable through require_admin. Confirmed by deleting the gate and watching
+// it fail. The admin gate itself is exercised for real on testnet.
+#[test]
+fn upgrade_before_init_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let id = env.register(ZeekPay, ());
+    let client = ZeekPayClient::new(&env, &id);
+
+    // No admin stored yet, so require_admin cannot resolve one.
+    let err = client.try_upgrade(&b32(&env, 0x99)).err().unwrap().unwrap();
+    assert_eq!(err, Error::NotInitialized);
+}
+
+#[test]
+fn upgrade_is_not_blocked_by_pause() {
+    // A contract paused because something is wrong with it must still be
+    // fixable. If this ever starts failing, someone added a pause check to
+    // upgrade and locked the contract out of its own repair path.
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let sac = env.register_stellar_asset_contract_v2(admin.clone());
+    let id = env.register(ZeekPay, ());
+    let client = ZeekPayClient::new(&env, &id);
+    client.initialize(&admin, &sac.address());
+    client.set_paused(&true);
+
+    // Reaching update_current_contract_wasm with a hash that is not an
+    // uploaded wasm traps, which is itself the proof that the pause check did
+    // not short-circuit first: a Paused error would have returned cleanly.
+    let res = client.try_upgrade(&b32(&env, 0x99));
+    assert!(res.is_err());
+    match res.err().unwrap() {
+        Ok(e) => panic!("expected a host trap past the pause check, got {:?}", e),
+        Err(_) => {} // host error: we got past the guard, as intended
+    }
+}

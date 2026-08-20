@@ -191,6 +191,36 @@ impl ZeekPay {
         Ok(())
     }
 
+    /// Replace this contract's code, keeping its address and all stored state:
+    /// nullifiers, roots, the token registry, and both verifying keys.
+    ///
+    /// Without this, fixing a bug means deploying a fresh contract at a new
+    /// address, which strands every note already deposited, drops the posted
+    /// roots, and forces a config change across the resolver, the backend and
+    /// the frontend. That is how the amount-truncation fix would otherwise have
+    /// had to ship.
+    ///
+    /// TRUST NOTE, and it is a real one: the admin can swap in arbitrary code
+    /// and therefore has full control of pooled funds. That is a stronger power
+    /// than `set_vk` or `set_paused` and it does not expire. It sits alongside
+    /// the existing admin-posts-roots seam documented in README honest-limits,
+    /// but it is worse: a malicious or compromised admin key can drain the
+    /// contract outright. Before mainnet this wants either a timelock, a
+    /// multisig admin, or removal of the entry point entirely once the code is
+    /// audited and stable.
+    ///
+    /// Deliberately NOT gated on `paused`: the point is to fix a contract that
+    /// has been paused precisely because something is wrong with it.
+    ///
+    /// `new_wasm_hash` is the hash of an already-uploaded wasm, from
+    /// `stellar contract upload`. The upgrade takes effect after this call
+    /// returns.
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) -> Result<(), Error> {
+        Self::require_admin(&env)?;
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
+        Ok(())
+    }
+
     pub fn set_paused(env: Env, paused: bool) -> Result<(), Error> {
         Self::require_admin(&env)?;
         env.storage().instance().set(&DataKey::Paused, &paused);
