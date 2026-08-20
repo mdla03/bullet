@@ -28,6 +28,25 @@ const jsonOut = circuit ? `${dir}/${circuit}_soroban.json` : `${dir}/groth16_sor
 const rsOut = circuit
   ? `contracts/zeekpay/src/${circuit}_fixture.rs`
   : "contracts/zeekpay/src/groth16_fixture.rs";
+// groth16_fixture.rs is pinned at the 5-public-input shape ON PURPOSE. The
+// deployed contract's derive_public_inputs pushes 5 Fr while claim.circom now
+// has 6, and verifier::verify rejects the mismatch before any pairing math, so
+// the staleness is safe rather than silently broken. Regenerating this file on
+// its own does not fix anything, it just moves the mismatch: see the D1 -> D2
+// handoff in pipeline/circom-circuit/changes.md, which lists the four changes
+// that have to land together.
+if (!circuit && fs.existsSync(rsOut) && process.env.FORCE_FIXTURE !== "1") {
+  console.error(`refusing to overwrite ${rsOut}`);
+  console.error("");
+  console.error("It is pinned at 5 public inputs deliberately. Regenerating it");
+  console.error("alone moves the mismatch rather than fixing it. See the D1 -> D2");
+  console.error("handoff in pipeline/circom-circuit/changes.md.");
+  console.error("");
+  console.error("If you are doing the coordinated contract + circuit change:");
+  console.error("  FORCE_FIXTURE=1 node circuits/scripts/convert-to-soroban.mjs");
+  process.exit(1);
+}
+
 const vk = JSON.parse(fs.readFileSync(`${dir}/${vkFile}.json`));
 const proof = JSON.parse(fs.readFileSync(`${dir}/${proofFile}.json`));
 const pub = JSON.parse(fs.readFileSync(`${dir}/${pubFile}.json`));

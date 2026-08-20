@@ -44,3 +44,39 @@ Light "paper" theme. Minimal, terminal-adjacent, trust through restraint.
   icon dependency.
 - Before designing a new screen, check Refero (MCP) for real-app references
   first. Do not invent layouts from scratch when a proven pattern exists.
+
+## Testing rules (money paths especially)
+
+A test that asserts a failure is worthless until you have watched it fail for
+the right reason. This has bitten three times: an assertion on
+`Error::InvalidAmount` passed because the SAC's own error code 10 decodes to
+the same value; a drain test passed because the pool was empty rather than
+because the guard worked; an ordering test passed because the fixture had
+three zeroes in the slots being swapped.
+
+- **Mutate to verify.** After writing a test that guards something, break the
+  thing it guards and confirm the test fails. Restore, confirm it passes. If
+  it passes both ways it is testing nothing.
+- **Assert on the specific site, not a generic outcome.** For circuits, pin
+  the constraint line (`circuits/scripts/gen-joinsplit-vectors.mjs` declares
+  an `expectAt` per vector and rejects a failure anywhere else). For
+  contracts, assert on balances and state rather than error codes, which
+  collide across contracts.
+- **Make failure paths reachable.** Over-fund the pool so a drain is blocked
+  by the guard rather than by an insufficient balance. Use distinct non-zero
+  values so a reordering is detectable.
+- **Check the test count** before and after any structural edit to a test
+  file. A silently deleted test looks exactly like a passing suite.
+
+## Repo conventions that have guards
+
+- **No direct commits to master.** A `pre-commit` hook enforces it. Two
+  worktrees share this `.git` (`bullet` on master, `bullet-d1` on a feature
+  branch), so check `git worktree list` before assuming the branch is wrong.
+  Deliberate exception: `ALLOW_MASTER_COMMIT=1 git commit`.
+- **`groth16_fixture.rs` is pinned at 5 public inputs on purpose.**
+  `convert-to-soroban.mjs` refuses to regenerate it without `FORCE_FIXTURE=1`.
+  It must only change as part of the coordinated contract + circuit + set_vk +
+  frontend change described in `pipeline/circom-circuit/changes.md`.
+- **Move work between worktrees with git**, via cherry-pick or stash. Never by
+  slicing source files with a script; that dropped six tests once already.
