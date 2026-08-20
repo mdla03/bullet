@@ -694,3 +694,169 @@ fn pool_unknown_root_rejected() {
         .unwrap();
     assert_eq!(err, Error::UnknownRoot);
 }
+
+// ---------------------------------------------------------------------------
+// Real join-split proof, end to end through the contract.
+//
+// The pool tests above use the verify bypass, so until now
+// derive_pool_public_inputs had never been checked against the actual circuit.
+// A wrong ordering there fails silently: proofs simply never verify, which
+// looks like a bad key rather than a bug. These run the real verifier.
+// ---------------------------------------------------------------------------
+
+use crate::joinsplit_fixture as jsx;
+use crate::VkData;
+
+fn hex32(env: &Env, h: &str) -> BytesN<32> {
+    let v = hex::decode(h).unwrap();
+    let a: [u8; 32] = v.try_into().unwrap();
+    BytesN::from_array(env, &a)
+}
+fn hex96(env: &Env, h: &str) -> BytesN<96> {
+    let v = hex::decode(h).unwrap();
+    let a: [u8; 96] = v.try_into().unwrap();
+    BytesN::from_array(env, &a)
+}
+fn hex192(env: &Env, h: &str) -> BytesN<192> {
+    let v = hex::decode(h).unwrap();
+    let a: [u8; 192] = v.try_into().unwrap();
+    BytesN::from_array(env, &a)
+}
+
+fn joinsplit_vkdata(env: &Env) -> VkData {
+    let mut ic: soroban_sdk::Vec<BytesN<96>> = soroban_sdk::Vec::new(env);
+    for h in jsx::IC {
+        ic.push_back(hex96(env, h));
+    }
+    VkData {
+        alpha1: hex96(env, jsx::ALPHA1),
+        beta2: hex192(env, jsx::BETA2),
+        gamma2: hex192(env, jsx::GAMMA2),
+        delta2: hex192(env, jsx::DELTA2),
+        ic,
+    }
+}
+
+/// Low level: the proof verifies against the verifier directly. If this fails,
+/// the byte encoding is wrong (most likely G2 c1/c0 order), not the circuit.
+#[test]
+fn pool_real_proof_verifies() {
+    let env = Env::default();
+    env.cost_estimate().budget().reset_unlimited();
+
+    let mut ic: Vec<G1Affine> = Vec::new(&env);
+    for h in jsx::IC {
+        ic.push_back(g1(&env, h));
+    }
+    let vk = VerifyingKey {
+        alpha1: g1(&env, jsx::ALPHA1),
+        beta2: g2(&env, jsx::BETA2),
+        gamma2: g2(&env, jsx::GAMMA2),
+        delta2: g2(&env, jsx::DELTA2),
+        ic,
+    };
+    let proof = Proof {
+        a: g1(&env, jsx::PROOF_A),
+        b: g2(&env, jsx::PROOF_B),
+        c: g1(&env, jsx::PROOF_C),
+    };
+    let mut pubs: Vec<Fr> = Vec::new(&env);
+    for h in jsx::PUBS {
+        pubs.push_back(fr(&env, h));
+    }
+    assert_eq!(jsx::PUBS.len(), 8, "join-split has 8 public inputs");
+    assert_eq!(jsx::IC.len(), 9, "IC must be pubs + 1");
+    assert!(verify(&env, &vk, &proof, &pubs), "real join-split proof must verify");
+}
+
+/// End to end: a real proof through `transact`, with the verify bypass OFF.
+/// This is what pins derive_pool_public_inputs to the circuit's locked order
+/// [root, nullifiers.., commitments.., deposit, withdraw, tokenId].
+#[test]
+fn pool_real_proof_through_transact() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.cost_estimate().budget().reset_unlimited();
+
+    let admin = Address::generate(&env);
+    let sac = env.register_stellar_asset_contract_v2(admin.clone());
+    let id = env.register(ZeekPay, ());
+    let client = ZeekPayClient::new(&env, &id);
+    client.initialize(&admin, &sac.address());
+    client.set_pool_vk(&joinsplit_vkdata(&env));
+    // Deliberately NOT setting the verify bypass.
+
+    let root = hex32(&env, jsx::PUBS[0]);
+    client.post_root(&root);
+
+    let mut nulls: soroban_sdk::Vec<BytesN<32>> = soroban_sdk::Vec::new(&env);
+    nulls.push_back(hex32(&env, jsx::PUBS[1]));
+    nulls.push_back(hex32(&env, jsx::PUBS[2]));
+    let mut cmts: soroban_sdk::Vec<BytesN<32>> = soroban_sdk::Vec::new(&env);
+    cmts.push_back(hex32(&env, jsx::PUBS[3]));
+    cmts.push_back(hex32(&env, jsx::PUBS[4]));
+
+    let a = Address::generate(&env);
+    let proof = crate::ProofBytes {
+        a: hex96(&env, jsx::PROOF_A),
+        b: hex192(&env, jsx::PROOF_B),
+        c: hex96(&env, jsx::PROOF_C),
+    };
+
+    // The fixture vector has distinct public legs: deposit 7, withdraw 3,
+    // tokenId 0. They differ on purpose. With all three zero, a contract that
+    // pushed them in the wrong order would still verify, so the vector could
+    // not detect a public-input ordering bug.
+    let sac_admin = token::StellarAssetClient::new(&env, &sac.address());
+    let tok = token::Client::new(&env, &sac.address());
+    sac_admin.mint(&a, &1_000);
+    sac_admin.mint(&id, &1_000);
+    client.transact(&proof, &root, &nulls, &cmts, &7, &3, &0, &a, &a);
+    // Deposit pulled 7 in, withdrawal paid 3 out: net +4 to the pool.
+    assert_eq!(tok.balance(&id), 1_004);
+
+    assert!(client.is_nullifier_used(&hex32(&env, jsx::PUBS[1])));
+    assert!(client.is_nullifier_used(&hex32(&env, jsx::PUBS[2])));
+}
+
+/// Proves the ordering above is actually load-bearing: swap the two nullifiers
+/// and the same proof must stop verifying. Without this, a test that passed
+/// with a wrong order would look identical to one that passed with the right
+/// order.
+#[test]
+fn pool_swapped_public_inputs_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.cost_estimate().budget().reset_unlimited();
+
+    let admin = Address::generate(&env);
+    let sac = env.register_stellar_asset_contract_v2(admin.clone());
+    let id = env.register(ZeekPay, ());
+    let client = ZeekPayClient::new(&env, &id);
+    client.initialize(&admin, &sac.address());
+    client.set_pool_vk(&joinsplit_vkdata(&env));
+
+    let root = hex32(&env, jsx::PUBS[0]);
+    client.post_root(&root);
+
+    // Nullifiers in the wrong order.
+    let mut nulls: soroban_sdk::Vec<BytesN<32>> = soroban_sdk::Vec::new(&env);
+    nulls.push_back(hex32(&env, jsx::PUBS[2]));
+    nulls.push_back(hex32(&env, jsx::PUBS[1]));
+    let mut cmts: soroban_sdk::Vec<BytesN<32>> = soroban_sdk::Vec::new(&env);
+    cmts.push_back(hex32(&env, jsx::PUBS[3]));
+    cmts.push_back(hex32(&env, jsx::PUBS[4]));
+
+    let a = Address::generate(&env);
+    let proof = crate::ProofBytes {
+        a: hex96(&env, jsx::PROOF_A),
+        b: hex192(&env, jsx::PROOF_B),
+        c: hex96(&env, jsx::PROOF_C),
+    };
+    let err = client
+        .try_transact(&proof, &root, &nulls, &cmts, &7, &3, &0, &a, &a)
+        .err()
+        .unwrap()
+        .unwrap();
+    assert_eq!(err, Error::InvalidProof);
+}

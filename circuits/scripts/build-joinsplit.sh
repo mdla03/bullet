@@ -65,13 +65,16 @@ fi
 echo "== [4/5] export verification key =="
 "$SNARKJS" zkey export verificationkey "$BUILD/joinsplit.zkey" "$BUILD/joinsplit_vk.json"
 
-echo "== [5/5] prove and verify the valid vector =="
-if [ ! -f "$BUILD/joinsplit_input_valid.json" ]; then
+echo "== [5/5] prove and verify the fixture vector =="
+# The fixture vector, not "valid": its public legs are distinct and non-zero
+# (deposit 7, withdraw 3, tokenId 0), so a contract that pushes them in the
+# wrong order fails verification. An all-zero vector cannot detect that.
+if [ ! -f "$BUILD/joinsplit_input_fixture.json" ]; then
     echo "no valid vector, generating..."
     node "$HERE/scripts/gen-joinsplit-vectors.mjs"
 fi
 "$SNARKJS" groth16 fullprove \
-    "$BUILD/joinsplit_input_valid.json" \
+    "$BUILD/joinsplit_input_fixture.json" \
     "$BUILD/joinsplit_js/joinsplit.wasm" \
     "$BUILD/joinsplit.zkey" \
     "$BUILD/joinsplit_proof.json" \

@@ -6,12 +6,28 @@
 // snarkjs stores Fp2 as [c0, c1], so we swap to c1,c0.
 import fs from "fs";
 
+// Usage:
+//   node convert-to-soroban.mjs            -> claim circuit (default, unchanged)
+//   node convert-to-soroban.mjs joinsplit  -> shielded-pool join-split
+//
 // claim circuit build uses claim_vk/claim_proof/claim_public;
 // fall back to the benchmark names for backward compatibility.
 const dir = "circuits/build";
-const vkFile = fs.existsSync(`${dir}/claim_vk.json`) ? "claim_vk" : "verification_key";
-const proofFile = fs.existsSync(`${dir}/claim_proof.json`) ? "claim_proof" : "proof";
-const pubFile = fs.existsSync(`${dir}/claim_public.json`) ? "claim_public" : "public";
+const circuit = process.argv[2] ?? null;
+const vkFile = circuit
+  ? `${circuit}_vk`
+  : fs.existsSync(`${dir}/claim_vk.json`) ? "claim_vk" : "verification_key";
+const proofFile = circuit
+  ? `${circuit}_proof`
+  : fs.existsSync(`${dir}/claim_proof.json`) ? "claim_proof" : "proof";
+const pubFile = circuit
+  ? `${circuit}_public`
+  : fs.existsSync(`${dir}/claim_public.json`) ? "claim_public" : "public";
+// Claim keeps its historical output names so build-claim.sh is unaffected.
+const jsonOut = circuit ? `${dir}/${circuit}_soroban.json` : `${dir}/groth16_soroban.json`;
+const rsOut = circuit
+  ? `contracts/zeekpay/src/${circuit}_fixture.rs`
+  : "contracts/zeekpay/src/groth16_fixture.rs";
 const vk = JSON.parse(fs.readFileSync(`${dir}/${vkFile}.json`));
 const proof = JSON.parse(fs.readFileSync(`${dir}/${proofFile}.json`));
 const pub = JSON.parse(fs.readFileSync(`${dir}/${pubFile}.json`));
@@ -36,7 +52,7 @@ const out = {
   c: g1(proof.pi_c),
   pubs: pub.map(fr),
 };
-fs.writeFileSync(`${dir}/groth16_soroban.json`, JSON.stringify(out, null, 2));
+fs.writeFileSync(jsonOut, JSON.stringify(out, null, 2));
 
 // Also emit a Rust fixture (tracked) for the verifier correctness test.
 const icArr = out.ic.map((h) => `    "${h}",`).join("\n");
@@ -58,6 +74,6 @@ pub const PUBS: &[&str] = &[
 ${pubArr}
 ];
 `;
-fs.writeFileSync("contracts/zeekpay/src/groth16_fixture.rs", rs);
-console.log("wrote groth16_soroban.json + contracts/zeekpay/src/groth16_fixture.rs");
+fs.writeFileSync(rsOut, rs);
+console.log(`wrote ${jsonOut} + ${rsOut}`);
 console.log("ic:", out.ic.length, "pubs:", out.pubs.length, "| G1 hex:", out.alpha1.length, "G2:", out.beta2.length, "Fr:", out.pubs[0].length);

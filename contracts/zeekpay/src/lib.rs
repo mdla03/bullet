@@ -22,6 +22,8 @@ mod verifier;
 #[cfg(test)]
 mod groth16_fixture;
 #[cfg(test)]
+mod joinsplit_fixture;
+#[cfg(test)]
 mod test;
 
 use soroban_sdk::crypto::bls12_381::{Fr, G1Affine, G2Affine};

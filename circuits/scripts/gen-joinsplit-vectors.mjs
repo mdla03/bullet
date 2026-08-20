@@ -118,6 +118,24 @@ const vectors = [
     input: base(),
   },
   {
+    // The vector used for the Soroban fixture. Public legs are distinct and
+    // non-zero on purpose: with deposit, withdraw and tokenId all zero, a
+    // contract that pushed them in the wrong order would still verify, so an
+    // all-zero vector cannot detect a public-input ordering bug.
+    // Balance: 100 + 50 + 7 == 120 + 34 + 3.
+    name: "fixture",
+    expect: "pass",
+    aim: "distinct public legs, so ordering errors are detectable",
+    input: (() => {
+      const v = base();
+      v.valueOut = ["120", "34"];
+      v.publicDeposit = "7";
+      v.publicWithdraw = "3";
+      v.__recomputeOut = true;
+      return v;
+    })(),
+  },
+  {
     name: "balance_violation",
     expect: "fail",
     expectAt: "JoinSplit:182",
