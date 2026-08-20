@@ -1,0 +1,8 @@
+#!/bin/sh
+# Strip AI attribution trailers from every commit message.
+# Covers both worktrees (bullet, bullet-d1) — they share this .git dir.
+sed -i '' \
+  -e '/^Co-Authored-By: Claude/d' \
+  -e '/^Co-authored-by: Claude/d' \
+  -e '/Generated with \[Claude Code\]/d' \
+  "$1"

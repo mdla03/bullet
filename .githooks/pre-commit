@@ -1,0 +1,37 @@
+#!/bin/sh
+# Refuse direct commits to master. Feature work goes on a branch and reaches
+# master through a merge.
+#
+# This exists because two worktrees share this repo (bullet on master,
+# bullet-d1 on a feature branch) and it is easy to run git in the wrong one.
+# A commit meant for a branch has landed on master more than once.
+#
+# Merges are allowed: git skips pre-commit for them, and the MERGE_HEAD check
+# below covers the conflict-resolution case.
+# Deliberate master commits: ALLOW_MASTER_COMMIT=1 git commit ...
+
+branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+
+[ "$branch" != "master" ] && exit 0
+[ -n "$ALLOW_MASTER_COMMIT" ] && exit 0
+[ -f "$(git rev-parse --git-dir)/MERGE_HEAD" ] && exit 0
+
+cat >&2 <<'EOF'
+pre-commit: refusing to commit directly to master.
+
+Work on a branch, then merge:
+
+    git switch -c feat/my-change
+    git commit ...
+    git switch master && git merge feat/my-change
+
+Note this repo has two worktrees sharing one .git, so check which one you are
+in before assuming the branch is wrong:
+
+    git worktree list
+
+If this commit really belongs on master:
+
+    ALLOW_MASTER_COMMIT=1 git commit ...
+EOF
+exit 1

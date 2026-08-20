@@ -80,3 +80,8 @@ three zeroes in the slots being swapped.
   frontend change described in `pipeline/circom-circuit/changes.md`.
 - **Move work between worktrees with git**, via cherry-pick or stash. Never by
   slicing source files with a script; that dropped six tests once already.
+- **Hooks are not installed by cloning.** Reference copies live in
+  `.githooks/`; install them with
+  `cp .githooks/* "$(git rev-parse --git-common-dir)/hooks/"`. The `commit-msg`
+  one strips AI attribution trailers and its absence is silent, so install it
+  first on any new clone. See `.githooks/README.md`.
