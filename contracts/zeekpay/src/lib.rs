@@ -81,6 +81,10 @@ pub enum DataKey {
     Root(BytesN<32>),
     RootRing(u32), // ring buffer slot -> root, for eviction
     RootHead,      // next ring slot
+    // Shielded pool. Separate verifying key from Vk, because the join-split
+    // circuit has 8 public inputs against claim's 6, so one key cannot serve
+    // both. Appended last so existing stored entries keep their encoding.
+    PoolVk,
 }
 
 #[contracterror]
@@ -97,7 +101,27 @@ pub enum Error {
     NonCanonicalInput = 9,
     InvalidAmount = 10,
     UnknownToken = 11,
+    /// Wrong number of nullifiers or output commitments for the join-split.
+    InvalidShape = 12,
 }
+
+/// Groth16 proof bytes, in the same encoding `claim` takes as three separate
+/// arguments. Bundled here because Soroban caps contract functions at 10
+/// parameters and `transact` needs the room.
+#[contracttype]
+#[derive(Clone)]
+pub struct ProofBytes {
+    pub a: BytesN<96>,
+    pub b: BytesN<192>,
+    pub c: BytesN<96>,
+}
+
+/// Join-split shape. Must match `JoinSplit(20, 64, N_IN, N_OUT)` in
+/// circuits/src/joinsplit.circom. The verifying key's IC length is derived
+/// from these, so a mismatch is caught by `verifier::verify` rather than
+/// silently accepted.
+const POOL_N_IN: u32 = 2;
+const POOL_N_OUT: u32 = 2;
 
 /// BLS12-381 scalar field modulus r, big-endian. A `nullifier`/`root` is used
 /// both as a storage key (raw 32 bytes) AND, via `Fr::from_bytes`, as a proof
@@ -153,6 +177,15 @@ impl ZeekPay {
     pub fn set_vk(env: Env, vk: VkData) -> Result<(), Error> {
         Self::require_admin(&env)?;
         env.storage().instance().set(&DataKey::Vk, &vk);
+        Ok(())
+    }
+
+    /// Verifying key for the shielded-pool join-split circuit. Admin only.
+    /// Separate from `set_vk`: rotating one must not disturb the other while
+    /// both paths are live during migration.
+    pub fn set_pool_vk(env: Env, vk: VkData) -> Result<(), Error> {
+        Self::require_admin(&env)?;
+        env.storage().instance().set(&DataKey::PoolVk, &vk);
         Ok(())
     }
 
@@ -334,6 +367,169 @@ impl ZeekPay {
         Ok(())
     }
 
+    /// Shielded-pool spend (join-split). One entry point covers all three
+    /// shapes: a deposit is a spend with dummy inputs, a withdrawal is one
+    /// whose value leaves the pool, and an in-pool transfer sets both public
+    /// legs to zero and reveals no amount at all.
+    ///
+    /// Verifies the join-split proof binding
+    /// [root, nullifiers, out_commitments, public_deposit, public_withdraw,
+    /// token_id], which includes the in-circuit balance constraint
+    /// `sum(inputs) + deposit == sum(outputs) + withdraw`. That constraint is
+    /// what stops the pool paying out more than was put in, and it is the fix
+    /// for deposits not being bound to their commitments in `deposit`/`claim`.
+    ///
+    /// Emits the output commitments with their tree indices so the indexer can
+    /// advance the Merkle tree off-chain, matching the existing `post_root`
+    /// trust seam.
+    pub fn transact(
+        env: Env,
+        proof: ProofBytes,
+        root: BytesN<32>,
+        nullifiers: Vec<BytesN<32>>,
+        out_commitments: Vec<BytesN<32>>,
+        public_deposit: i128,
+        public_withdraw: i128,
+        token_id: u32,
+        depositor: Address,
+        recipient: Address,
+    ) -> Result<u64, Error> {
+        Self::require_initialized(&env)?;
+        if Self::is_paused(&env) {
+            return Err(Error::Paused);
+        }
+
+        // Shape must match the circuit the verifying key was built for. A
+        // mismatch would also be caught by verifier::verify's IC length check,
+        // but failing here gives a usable error instead of InvalidProof.
+        if nullifiers.len() != POOL_N_IN || out_commitments.len() != POOL_N_OUT {
+            return Err(Error::InvalidShape);
+        }
+
+        // Public legs may be zero (an in-pool transfer moves nothing on-chain),
+        // but never negative, and never at or above 2^64. See
+        // AMOUNT_MAX_EXCLUSIVE: derive_pool_public_inputs truncates via
+        // `as u64` exactly as derive_public_inputs does, so without this bound
+        // a proof for X would authorise moving 2^64 + X.
+        if public_deposit < 0
+            || public_withdraw < 0
+            || public_deposit >= AMOUNT_MAX_EXCLUSIVE
+            || public_withdraw >= AMOUNT_MAX_EXCLUSIVE
+        {
+            return Err(Error::InvalidAmount);
+        }
+
+        // Reject non-canonical field elements everywhere a 32-byte value is
+        // used both as a storage key and as a proof input. Same reasoning as
+        // claim: n and n + r are one field element but two storage keys.
+        if !is_canonical_fr(&root) {
+            return Err(Error::NonCanonicalInput);
+        }
+        let mut i = 0u32;
+        while i < nullifiers.len() {
+            if !is_canonical_fr(&nullifiers.get(i).unwrap()) {
+                return Err(Error::NonCanonicalInput);
+            }
+            i += 1;
+        }
+        let mut j = 0u32;
+        while j < out_commitments.len() {
+            if !is_canonical_fr(&out_commitments.get(j).unwrap()) {
+                return Err(Error::NonCanonicalInput);
+            }
+            j += 1;
+        }
+
+        if !env.storage().persistent().has(&DataKey::Root(root.clone())) {
+            return Err(Error::UnknownRoot);
+        }
+
+        // Verify before touching any state.
+        if !Self::maybe_skip_verify(&env) {
+            let proof = Proof {
+                a: G1Affine::from_bytes(proof.a),
+                b: G2Affine::from_bytes(proof.b),
+                c: G1Affine::from_bytes(proof.c),
+            };
+            let vk = Self::load_vk_at(&env, DataKey::PoolVk)?;
+            let pubs = Self::derive_pool_public_inputs(
+                &env,
+                &root,
+                &nullifiers,
+                &out_commitments,
+                public_deposit,
+                public_withdraw,
+                token_id,
+            );
+            if !verifier::verify(&env, &vk, &proof, &pubs) {
+                return Err(Error::InvalidProof);
+            }
+        }
+
+        // SECURITY: check-then-set, one nullifier at a time. The circuit does
+        // NOT constrain the two nullifiers to differ (see the note at the
+        // bottom of joinsplit.circom), so a prover can pass the same note
+        // twice. Checking both against storage first and only then writing
+        // both would let that duplicate through: neither is stored at check
+        // time, and the second write silently overwrites the first. Writing
+        // each before checking the next is what makes the in-transaction
+        // duplicate impossible. Do not reorder this loop.
+        let mut k = 0u32;
+        while k < nullifiers.len() {
+            let n = nullifiers.get(k).unwrap();
+            if env.storage().persistent().has(&DataKey::Nullifier(n.clone())) {
+                return Err(Error::NullifierUsed);
+            }
+            env.storage()
+                .persistent()
+                .set(&DataKey::Nullifier(n.clone()), &true);
+            env.storage().persistent().extend_ttl(
+                &DataKey::Nullifier(n),
+                NULLIFIER_BUMP_THRESHOLD,
+                NULLIFIER_BUMP_TO,
+            );
+            k += 1;
+        }
+
+        // Publish the new notes with their tree positions. The indexer rebuilds
+        // the tree from these and the admin posts the resulting root, so an
+        // output note is only spendable once that has happened.
+        let mut index: u64 = env.storage().instance().get(&DataKey::Index).unwrap_or(0);
+        let first_index = index;
+        let mut m = 0u32;
+        while m < out_commitments.len() {
+            env.events().publish(
+                (soroban_sdk::symbol_short!("note"),),
+                (out_commitments.get(m).unwrap(), index),
+            );
+            index += 1;
+            m += 1;
+        }
+        env.storage().instance().set(&DataKey::Index, &index);
+
+        // Token legs. Pull first, so a deposit in the same transaction can fund
+        // the withdrawal alongside it.
+        let tok_addr: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Token(token_id))
+            .ok_or(Error::UnknownToken)?;
+        let client = token::Client::new(&env, &tok_addr);
+        if public_deposit > 0 {
+            depositor.require_auth();
+            client.transfer(&depositor, &env.current_contract_address(), &public_deposit);
+        }
+        if public_withdraw > 0 {
+            client.transfer(
+                &env.current_contract_address(),
+                &recipient,
+                &public_withdraw,
+            );
+        }
+
+        Ok(first_index)
+    }
+
     pub fn is_nullifier_used(env: Env, nullifier: BytesN<32>) -> bool {
         env.storage()
             .persistent()
@@ -371,10 +567,14 @@ impl ZeekPay {
     }
 
     fn load_vk(env: &Env) -> Result<VerifyingKey, Error> {
+        Self::load_vk_at(env, DataKey::Vk)
+    }
+
+    fn load_vk_at(env: &Env, key: DataKey) -> Result<VerifyingKey, Error> {
         let vk: VkData = env
             .storage()
             .instance()
-            .get(&DataKey::Vk)
+            .get(&key)
             .ok_or(Error::VkNotSet)?;
         let mut ic: Vec<G1Affine> = Vec::new(env);
         let mut i = 0u32;
@@ -416,6 +616,57 @@ impl ZeekPay {
         v.push_back(Fr::from_bytes(recipient_digest.clone()));
         v.push_back(Fr::from_u256(soroban_sdk::U256::from_parts(env, 0, 0, 0, amount as u64)));
         v.push_back(Fr::from_u256(soroban_sdk::U256::from_parts(env, 0, 0, 0, token_id as u64)));
+        v
+    }
+
+    /// Public inputs for the join-split, in the order locked by
+    /// `component main {public [...]}` in circuits/src/joinsplit.circom:
+    ///   [root, nullifiers.., out_commitments.., deposit, withdraw, tokenId]
+    /// Never insert or reorder; append only, and only alongside the circuit.
+    fn derive_pool_public_inputs(
+        env: &Env,
+        root: &BytesN<32>,
+        nullifiers: &Vec<BytesN<32>>,
+        out_commitments: &Vec<BytesN<32>>,
+        public_deposit: i128,
+        public_withdraw: i128,
+        token_id: u32,
+    ) -> Vec<Fr> {
+        let mut v: Vec<Fr> = Vec::new(env);
+        v.push_back(Fr::from_bytes(root.clone()));
+        let mut i = 0u32;
+        while i < nullifiers.len() {
+            v.push_back(Fr::from_bytes(nullifiers.get(i).unwrap()));
+            i += 1;
+        }
+        let mut j = 0u32;
+        while j < out_commitments.len() {
+            v.push_back(Fr::from_bytes(out_commitments.get(j).unwrap()));
+            j += 1;
+        }
+        // `as u64` truncates, which is safe only because transact() rejects
+        // anything at or above AMOUNT_MAX_EXCLUSIVE first. Both halves stay.
+        v.push_back(Fr::from_u256(soroban_sdk::U256::from_parts(
+            env,
+            0,
+            0,
+            0,
+            public_deposit as u64,
+        )));
+        v.push_back(Fr::from_u256(soroban_sdk::U256::from_parts(
+            env,
+            0,
+            0,
+            0,
+            public_withdraw as u64,
+        )));
+        v.push_back(Fr::from_u256(soroban_sdk::U256::from_parts(
+            env,
+            0,
+            0,
+            0,
+            token_id as u64,
+        )));
         v
     }
 

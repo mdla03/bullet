@@ -457,3 +457,240 @@ fn deposit_amount_at_or_above_2_64_rejected() {
 
     assert_eq!(s.token.balance(&s.id), 0, "oversized deposit was accepted");
 }
+
+// ---------------------------------------------------------------------------
+// Shielded pool (join-split) tests.
+//
+// These use the cfg(test) verify bypass, like the other business-logic tests,
+// so they exercise the contract's state handling rather than the SNARK. The
+// balance constraint itself is tested in-circuit by
+// circuits/scripts/gen-joinsplit-vectors.mjs.
+// ---------------------------------------------------------------------------
+
+use crate::ProofBytes;
+
+fn zero_proof(env: &Env) -> ProofBytes {
+    ProofBytes {
+        a: BytesN::from_array(env, &[0u8; 96]),
+        b: BytesN::from_array(env, &[0u8; 192]),
+        c: BytesN::from_array(env, &[0u8; 96]),
+    }
+}
+
+/// A canonical field element derived from a tag byte. `b32` alone is not
+/// enough here: any tag at or above 0x73 exceeds the BLS12-381 modulus and the
+/// contract rejects it as NonCanonicalInput before reaching the check under
+/// test. Masking the top byte keeps every tag usable while staying canonical.
+fn fr32(env: &Env, tag: u8) -> BytesN<32> {
+    let mut buf = [tag; 32];
+    buf[0] &= 0x0f;
+    BytesN::from_array(env, &buf)
+}
+
+fn vec32(env: &Env, bytes: &[u8]) -> soroban_sdk::Vec<BytesN<32>> {
+    let mut v = soroban_sdk::Vec::new(env);
+    for b in bytes {
+        v.push_back(fr32(env, *b));
+    }
+    v
+}
+
+#[test]
+fn pool_deposit_then_withdraw() {
+    let s = setup();
+    let depositor = Address::generate(&s.env);
+    let recipient = Address::generate(&s.env);
+    s.usdc_admin.mint(&depositor, &1_000_000_000);
+
+    let root = b32(&s.env, 0x11);
+    s.client.post_root(&root);
+
+    // Deposit: value enters the pool, dummy inputs, two fresh output notes.
+    s.client.transact(
+        &zero_proof(&s.env),
+        &root,
+        &vec32(&s.env, &[0x01, 0x02]),
+        &vec32(&s.env, &[0xA1, 0xA2]),
+        &TEN_USDC,
+        &0,
+        &0,
+        &depositor,
+        &recipient,
+    );
+    assert_eq!(s.token.balance(&s.id), TEN_USDC);
+    assert_eq!(s.token.balance(&depositor), 900_000_000);
+
+    // Withdraw: value leaves the pool to the recipient.
+    s.client.transact(
+        &zero_proof(&s.env),
+        &root,
+        &vec32(&s.env, &[0x03, 0x04]),
+        &vec32(&s.env, &[0xA3, 0xA4]),
+        &0,
+        &TEN_USDC,
+        &0,
+        &depositor,
+        &recipient,
+    );
+    assert_eq!(s.token.balance(&recipient), TEN_USDC);
+    assert_eq!(s.token.balance(&s.id), 0);
+}
+
+#[test]
+fn pool_in_pool_transfer_moves_no_tokens() {
+    let s = setup();
+    let a = Address::generate(&s.env);
+    let root = b32(&s.env, 0x11);
+    s.client.post_root(&root);
+
+    // Both public legs zero: nothing on-chain reveals an amount.
+    s.client.transact(
+        &zero_proof(&s.env),
+        &root,
+        &vec32(&s.env, &[0x05, 0x06]),
+        &vec32(&s.env, &[0xB1, 0xB2]),
+        &0,
+        &0,
+        &0,
+        &a,
+        &a,
+    );
+    assert_eq!(s.token.balance(&s.id), 0);
+    assert!(s.client.is_nullifier_used(&fr32(&s.env, 0x05)));
+    assert!(s.client.is_nullifier_used(&fr32(&s.env, 0x06)));
+}
+
+/// THE ordering test. The circuit does not constrain the two nullifiers to
+/// differ, so a prover can pass the same note twice. This must be rejected by
+/// the contract's check-then-set loop. If that loop is ever changed to check
+/// both nullifiers before writing either, this test fails and the pool becomes
+/// double-spendable.
+#[test]
+fn pool_same_nullifier_twice_in_one_tx_rejected() {
+    let s = setup();
+    let a = Address::generate(&s.env);
+    let root = b32(&s.env, 0x11);
+    s.client.post_root(&root);
+
+    let dup = vec32(&s.env, &[0x07, 0x07]); // same note, twice
+    let err = s
+        .client
+        .try_transact(
+            &zero_proof(&s.env),
+            &root,
+            &dup,
+            &vec32(&s.env, &[0xC1, 0xC2]),
+            &0,
+            &TEN_USDC,
+            &0,
+            &a,
+            &a,
+        )
+        .err()
+        .unwrap()
+        .unwrap();
+    assert_eq!(err, Error::NullifierUsed);
+    assert_eq!(s.token.balance(&a), 0, "double spend paid out");
+}
+
+#[test]
+fn pool_replayed_nullifier_rejected() {
+    let s = setup();
+    let a = Address::generate(&s.env);
+    let root = b32(&s.env, 0x11);
+    s.client.post_root(&root);
+
+    s.client.transact(
+        &zero_proof(&s.env), &root,
+        &vec32(&s.env, &[0x08, 0x09]),
+        &vec32(&s.env, &[0xD1, 0xD2]),
+        &0, &0, &0, &a, &a,
+    );
+    // Reuse 0x08 in a later transaction.
+    let err = s
+        .client
+        .try_transact(
+            &zero_proof(&s.env), &root,
+            &vec32(&s.env, &[0x08, 0x0A]),
+            &vec32(&s.env, &[0xD3, 0xD4]),
+            &0, &0, &0, &a, &a,
+        )
+        .err()
+        .unwrap()
+        .unwrap();
+    assert_eq!(err, Error::NullifierUsed);
+}
+
+#[test]
+fn pool_wrong_shape_rejected() {
+    let s = setup();
+    let a = Address::generate(&s.env);
+    let root = b32(&s.env, 0x11);
+    s.client.post_root(&root);
+
+    let err = s
+        .client
+        .try_transact(
+            &zero_proof(&s.env), &root,
+            &vec32(&s.env, &[0x0B]),            // one nullifier, circuit wants two
+            &vec32(&s.env, &[0xE1, 0xE2]),
+            &0, &0, &0, &a, &a,
+        )
+        .err()
+        .unwrap()
+        .unwrap();
+    assert_eq!(err, Error::InvalidShape);
+}
+
+#[test]
+fn pool_amount_bounds_enforced() {
+    let s = setup();
+    let a = Address::generate(&s.env);
+    s.usdc_admin.mint(&a, &(INFLATED * 2));
+    s.usdc_admin.mint(&s.id, &(INFLATED * 2));
+    let root = b32(&s.env, 0x11);
+    s.client.post_root(&root);
+    let pool_before = s.token.balance(&s.id);
+
+    // Same truncation hazard as claim: 2^64 + X encodes as X.
+    let _ = s.client.try_transact(
+        &zero_proof(&s.env), &root,
+        &vec32(&s.env, &[0x0C, 0x0D]),
+        &vec32(&s.env, &[0xF1, 0xF2]),
+        &0, &INFLATED, &0, &a, &a,
+    );
+    assert_eq!(s.token.balance(&s.id), pool_before, "pool drained");
+
+    // Negative is rejected too.
+    let err = s
+        .client
+        .try_transact(
+            &zero_proof(&s.env), &root,
+            &vec32(&s.env, &[0x0C, 0x0D]),
+            &vec32(&s.env, &[0xF1, 0xF2]),
+            &-1, &0, &0, &a, &a,
+        )
+        .err()
+        .unwrap()
+        .unwrap();
+    assert_eq!(err, Error::InvalidAmount);
+}
+
+#[test]
+fn pool_unknown_root_rejected() {
+    let s = setup();
+    let a = Address::generate(&s.env);
+    let err = s
+        .client
+        .try_transact(
+            &zero_proof(&s.env),
+            &fr32(&s.env, 0x6E), // never posted
+            &vec32(&s.env, &[0x0E, 0x0F]),
+            &vec32(&s.env, &[0xF3, 0xF4]),
+            &0, &0, &0, &a, &a,
+        )
+        .err()
+        .unwrap()
+        .unwrap();
+    assert_eq!(err, Error::UnknownRoot);
+}
