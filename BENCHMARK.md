@@ -18,6 +18,61 @@ this report as evidence of amount privacy.
 
 ---
 
+## Deliverable 1 go/no-go decision: GO
+
+**Decided 2026-08-20 by Mark Aquino (builder).**
+
+The SOW makes Deliverable 1 a gate: in-browser proving time and on-chain
+verification cost are benchmarked in week one as a go/no-go checkpoint before
+the rest of the sprint proceeds (SOW section 4.1). Both numbers are now
+measured rather than estimated, and both pass with margin.
+
+| Gate metric | Result | Margin |
+|---|---|---|
+| On-chain verification cost, 6 public inputs | 77,665,920 CPU instructions, 77.67% of the 100,000,000 per-transaction budget | ~22% headroom |
+| In-browser proving time | 1,349 ms median over 25 runs, headless Chrome 151 | cold run 1,642 ms |
+
+Method and raw numbers are in sections 3 and 4 below. The on-chain figure comes
+from the soroban-sdk budget meter via `cargo test -p verifier`. The in-browser
+figure comes from a real browser executing the real circuit wasm, driven by
+`frontend/scripts/bench-browser.mjs`, and each run verifies its own proof, so a
+timing can never be recorded for an invalid proof.
+
+**Verdict: proceed.** Neither metric is close to a limit.
+
+### What this decision does not assert
+
+- **It is not a privacy claim.** `amount` is still a plaintext public input.
+  See the note above. The commitment and range proof are an integrity binding.
+- **It is not a security sign-off.** No external audit has been done, and the
+  SOW lists one as a mainnet prerequisite (out-of-scope item 4). The trusted
+  setup is a single local contribution, not a multi-party ceremony
+  (out-of-scope item 3).
+- **The commitment is Poseidon, not Pedersen.** The SOW specifies Pedersen.
+  circomlib's Pedersen uses Baby Jubjub, which is a sound group only over the
+  BN254 scalar field, while this circuit compiles under BLS12-381. A
+  single-proof design does not need the additive homomorphism Pedersen would
+  provide, so Poseidon is the correct primitive here rather than a fallback.
+  Recorded as a deviation from the SOW text.
+
+### Found and fixed while benchmarking
+
+A security review of this work surfaced a pre-existing contract bug, unrelated
+to the circuit change. `derive_public_inputs` truncated the amount via
+`amount as u64` while `token::Client::transfer` moved the full `i128`, so a
+proof for X also authorised a transfer of 2^64 + X, capped by the pool balance.
+Fixed by `AMOUNT_MAX_EXCLUSIVE` in `contracts/zeekpay/src/lib.rs` and pinned by
+regression tests that were confirmed to fail without the fix. The fix is on
+master and **not yet deployed to testnet**.
+
+A second finding remains open: deposits are not bound to their commitments, so
+a one-stroop deposit can claim a larger amount. No contract guard closes that,
+because the contract cannot inspect a hash over a secret it does not know. The
+fix is the in-circuit balance constraint of the shielded-pool join-split, which
+is built and tested in `circuits/src/joinsplit.circom`.
+
+---
+
 ## 1. Circuit shape
 
 | | Before (5 public inputs) | After (6 public inputs) | Delta |
