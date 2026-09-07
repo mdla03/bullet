@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 import express, { type Request, type Response, type NextFunction } from "express";
 import cors from "cors";
-import type { ResolveResult } from "@zeekpay/shared";
+import { verifyHandleTypeOwnership, type ResolveResult } from "@zeekpay/shared";
 import * as store from "./store.js";
 import * as leaves from "./leaves.js";
 import * as tree from "./tree.js";
@@ -206,6 +206,26 @@ app.post("/wallet/link", requireAuth, async (req: Request, res: Response) => {
   // Best-effort: deliver any pending invites addressed to this user's handles.
   invite.deliverInvitesFor(userId, zeekPayPubKey).catch(() => {});
   res.json({ ok: true, wallet: result.wallet });
+});
+
+// ── /register: confirm ownership of an OAuth-backed handle type ──────────────
+// Handles themselves are auto-created from auth.identities by a DB trigger the
+// moment an OAuth sign-in completes — that's already proof of control, the
+// same mechanism Google has used since launch. This route lets the frontend
+// confirm that proof explicitly for a specific handle type (e.g. GitHub)
+// before treating a public key as publishable for it, per SPEC §7.
+app.post("/register", requireAuth, async (req: Request, res: Response) => {
+  const userId = (req as Request & { userId?: string }).userId!;
+  const { handleType } = req.body as { handleType?: string };
+  if (!handleType) return void badRequest(res, "handleType required");
+
+  const { data, error } = await serviceClient.auth.admin.getUserById(userId);
+  if (error || !data.user) return void res.status(401).json({ error: "unauthorized" });
+
+  const identityProviders = (data.user.identities ?? []).map((i) => i.provider);
+  const result = verifyHandleTypeOwnership(handleType, identityProviders);
+  if (!result.ok) return void res.status(403).json({ error: result.error });
+  res.json({ ok: true, handleType });
 });
 
 // ── /invite: send-to-unregistered flow ────────────────────────────────────────

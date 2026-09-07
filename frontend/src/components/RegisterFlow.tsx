@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import type { Session } from "@supabase/supabase-js";
+import type { Provider, Session } from "@supabase/supabase-js";
 import type { SVGProps } from "react";
 import {
   CheckIcon,
+  GithubIcon,
   GoogleIcon,
   LoaderIcon,
   MailIcon,
@@ -13,8 +14,19 @@ import {
   XBrandIcon,
 } from "@/components/icons";
 import { createClient } from "@/lib/supabase/client";
-import { apiFetch, getMe, lookupEmailProviders, type MeResponse } from "@/lib/api";
+import {
+  apiFetch,
+  confirmHandleOwnership,
+  getMe,
+  lookupEmailProviders,
+  type MeResponse,
+} from "@/lib/api";
 import { Skeleton } from "@/components/Skeleton";
+import {
+  enabledHandleTypes,
+  handleTypeForIdentityProvider,
+  type HandleTypeId,
+} from "@zeekpay/shared";
 import {
   KEY_DOMAIN_MESSAGE,
   buildLinkWalletChallenge,
@@ -22,10 +34,30 @@ import {
   signatureToHex,
 } from "@/lib/register";
 
-const PROVIDERS = [
-  { key: "google", label: "Google", icon: GoogleIcon, enabled: true },
-  { key: "x", label: "X", icon: XBrandIcon, enabled: true },
-] as const;
+// Icons for the OAuth-backed handle types shown as sign-in buttons. Discord
+// and telegram stay out of PROVIDERS below (registry enabled: false).
+const OAUTH_ICON: Partial<
+  Record<HandleTypeId, (p: SVGProps<SVGSVGElement>) => React.ReactElement>
+> = {
+  google: GoogleIcon,
+  x: XBrandIcon,
+  github: GithubIcon,
+};
+
+// Sign-in buttons: every enabled handle type proven via Supabase OAuth.
+const PROVIDERS: {
+  key: Provider;
+  label: string;
+  icon: (p: SVGProps<SVGSVGElement>) => React.ReactElement;
+  enabled: boolean;
+}[] = enabledHandleTypes()
+  .filter((h) => h.proof.type === "supabase-oauth")
+  .map((h) => ({
+    key: (h.proof as { type: "supabase-oauth"; provider: string }).provider as Provider,
+    label: h.label,
+    icon: OAUTH_ICON[h.id] ?? MailIcon,
+    enabled: true,
+  }));
 
 const OAUTH_ERRORS: Record<string, string> = {
   missing_code: "The sign-in didn't complete. Start again.",
@@ -33,20 +65,14 @@ const OAUTH_ERRORS: Record<string, string> = {
 };
 
 function providerIcon(provider: string): (p: SVGProps<SVGSVGElement>) => React.ReactElement {
-  if (provider === "twitter" || provider === "twitter_v2" || provider === "x")
-    return XBrandIcon;
-  if (provider === "google") return GoogleIcon;
-  return MailIcon;
+  const handleType = handleTypeForIdentityProvider(provider);
+  return (handleType && OAUTH_ICON[handleType.id]) || MailIcon;
 }
 
-// Sort key: Google first, then X, then email, then anything else.
-const PROVIDER_RANK: Record<string, number> = {
-  google: 0,
-  x: 1,
-  twitter: 1,
-  twitter_v2: 1,
-  email: 2,
-};
+// Sort key: registry order (Google, X, email, GitHub, …), unknown last.
+const PROVIDER_RANK: Record<string, number> = Object.fromEntries(
+  enabledHandleTypes().flatMap((h, i) => h.identityProviders.map((p) => [p, i]))
+);
 function providerRank(provider: string): number {
   return PROVIDER_RANK[provider] ?? 99;
 }
@@ -123,6 +149,16 @@ export function RegisterFlow({
     else setMe(null);
   }, [session, refreshMe]);
 
+  // GitHub's handle isn't typed in, it's read from the OAuth identity. Confirm
+  // the session actually proves control of it before treating the handle as
+  // registerable (SPEC §7: a key is published only after that proof lands).
+  useEffect(() => {
+    if (session?.user.app_metadata.provider !== "github") return;
+    confirmHandleOwnership("github").then((ok) => {
+      if (!ok) setError("Couldn't confirm your GitHub account. Sign in again.");
+    });
+  }, [session]);
+
   // Switching wallets strands unclaimed notes on the outgoing key. Count them
   // up front so the confirm can state the real number, not a vague warning.
   useEffect(() => {
@@ -156,7 +192,7 @@ export function RegisterFlow({
     return () => clearInterval(id);
   }, [sentAt]);
 
-  async function signIn(provider: (typeof PROVIDERS)[number]["key"]) {
+  async function signIn(provider: Provider) {
     setError("");
     setWorking("oauth");
     const { error: oauthErr } = await supabase.auth.signInWithOAuth({

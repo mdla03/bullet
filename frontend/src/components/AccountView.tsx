@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { Session } from "@supabase/supabase-js";
+import type { Provider, Session } from "@supabase/supabase-js";
 import {
   CheckIcon,
   CopyIcon,
   ExternalLinkIcon,
+  GithubIcon,
   GoogleIcon,
   LoaderIcon,
   MailIcon,
@@ -18,25 +19,39 @@ import type { SVGProps } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getMe, type MeResponse } from "@/lib/api";
 import { Skeleton } from "@/components/Skeleton";
+import {
+  enabledHandleTypes,
+  handleTypeForIdentityProvider,
+  type HandleTypeId,
+} from "@zeekpay/shared";
+
+// Icons for the OAuth-backed handle types. Discord/telegram stay hidden
+// (registry enabled: false), so they're never looked up here.
+const OAUTH_ICON: Partial<
+  Record<HandleTypeId, (p: SVGProps<SVGSVGElement>) => React.ReactElement>
+> = {
+  google: GoogleIcon,
+  x: XBrandIcon,
+  github: GithubIcon,
+};
 
 function providerIcon(provider: string): (p: SVGProps<SVGSVGElement>) => React.ReactElement {
-  if (provider === "twitter" || provider === "twitter_v2" || provider === "x")
-    return XBrandIcon;
-  if (provider === "google") return GoogleIcon;
-  return MailIcon;
+  const handleType = handleTypeForIdentityProvider(provider);
+  return (handleType && OAUTH_ICON[handleType.id]) || MailIcon;
 }
 
-// Google first, then X/twitter, then email, then anything else.
-const PROVIDER_RANK: Record<string, number> = {
-  google: 0,
-  x: 1,
-  twitter: 1,
-  twitter_v2: 1,
-  email: 2,
-};
+// Sort key: registry order (Google, X, email, GitHub, …), unknown last.
+const PROVIDER_RANK: Record<string, number> = Object.fromEntries(
+  enabledHandleTypes().flatMap((h, i) => h.identityProviders.map((p) => [p, i]))
+);
 function providerRank(provider: string): number {
   return PROVIDER_RANK[provider] ?? 99;
 }
+
+// "Connect X" buttons: every enabled handle type proven via Supabase OAuth.
+const OAUTH_HANDLE_TYPES = enabledHandleTypes().filter(
+  (h) => h.proof.type === "supabase-oauth"
+);
 
 export function AccountView() {
   const supabase = createClient();
@@ -73,7 +88,7 @@ export function AccountView() {
     else if (session === null) router.replace("/register");
   }, [session, refreshMe, router]);
 
-  async function linkProvider(provider: "google" | "x") {
+  async function linkProvider(provider: Provider) {
     setError("");
     setWorking("oauth");
     const { error: err } = await supabase.auth.linkIdentity({
@@ -150,19 +165,13 @@ export function AccountView() {
   const linkedWallet = me.wallet ?? null;
   const handles = me.identities ?? [];
   const linkedProviders = new Set(handles.map((h) => h.provider));
-  const missingOAuth = (
-    [
-      { key: "google" as const, label: "Google", Icon: GoogleIcon },
-      { key: "x" as const, label: "X", Icon: XBrandIcon },
-    ] as const
-  ).filter(
-    (p) =>
-      !(
-        linkedProviders.has(p.key) ||
-        (p.key === "x" &&
-          (linkedProviders.has("twitter") || linkedProviders.has("twitter_v2")))
-      )
-  );
+  const missingOAuth = OAUTH_HANDLE_TYPES.filter(
+    (h) => !h.identityProviders.some((p) => linkedProviders.has(p))
+  ).map((h) => ({
+    key: (h.proof as { type: "supabase-oauth"; provider: string }).provider as Provider,
+    label: h.label,
+    Icon: OAUTH_ICON[h.id] ?? MailIcon,
+  }));
   const hasEmail = linkedProviders.has("email");
 
   return (

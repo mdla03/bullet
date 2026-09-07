@@ -1,5 +1,7 @@
 // Shared types between @zeekpay/backend and @zeekpay/frontend.
 
+export * from "./handles.js";
+
 export interface ResolveResult {
   found: boolean;
   stellarAddress?: string;
