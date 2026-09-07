@@ -17,7 +17,7 @@
 #[cfg(test)]
 extern crate std;
 
-mod verifier;
+pub mod verifier;
 
 #[cfg(test)]
 mod groth16_fixture;

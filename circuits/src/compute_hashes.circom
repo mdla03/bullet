@@ -8,7 +8,6 @@ pragma circom 2.0.0;
 // Not part of the ZeekPay proof system. Test-only helper.
 
 include "../node_modules/circomlib/circuits/poseidon.circom";
-include "jubjub/pedersen_commit.circom";
 
 template ComputeHashes() {
     signal input secret;
@@ -18,20 +17,18 @@ template ComputeHashes() {
     signal input blinding;
     signal output nullifier;
     signal output root;
-    signal output amountCommitmentX;
-    signal output amountCommitmentY;
+    signal output amountCommitment;
 
     // nullifier = Poseidon([secret])
     component n = Poseidon(1);
     n.inputs[0] <== secret;
     nullifier <== n.out;
 
-    // amountCommitment = amount*G + blinding*H on Jubjub (Pedersen)
-    component ac = PedersenCommit();
-    ac.amount <== amount;
-    ac.blinding <== blinding;
-    amountCommitmentX <== ac.cx;
-    amountCommitmentY <== ac.cy;
+    // amountCommitment = Poseidon([amount, blinding])
+    component ac = Poseidon(2);
+    ac.inputs[0] <== amount;
+    ac.inputs[1] <== blinding;
+    amountCommitment <== ac.out;
 
     // commitment = Poseidon([secret, recipientDigest, amount, tokenId])
     component c = Poseidon(4);

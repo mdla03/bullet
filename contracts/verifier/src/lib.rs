@@ -7,6 +7,14 @@
 //!
 //! This is NOT the product verifier. It does not bind real proof/vk bytes, has
 //! no nullifiers, no storage, no recipient binding. See spec.md.
+//!
+//! `bench_verify_real` calls `zeekpay::verifier::verify` directly (a normal,
+//! non-dev path dependency on the `zeekpay` crate) so the measured cost is the
+//! product code path exactly. Side effect: since `zeekpay` also has its own
+//! `#[contract]` impl, this crate's wasm exports zeekpay's full contract ABI
+//! (deposit, claim, post_root, etc.) alongside the bench_* functions. Harmless
+//! for a benchmark-only crate that is never deployed as the product contract,
+//! but do not reuse this wasm as anything other than a cost-measurement probe.
 #![no_std]
 
 #[cfg(test)]
@@ -122,10 +130,13 @@ impl BenchContract {
     /// Real Groth16 verify against actual proof/vk bytes (not the synthetic
     /// canceling-pairs construction `bench_verify` uses above), so the cost
     /// of a specific real proof shape can be *measured* rather than read off
-    /// the synthetic scaling table. Byte layout and verify equation are an
-    /// exact copy of `contracts/zeekpay/src/verifier.rs`'s `verify` (not
-    /// imported from there to avoid coupling the benchmark crate to the
-    /// product contract crate). `ic.len()` must equal `pubs.len() + 1`.
+    /// the synthetic scaling table. Builds a `zeekpay::verifier::VerifyingKey`
+    /// and `Proof` from the incoming bytes and calls `zeekpay::verifier::verify`
+    /// directly, so the measured cost is the product code path exactly.
+    /// `zeekpay` is a normal (non-dev) dependency here because this method is
+    /// compiled into the benchmark contract's wasm, not gated behind
+    /// `cfg(test)`; acceptable since this crate is benchmark-only and never
+    /// deployed as the product contract. `ic.len()` must equal `pubs.len() + 1`.
     pub fn bench_verify_real(
         env: Env,
         alpha1: soroban_sdk::BytesN<96>,
@@ -139,46 +150,35 @@ impl BenchContract {
         pubs: Vec<soroban_sdk::BytesN<32>>,
     ) -> bool {
         use soroban_sdk::crypto::bls12_381::{Fr, G1Affine, G2Affine};
+        use zeekpay::verifier::{verify, Proof, VerifyingKey};
 
-        let bls = env.crypto().bls12_381();
-
-        if ic.len() != pubs.len() + 1 {
-            return false;
-        }
-
-        let ic_alpha = G1Affine::from_bytes(ic.get(0).unwrap());
-
-        // L = IC[0] + Sum pub_i * IC[i+1]
-        let mut ic_rest: Vec<G1Affine> = Vec::new(&env);
-        let mut fr_pubs: Vec<Fr> = Vec::new(&env);
+        let mut ic_points: Vec<G1Affine> = Vec::new(&env);
         let mut i = 0u32;
-        while i < pubs.len() {
-            ic_rest.push_back(G1Affine::from_bytes(ic.get(i + 1).unwrap()));
-            fr_pubs.push_back(Fr::from_bytes(pubs.get(i).unwrap()));
+        while i < ic.len() {
+            ic_points.push_back(G1Affine::from_bytes(ic.get(i).unwrap()));
             i += 1;
         }
-        let acc = bls.g1_msm(ic_rest, fr_pubs);
-        let l = bls.g1_add(&ic_alpha, &acc);
+        let mut fr_pubs: Vec<Fr> = Vec::new(&env);
+        let mut j = 0u32;
+        while j < pubs.len() {
+            fr_pubs.push_back(Fr::from_bytes(pubs.get(j).unwrap()));
+            j += 1;
+        }
 
-        let zero = Fr::from_u256(soroban_sdk::U256::from_u32(&env, 0));
-        let one = Fr::from_u256(soroban_sdk::U256::from_u32(&env, 1));
-        let neg_one = bls.fr_sub(&zero, &one);
-        let proof_a = G1Affine::from_bytes(a);
-        let neg_a = bls.g1_mul(&proof_a, &neg_one);
+        let vk = VerifyingKey {
+            alpha1: G1Affine::from_bytes(alpha1),
+            beta2: G2Affine::from_bytes(beta2),
+            gamma2: G2Affine::from_bytes(gamma2),
+            delta2: G2Affine::from_bytes(delta2),
+            ic: ic_points,
+        };
+        let proof = Proof {
+            a: G1Affine::from_bytes(a),
+            b: G2Affine::from_bytes(b),
+            c: G1Affine::from_bytes(c),
+        };
 
-        let mut g1s: Vec<G1Affine> = Vec::new(&env);
-        g1s.push_back(neg_a);
-        g1s.push_back(G1Affine::from_bytes(alpha1));
-        g1s.push_back(l);
-        g1s.push_back(G1Affine::from_bytes(c));
-
-        let mut g2s: Vec<G2Affine> = Vec::new(&env);
-        g2s.push_back(G2Affine::from_bytes(b));
-        g2s.push_back(G2Affine::from_bytes(beta2));
-        g2s.push_back(G2Affine::from_bytes(gamma2));
-        g2s.push_back(G2Affine::from_bytes(delta2));
-
-        bls.pairing_check(g1s, g2s)
+        verify(&env, &vk, &proof, &fr_pubs)
     }
 
     /// Deposit-cost benchmark for Option A (on-chain Merkle insert).

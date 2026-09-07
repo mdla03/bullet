@@ -13,19 +13,9 @@ use crate::claim_fixture_7in as fx;
 /// Soroban network per-transaction CPU instruction limit.
 const TX_CPU_LIMIT: u64 = 100_000_000;
 
-fn bytes96(env: &Env, h: &str) -> BytesN<96> {
+fn hex_to<const N: usize>(env: &Env, h: &str) -> BytesN<N> {
     let v = hex::decode(h).unwrap();
-    let a: [u8; 96] = v.try_into().unwrap();
-    BytesN::from_array(env, &a)
-}
-fn bytes192(env: &Env, h: &str) -> BytesN<192> {
-    let v = hex::decode(h).unwrap();
-    let a: [u8; 192] = v.try_into().unwrap();
-    BytesN::from_array(env, &a)
-}
-fn bytes32(env: &Env, h: &str) -> BytesN<32> {
-    let v = hex::decode(h).unwrap();
-    let a: [u8; 32] = v.try_into().unwrap();
+    let a: [u8; N] = v.try_into().unwrap();
     BytesN::from_array(env, &a)
 }
 
@@ -115,22 +105,22 @@ fn real_7in_claim_proof_verify_cost() {
 
     let mut ic: soroban_sdk::Vec<BytesN<96>> = soroban_sdk::Vec::new(&env);
     for h in fx::IC {
-        ic.push_back(bytes96(&env, h));
+        ic.push_back(hex_to::<96>(&env, h));
     }
     let mut pubs: soroban_sdk::Vec<BytesN<32>> = soroban_sdk::Vec::new(&env);
     for h in fx::PUBS {
-        pubs.push_back(bytes32(&env, h));
+        pubs.push_back(hex_to::<32>(&env, h));
     }
     assert_eq!(ic.len(), 8, "IC must have num_public_inputs + 1 = 8 points");
     assert_eq!(pubs.len(), 7, "claim.circom (Pedersen shape) has 7 public inputs");
 
-    let alpha1 = bytes96(&env, fx::ALPHA1);
-    let beta2 = bytes192(&env, fx::BETA2);
-    let gamma2 = bytes192(&env, fx::GAMMA2);
-    let delta2 = bytes192(&env, fx::DELTA2);
-    let a = bytes96(&env, fx::PROOF_A);
-    let b = bytes192(&env, fx::PROOF_B);
-    let c = bytes96(&env, fx::PROOF_C);
+    let alpha1 = hex_to::<96>(&env, fx::ALPHA1);
+    let beta2 = hex_to::<192>(&env, fx::BETA2);
+    let gamma2 = hex_to::<192>(&env, fx::GAMMA2);
+    let delta2 = hex_to::<192>(&env, fx::DELTA2);
+    let a = hex_to::<96>(&env, fx::PROOF_A);
+    let b = hex_to::<192>(&env, fx::PROOF_B);
+    let c = hex_to::<96>(&env, fx::PROOF_C);
 
     env.cost_estimate().budget().reset_unlimited();
     let ok = client.bench_verify_real(

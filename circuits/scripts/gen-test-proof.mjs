@@ -13,6 +13,7 @@ import fs from "fs";
 import path from "path";
 import {fileURLToPath} from "url";
 import {symIndex} from "./sym.mjs";
+import {commit} from "./jubjub-ref.mjs";
 
 const CIRCOM = process.env.CIRCOM || `${process.env.HOME}/.local/bin/circom`;
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -83,9 +84,21 @@ function getHelperSignal(name) {
 
 const computedNullifier = getHelperSignal("main.nullifier");
 const computedRoot = getHelperSignal("main.root");
+// main.amountCommitment present in the .sym means the helper circuit is the
+// old Poseidon shape, which does not compute the Pedersen (Jubjub) commitment
+// claim.circom actually needs. Compute it off-circuit instead with the same
+// reference implementation circuits/test/jubjub.test.mjs proves agrees with
+// the in-circuit PedersenCommit gadget. Otherwise the helper already carries
+// amountCommitmentX/Y (a future Pedersen-shape helper), so use those.
 const hasPoseidonCommitment = helperSigIdx["main.amountCommitment"] !== undefined;
 const commitmentFields = hasPoseidonCommitment
-  ? { amountCommitment: getHelperSignal("main.amountCommitment") }
+  ? (() => {
+      const point = commit(AMOUNT, BLINDING);
+      return {
+        amountCommitmentX: point.x.toString(),
+        amountCommitmentY: point.y.toString(),
+      };
+    })()
   : {
       amountCommitmentX: getHelperSignal("main.amountCommitmentX"),
       amountCommitmentY: getHelperSignal("main.amountCommitmentY"),

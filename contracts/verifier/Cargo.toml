@@ -16,6 +16,12 @@ soroban-sdk = "=22.0.7"
 # pairing backend; used directly here to measure on-chain Poseidon insert cost.
 ark-bls12-381 = { version = "0.4", default-features = false, features = ["curve"] }
 ark-ff = { version = "0.4", default-features = false }
+# Path dependency so `bench_verify_real` can call the product verify equation
+# directly instead of re-implementing it (see contracts/zeekpay/src/verifier.rs).
+# Normal (non-dev) dependency because bench_verify_real is compiled into the
+# benchmark contract's wasm, not gated behind cfg(test); acceptable since this
+# crate is benchmark-only and never deployed as the product contract.
+zeekpay = { path = "../zeekpay" }
 
 [dev-dependencies]
 soroban-sdk = { version = "=22.0.7", features = ["testutils"] }

@@ -259,10 +259,10 @@ Method: `contracts/verifier` test `real_7in_claim_proof_verify_cost` runs the ve
 
 | Metric | Value |
 |---|---:|
-| CPU instructions | 53,956,553 |
-| Share of the 100,000,000 per-transaction budget | 53.96% |
-| Headroom | 46.04% |
-| Memory bytes | 430,071 |
+| CPU instructions | 53,972,600 |
+| Share of the 100,000,000 per-transaction budget | 53.97% |
+| Headroom | 46.03% |
+| Memory bytes | 431,063 |
 
 Two notes on reading this number.
 
@@ -286,6 +286,6 @@ Section 4's 1,349 ms median was measured on a different machine (macOS, Chrome 1
 
 ### 5.4 Gate verdict for the Pedersen shape
 
-Both gate metrics are inside their limits with margin on the same criteria as the 2026-08-20 decision: verify cost 53.96% of budget with the real proof, proving time under one second. **Proceed.** The SOW deviation recorded in the go/no-go section (Poseidon instead of Pedersen) is closed.
+Both gate metrics are inside their limits with margin on the same criteria as the 2026-08-20 decision: verify cost 53.97% of budget with the real proof, proving time under one second. **Proceed.** The SOW deviation recorded in the go/no-go section (Poseidon instead of Pedersen) is closed.
 
 Open items: confirm the on-chain number with a testnet claim after the contract moves to 7 public inputs; the standalone range proof in `claim.circom` duplicates the 64-bit decomposition inside PedersenCommit and is kept deliberately (see the `ponytail:` note in the circuit).
