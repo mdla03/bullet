@@ -12,6 +12,7 @@ import {execSync} from "child_process";
 import fs from "fs";
 import path from "path";
 import {fileURLToPath} from "url";
+import {symIndex} from "./sym.mjs";
 
 const CIRCOM = process.env.CIRCOM || `${process.env.HOME}/.local/bin/circom`;
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -70,13 +71,7 @@ execSync(
 );
 
 // ── parse helper .sym to find signal indices ──────────────────────────────────
-const helperSymLines = fs.readFileSync(HELPER_SYM, "utf8").trim().split("\n");
-const helperSigIdx = {};
-for (const line of helperSymLines) {
-  const parts = line.split(",");
-  if (parts.length < 4) continue;
-  helperSigIdx[parts[3].trim()] = parseInt(parts[0], 10);
-}
+const helperSigIdx = symIndex(HELPER_SYM);
 
 const helperWitness = JSON.parse(fs.readFileSync(helperWtnsJsonPath, "utf8"));
 
@@ -89,15 +84,12 @@ function getHelperSignal(name) {
 const computedNullifier = getHelperSignal("main.nullifier");
 const computedRoot = getHelperSignal("main.root");
 const hasPoseidonCommitment = helperSigIdx["main.amountCommitment"] !== undefined;
-const computedAmountCommitment = hasPoseidonCommitment
-  ? getHelperSignal("main.amountCommitment")
-  : null;
-const computedAmountCommitmentX = hasPoseidonCommitment
-  ? null
-  : getHelperSignal("main.amountCommitmentX");
-const computedAmountCommitmentY = hasPoseidonCommitment
-  ? null
-  : getHelperSignal("main.amountCommitmentY");
+const commitmentFields = hasPoseidonCommitment
+  ? { amountCommitment: getHelperSignal("main.amountCommitment") }
+  : {
+      amountCommitmentX: getHelperSignal("main.amountCommitmentX"),
+      amountCommitmentY: getHelperSignal("main.amountCommitmentY"),
+    };
 
 // For leaf at index 0 (left child all the way), pathElements[i] = zeroHashes[i]:
 //   pathElements[0] = zeroHashes[0] = 0            (empty leaf)
@@ -114,11 +106,8 @@ for (let i = 0; i < 19; i++) {
 
 console.log(`nullifier:        ${computedNullifier}`);
 console.log(`root:             ${computedRoot}`);
-if (hasPoseidonCommitment) {
-  console.log(`amountCommitment: ${computedAmountCommitment}`);
-} else {
-  console.log(`amountCommitmentX: ${computedAmountCommitmentX}`);
-  console.log(`amountCommitmentY: ${computedAmountCommitmentY}`);
+for (const [name, value] of Object.entries(commitmentFields)) {
+  console.log(`${name}: ${value}`);
 }
 console.log(`pathElements[0]:  ${pathElements[0]}`);
 console.log(`pathElements[1]:  ${pathElements[1]}`);
@@ -130,9 +119,7 @@ const realInput = {
   recipientDigest: RECIPIENT_DIGEST,
   amount: AMOUNT,
   tokenId: TOKEN_ID,
-  ...(hasPoseidonCommitment
-    ? { amountCommitment: computedAmountCommitment }
-    : { amountCommitmentX: computedAmountCommitmentX, amountCommitmentY: computedAmountCommitmentY }),
+  ...commitmentFields,
   secret: SECRET,
   pathElements,
   pathIndices: PATH_INDICES,

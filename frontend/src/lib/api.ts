@@ -93,13 +93,3 @@ export async function getMe(): Promise<MeResponse> {
   if (!res.ok) throw new Error(`/me failed (${res.status})`);
   return res.json();
 }
-
-/** Confirm the signed-in session actually owns an OAuth-backed handle type
- *  (see shared/src/handles.ts) before treating it as registerable. */
-export async function confirmHandleOwnership(handleType: string): Promise<boolean> {
-  const res = await apiFetch("/register", {
-    method: "POST",
-    body: JSON.stringify({ handleType }),
-  });
-  return res.ok;
-}

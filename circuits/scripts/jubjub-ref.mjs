@@ -20,6 +20,7 @@
 //   needed since noble ships the real group hash.
 
 import { jubjub, findGroupHash } from '@noble/curves/jubjub';
+import { invert } from '@noble/curves/abstract/modular';
 import { randomBytes } from 'node:crypto';
 import assert from 'node:assert';
 import { pathToFileURL } from 'node:url';
@@ -115,15 +116,14 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const zero = commit(0, 0);
   assert(zero.x === 0n && zero.y === 1n, 'commit(0,0) != identity');
 
-  // Fermat inverse (Fr is prime) to cross-check A = 2(a+d)/(a-d).
+  // Modular inverse (Fr is prime) to cross-check A = 2(a+d)/(a-d).
   // Note: B = 4/(a-d) is NOT cross-checked here. Jubjub's published (a,d) is a
   // non-square-scaled (quadratic twist) copy of the "canonical" a=1-style
   // Edwards curve reached by the textbook birational map; that scaling
   // (x,y) -> (c*x, y) leaves A invariant (confirmed below) but rescales B by
   // 1/c^2, so B can't be recovered from (a,d) without also knowing c. We take
   // montgomeryB=1 directly from the spec instead, as the task allows.
-  const modpow = (base, exp, m) => { let r = 1n; base %= m; while (exp > 0n) { if (exp & 1n) r = (r * base) % m; base = (base * base) % m; exp >>= 1n; } return r; };
-  const invAminusD = modpow(modr(a - d), Fr - 2n, Fr);
+  const invAminusD = invert(modr(a - d), Fr);
   const computedA = modr(2n * modr(a + d) * invAminusD);
   if (computedA !== montgomeryA) {
     console.log('montgomery A mismatch: computed', computedA.toString(), 'expected', montgomeryA.toString());

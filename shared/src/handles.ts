@@ -143,30 +143,3 @@ export function enabledHandleTypes(): HandleType[] {
 export function handleTypeForIdentityProvider(provider: string): HandleType | undefined {
   return HANDLE_TYPES.find((h) => h.identityProviders.includes(provider));
 }
-
-export interface OwnershipCheck {
-  ok: boolean;
-  error?:
-    | "unknown_handle_type"
-    | "handle_type_disabled"
-    | "not_oauth_backed"
-    | "provider_mismatch";
-}
-
-/**
- * True iff one of the caller's already-verified Supabase identity providers
- * proves control of `handleTypeId`. Pure: callers fetch `identityProviders`
- * from a verified JWT/session (never from user input) before calling this.
- */
-export function verifyHandleTypeOwnership(
-  handleTypeId: string,
-  identityProviders: string[]
-): OwnershipCheck {
-  const handleType = getHandleType(handleTypeId);
-  if (!handleType) return { ok: false, error: "unknown_handle_type" };
-  if (!handleType.enabled) return { ok: false, error: "handle_type_disabled" };
-  if (handleType.proof.type !== "supabase-oauth")
-    return { ok: false, error: "not_oauth_backed" };
-  const owns = identityProviders.some((p) => handleType.identityProviders.includes(p));
-  return owns ? { ok: true } : { ok: false, error: "provider_mismatch" };
-}

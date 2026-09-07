@@ -7,46 +7,21 @@ import {
   CheckIcon,
   CopyIcon,
   ExternalLinkIcon,
-  GithubIcon,
-  GoogleIcon,
   LoaderIcon,
   MailIcon,
   TrashIcon,
   WalletIcon,
-  XBrandIcon,
 } from "@/components/icons";
-import type { SVGProps } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getMe, type MeResponse } from "@/lib/api";
 import { Skeleton } from "@/components/Skeleton";
+import { enabledHandleTypes } from "@zeekpay/shared";
 import {
-  enabledHandleTypes,
-  handleTypeForIdentityProvider,
-  type HandleTypeId,
-} from "@zeekpay/shared";
-
-// Icons for the OAuth-backed handle types. Discord/telegram stay hidden
-// (registry enabled: false), so they're never looked up here.
-const OAUTH_ICON: Partial<
-  Record<HandleTypeId, (p: SVGProps<SVGSVGElement>) => React.ReactElement>
-> = {
-  google: GoogleIcon,
-  x: XBrandIcon,
-  github: GithubIcon,
-};
-
-function providerIcon(provider: string): (p: SVGProps<SVGSVGElement>) => React.ReactElement {
-  const handleType = handleTypeForIdentityProvider(provider);
-  return (handleType && OAUTH_ICON[handleType.id]) || MailIcon;
-}
-
-// Sort key: registry order (Google, X, email, GitHub, …), unknown last.
-const PROVIDER_RANK: Record<string, number> = Object.fromEntries(
-  enabledHandleTypes().flatMap((h, i) => h.identityProviders.map((p) => [p, i]))
-);
-function providerRank(provider: string): number {
-  return PROVIDER_RANK[provider] ?? 99;
-}
+  OAUTH_ICON,
+  isOAuthProof,
+  providerIcon,
+  providerRank,
+} from "@/lib/handle-ui";
 
 // "Connect X" buttons: every enabled handle type proven via Supabase OAuth.
 const OAUTH_HANDLE_TYPES = enabledHandleTypes().filter(
@@ -167,11 +142,10 @@ export function AccountView() {
   const linkedProviders = new Set(handles.map((h) => h.provider));
   const missingOAuth = OAUTH_HANDLE_TYPES.filter(
     (h) => !h.identityProviders.some((p) => linkedProviders.has(p))
-  ).map((h) => ({
-    key: (h.proof as { type: "supabase-oauth"; provider: string }).provider as Provider,
-    label: h.label,
-    Icon: OAUTH_ICON[h.id] ?? MailIcon,
-  }));
+  ).flatMap((h) => {
+    if (!isOAuthProof(h.proof)) return [];
+    return [{ key: h.proof.provider, label: h.label, Icon: OAUTH_ICON[h.id] ?? MailIcon }];
+  });
   const hasEmail = linkedProviders.has("email");
 
   return (
