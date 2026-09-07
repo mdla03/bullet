@@ -1,8 +1,10 @@
 #!/bin/sh
 # Strip AI attribution trailers from every commit message.
-# Covers both worktrees (bullet, bullet-d1) — they share this .git dir.
-sed -i '' \
+# Covers both worktrees (bullet, bullet-d1), they share this .git dir.
+# sed -i.bak works on both GNU and BSD sed; sed -i '' is BSD only.
+sed -i.bak \
   -e '/^Co-Authored-By: Claude/d' \
   -e '/^Co-authored-by: Claude/d' \
   -e '/Generated with \[Claude Code\]/d' \
   "$1"
+rm -f "$1.bak"
