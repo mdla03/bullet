@@ -72,9 +72,12 @@ export default function Bench() {
       const zkey = new Uint8Array(zkeyBuf);
       const loadMs = performance.now() - t0;
 
-      if (input.blinding === undefined || input.amountCommitment === undefined) {
+      const hasCommitment =
+        input.amountCommitment !== undefined ||
+        (input.amountCommitmentX !== undefined && input.amountCommitmentY !== undefined);
+      if (input.blinding === undefined || !hasCommitment) {
         throw new Error(
-          "Input vector has no blinding / amountCommitment. This is the old 5-input build, not the circuit under test."
+          "Input vector has no blinding / amountCommitment(X/Y). This is the old 5-input build, not the circuit under test."
         );
       }
 

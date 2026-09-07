@@ -88,7 +88,16 @@ function getHelperSignal(name) {
 
 const computedNullifier = getHelperSignal("main.nullifier");
 const computedRoot = getHelperSignal("main.root");
-const computedAmountCommitment = getHelperSignal("main.amountCommitment");
+const hasPoseidonCommitment = helperSigIdx["main.amountCommitment"] !== undefined;
+const computedAmountCommitment = hasPoseidonCommitment
+  ? getHelperSignal("main.amountCommitment")
+  : null;
+const computedAmountCommitmentX = hasPoseidonCommitment
+  ? null
+  : getHelperSignal("main.amountCommitmentX");
+const computedAmountCommitmentY = hasPoseidonCommitment
+  ? null
+  : getHelperSignal("main.amountCommitmentY");
 
 // For leaf at index 0 (left child all the way), pathElements[i] = zeroHashes[i]:
 //   pathElements[0] = zeroHashes[0] = 0            (empty leaf)
@@ -105,7 +114,12 @@ for (let i = 0; i < 19; i++) {
 
 console.log(`nullifier:        ${computedNullifier}`);
 console.log(`root:             ${computedRoot}`);
-console.log(`amountCommitment: ${computedAmountCommitment}`);
+if (hasPoseidonCommitment) {
+  console.log(`amountCommitment: ${computedAmountCommitment}`);
+} else {
+  console.log(`amountCommitmentX: ${computedAmountCommitmentX}`);
+  console.log(`amountCommitmentY: ${computedAmountCommitmentY}`);
+}
 console.log(`pathElements[0]:  ${pathElements[0]}`);
 console.log(`pathElements[1]:  ${pathElements[1]}`);
 
@@ -116,7 +130,9 @@ const realInput = {
   recipientDigest: RECIPIENT_DIGEST,
   amount: AMOUNT,
   tokenId: TOKEN_ID,
-  amountCommitment: computedAmountCommitment,
+  ...(hasPoseidonCommitment
+    ? { amountCommitment: computedAmountCommitment }
+    : { amountCommitmentX: computedAmountCommitmentX, amountCommitmentY: computedAmountCommitmentY }),
   secret: SECRET,
   pathElements,
   pathIndices: PATH_INDICES,
