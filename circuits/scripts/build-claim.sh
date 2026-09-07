@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build the ZeekPay claim circuit end-to-end:
-#   compile → pot13 ceremony (if missing) → Groth16 setup → export vk → convert for Soroban
+#   compile → pot15 ceremony (if missing) → Groth16 setup → export vk → convert for Soroban
 #
 # Outputs (tracked, safe to commit):
 #   circuits/build/claim_vk.json
@@ -8,7 +8,7 @@
 #   contracts/zeekpay/src/groth16_fixture.rs
 #
 # Outputs (gitignored — do NOT commit):
-#   circuits/build/claim.r1cs   *.sym   *.zkey   *.wtns   pot13*.ptau
+#   circuits/build/claim.r1cs   *.sym   *.zkey   *.wtns   pot15*.ptau
 #   circuits/build/claim_js/
 set -euo pipefail
 
@@ -23,18 +23,19 @@ echo "== [1/6] compile claim.circom (BLS12-381) =="
 "$CIRCOM" "$HERE/src/claim.circom" --r1cs --wasm --sym -p bls12381 -o "$BUILD"
 "$SNARKJS" r1cs info "$BUILD/claim.r1cs"
 
-echo "== [2/6] powers of tau (bls12-381, power 14) =="
-# claim circuit: 11420 total constraints → need 2^14 = 16384 ≥ 11420
-if [ ! -f "$BUILD/pot14_final.ptau" ]; then
-    "$SNARKJS" powersoftau new bls12-381 14 "$BUILD/pot14_0.ptau" -v
-    "$SNARKJS" powersoftau contribute "$BUILD/pot14_0.ptau" "$BUILD/pot14_1.ptau" \
+echo "== [2/6] powers of tau (bls12-381, power 15) =="
+# claim circuit: 16,768 total constraints after the Pedersen amount commitment
+# → needs 2^15 = 32768. pot14 (16384) is short. Mirrors build-joinsplit.sh.
+if [ ! -f "$BUILD/pot15_final.ptau" ]; then
+    "$SNARKJS" powersoftau new bls12-381 15 "$BUILD/pot15_0.ptau" -v
+    "$SNARKJS" powersoftau contribute "$BUILD/pot15_0.ptau" "$BUILD/pot15_1.ptau" \
         --name="zeekpay-claim" -v -e="$(date +%s%N)claimentropy"
-    "$SNARKJS" powersoftau prepare phase2 "$BUILD/pot14_1.ptau" \
-        "$BUILD/pot14_final.ptau" -v
-    rm -f "$BUILD/pot14_0.ptau" "$BUILD/pot14_1.ptau"
-    echo "pot14_final.ptau generated."
+    "$SNARKJS" powersoftau prepare phase2 "$BUILD/pot15_1.ptau" \
+        "$BUILD/pot15_final.ptau" -v
+    rm -f "$BUILD/pot15_0.ptau" "$BUILD/pot15_1.ptau"
+    echo "pot15_final.ptau generated."
 else
-    echo "pot14_final.ptau already exists, skipping ceremony."
+    echo "pot15_final.ptau already exists, skipping ceremony."
 fi
 
 echo "== [3/6] Groth16 setup =="
@@ -49,7 +50,7 @@ if [ -f "$BUILD/claim.zkey" ] && [ "${FORCE_SETUP:-0}" != "1" ]; then
     echo "  (a) copy build/claim.zkey -> frontend/public/circuits/claim.zkey and"
     echo "  (b) re-run set_vk on the deployed contract with the new groth16_soroban.json."
 else
-    "$SNARKJS" groth16 setup "$BUILD/claim.r1cs" "$BUILD/pot14_final.ptau" \
+    "$SNARKJS" groth16 setup "$BUILD/claim.r1cs" "$BUILD/pot15_final.ptau" \
         "$BUILD/claim_0.zkey"
     "$SNARKJS" zkey contribute "$BUILD/claim_0.zkey" "$BUILD/claim.zkey" \
         --name="zeekpay-claim" -v -e="$(date +%s%N)claimzkeyentropy"

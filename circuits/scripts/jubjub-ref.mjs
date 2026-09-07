@@ -71,13 +71,18 @@ export function commit(amount, blinding) {
   return add(mul(BigInt(amount), G), mul(BigInt(blinding), H));
 }
 
+// Blindings are sampled below 2^251, not below subgroupOrder. The in-circuit
+// PedersenCommit (circuits/src/jubjub/pedersen_commit.circom) decomposes the
+// blinding with Num2Bits(251), so a value at or above 2^251 has no witness
+// there. 2^251 < subgroupOrder (a 252-bit value), so this range is still
+// injective on the group and the two sides agree exactly.
+export const BLINDING_BITS = 251n;
+export const blindingMax = 1n << BLINDING_BITS; // exclusive
+
 export function randomBlinding() {
-  const bytes = Math.ceil(subgroupOrder.toString(2).length / 8);
-  while (true) {
-    let v = 0n;
-    for (const b of randomBytes(bytes)) v = (v << 8n) | BigInt(b);
-    if (v < subgroupOrder) return v;
-  }
+  let v = 0n;
+  for (const b of randomBytes(32)) v = (v << 8n) | BigInt(b);
+  return v & (blindingMax - 1n); // uniform on [0, 2^251)
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
@@ -100,6 +105,8 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
 
   assert(isOnCurve(G) && !(G.x === 0n && G.y === 1n), 'G invalid or identity');
   assert(isOnCurve(H) && !(H.x === 0n && H.y === 1n), 'H invalid or identity');
+
+  assert(blindingMax < subgroupOrder, '2^251 is not below the Jubjub subgroup order');
 
   const idG = mul(subgroupOrder, G);
   assert(idG.x === 0n && idG.y === 1n, 'subgroupOrder * G != identity');

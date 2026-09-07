@@ -12,7 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as snarkjs from 'snarkjs';
 import { symIndex } from '../scripts/sym.mjs';
-import { G, H, add, double, mul, isOnCurve, subgroupOrder } from '../scripts/jubjub-ref.mjs';
+import { G, H, add, double, mul, isOnCurve, subgroupOrder, commit, randomBlinding, blindingMax } from '../scripts/jubjub-ref.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BUILD = path.join(HERE, 'build');
@@ -121,7 +121,49 @@ test('EscalarMulFix: random 64-bit scalar 1', () => checkMulFix(randomScalar64()
 test('EscalarMulFix: random 64-bit scalar 2', () => checkMulFix(randomScalar64()));
 test('EscalarMulFix: random 64-bit scalar 3', () => checkMulFix(randomScalar64()));
 
+// ── PedersenCommit ───────────────────────────────────────────────────────────
+async function checkCommit(amount, blinding) {
+  const idx = symIndexFor('pedersen_commit_test');
+  const w = await calculateWitness('pedersen_commit_test', {
+    amount: amount.toString(), blinding: blinding.toString(),
+  });
+  const expected = commit(amount, blinding);
+  assert.strictEqual(w[idx['main.cx']], expected.x.toString());
+  assert.strictEqual(w[idx['main.cy']], expected.y.toString());
+  return expected;
+}
+
+test('PedersenCommit: pinned sample (amount 37, blinding 12345)', async () => {
+  const c = await checkCommit(37n, 12345n);
+  // Pinned against the jubjub-ref.mjs printed sample, so a drift in either G,
+  // H, or the circuit's copies of them fails here rather than silently.
+  assert.strictEqual(c.x.toString(), '45698945774435739926801948253091155734572283544145897043617877029042215456708');
+  assert.strictEqual(c.y.toString(), '9314562124973391845024092063267342551607489952627410574825363956335655348463');
+});
+
+test('PedersenCommit: (0, 0) is the identity point', async () => {
+  const c = await checkCommit(0n, 0n);
+  assert.strictEqual(c.x, 0n);
+  assert.strictEqual(c.y, 1n);
+});
+
+test('PedersenCommit: amount 2^64-1 with a random blinding', () =>
+  checkCommit((1n << 64n) - 1n, randomBlinding()));
+
+test('PedersenCommit: random 64-bit amount with a random blinding', () =>
+  checkCommit(randomScalar64(), randomBlinding()));
+
+test('PedersenCommit: rejects amount = 2^64', () =>
+  assert.rejects(calculateWitness('pedersen_commit_test', {
+    amount: (1n << 64n).toString(), blinding: '0',
+  })));
+
 // sanity on the reference itself, so a broken subgroupOrder import fails loud
 test('reference sanity: subgroupOrder is nonzero', () => {
   assert.ok(subgroupOrder > 0n);
+});
+
+test('reference sanity: blindings stay below the subgroup order', () => {
+  assert.ok(blindingMax < subgroupOrder);
+  assert.ok(randomBlinding() < blindingMax);
 });
