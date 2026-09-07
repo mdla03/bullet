@@ -20,6 +20,8 @@ this report as evidence of amount privacy.
 
 ## Deliverable 1 go/no-go decision: GO
 
+**Update 2026-09-08:** the commitment has since been replaced by a Pedersen commitment on Jubjub, closing the deviation noted below. Numbers for that shape are in section 5. This section is kept as the dated record of the 2026-08-20 decision.
+
 **Decided 2026-08-20 by Mark Aquino (builder).**
 
 The SOW makes Deliverable 1 a gate: in-browser proving time and on-chain
@@ -234,3 +236,56 @@ failure correctly to the range constraint.
 
 **Stopping here per task instructions — not proceeding to any further
 deliverable.**
+
+## 5. Pedersen shape (2026-09-08)
+
+**Scope:** `circuits/src/claim.circom` at dev commit a2c73cc. The amount commitment is now C = amount * G + blinding * H on Jubjub, the BLS12-381 embedded curve, as the SOW specifies. The commitment leaves the circuit as two public inputs, `amountCommitmentX` and `amountCommitmentY`. The 64-bit range proof on `amount` is unchanged. G is the Jubjub generator and H is Zcash's value-commitment randomness base, both derived by `circuits/scripts/jubjub-ref.mjs` and cross-checked in `circuits/test/jubjub.test.mjs` (21 tests).
+
+### 5.1 Circuit shape
+
+| | Poseidon (section 1) | Pedersen on Jubjub | Delta |
+|---|---:|---:|---:|
+| Public inputs | 6 | 7 | +1 |
+| Private inputs | 42 | 42 | 0 |
+| Non-linear constraints | 5,743 | 10,422 | +4,679 |
+| Total constraints | 12,133 | 16,768 | +4,635 (+38.2%) |
+| Powers of tau | pot14 | pot15 | ceiling 16,384 exceeded |
+
+PedersenCommit alone is 5,152 constraints (4,922 non-linear): a 64-bit fixed-base multiply on G, a 251-bit fixed-base multiply on H, one point add.
+
+### 5.2 On-chain verification cost, real proof
+
+Method: `contracts/verifier` test `real_7in_claim_proof_verify_cost` runs the verify equation from `contracts/zeekpay/src/verifier.rs` on the real verification key and proof from `circuits/build/` (fixture `contracts/verifier/src/claim_fixture_7in.rs`) under the soroban-sdk budget meter. The proof verifies `true`.
+
+| Metric | Value |
+|---|---:|
+| CPU instructions | 53,956,553 |
+| Share of the 100,000,000 per-transaction budget | 53.96% |
+| Headroom | 46.04% |
+| Memory bytes | 430,071 |
+
+Two notes on reading this number.
+
+- It is lower than the 6-input figure of 77,665,920 in section 3, and lower than the synthetic scaling table's 7-input row (79,158,015). The synthetic `bench_verify` builds its test points with four hash-to-curve calls, which a real verify never performs; a real verify decodes points from bytes. The synthetic rows therefore overstate real verify cost by roughly 25M instructions. The real-proof measurement is the trustworthy one.
+- It isolates the verify equation. A full claim transaction adds the token transfer, storage reads and writes, and wasm instantiation. The first real testnet claim, with 4 public inputs, measured 70.66% for the whole transaction. The on-chain gate number is confirmed by a real testnet claim once the contract takes 7 inputs (week 2).
+
+### 5.3 In-browser proving time
+
+Method as in section 4: 25 runs through `frontend/scripts/bench-browser.mjs`, headless Chrome 152 on Windows, each run verifies its own proof, 7 public signals observed.
+
+| Metric | Value |
+|---|---:|
+| Median | 675 ms |
+| Mean | 678.5 ms |
+| Min | 648 ms |
+| Max | 783 ms |
+| Cold (first run) | 783 ms |
+| Artifacts fetched | 2.73 MB wasm + 12.42 MB zkey = 15.15 MB |
+
+Section 4's 1,349 ms median was measured on a different machine (macOS, Chrome 151). The two runs are not an A/B and should not be read as Pedersen proving faster than Poseidon. A same-machine comparison is optional; both are far from any limit.
+
+### 5.4 Gate verdict for the Pedersen shape
+
+Both gate metrics are inside their limits with margin on the same criteria as the 2026-08-20 decision: verify cost 53.96% of budget with the real proof, proving time under one second. **Proceed.** The SOW deviation recorded in the go/no-go section (Poseidon instead of Pedersen) is closed.
+
+Open items: confirm the on-chain number with a testnet claim after the contract moves to 7 public inputs; the standalone range proof in `claim.circom` duplicates the 64-bit decomposition inside PedersenCommit and is kept deliberately (see the `ponytail:` note in the circuit).

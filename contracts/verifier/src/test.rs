@@ -5,12 +5,29 @@
 //! IC MSM over `num_public_inputs + 1` points) fit, and with what margin?
 #![cfg(test)]
 
-use soroban_sdk::Env;
+use soroban_sdk::{BytesN, Env};
 
 use crate::{BenchContract, BenchContractClient};
+use crate::claim_fixture_7in as fx;
 
 /// Soroban network per-transaction CPU instruction limit.
 const TX_CPU_LIMIT: u64 = 100_000_000;
+
+fn bytes96(env: &Env, h: &str) -> BytesN<96> {
+    let v = hex::decode(h).unwrap();
+    let a: [u8; 96] = v.try_into().unwrap();
+    BytesN::from_array(env, &a)
+}
+fn bytes192(env: &Env, h: &str) -> BytesN<192> {
+    let v = hex::decode(h).unwrap();
+    let a: [u8; 192] = v.try_into().unwrap();
+    BytesN::from_array(env, &a)
+}
+fn bytes32(env: &Env, h: &str) -> BytesN<32> {
+    let v = hex::decode(h).unwrap();
+    let a: [u8; 32] = v.try_into().unwrap();
+    BytesN::from_array(env, &a)
+}
 
 fn measure(n_pairs: u32, msm_size: u32) -> (bool, u64, u64) {
     let env = Env::default();
@@ -81,4 +98,71 @@ fn cost_scaling_table() {
             ok
         );
     }
+}
+
+/// Measured (not synthetic) on-chain verify cost for the real 7-public-input
+/// Pedersen-shape claim circuit: the actual vk/proof/public signals from
+/// `circuits/build/claim_{vk,proof,public}.json` at HEAD, converted to the
+/// Soroban byte layout (see `claim_fixture_7in.rs`), run through the same
+/// budget-metered `env.register` + client-call path `measure()` above uses.
+/// A cost number for a proof that doesn't verify is meaningless, so this
+/// also asserts the real proof verifies `true`.
+#[test]
+fn real_7in_claim_proof_verify_cost() {
+    let env = Env::default();
+    let id = env.register(BenchContract, ());
+    let client = BenchContractClient::new(&env, &id);
+
+    let mut ic: soroban_sdk::Vec<BytesN<96>> = soroban_sdk::Vec::new(&env);
+    for h in fx::IC {
+        ic.push_back(bytes96(&env, h));
+    }
+    let mut pubs: soroban_sdk::Vec<BytesN<32>> = soroban_sdk::Vec::new(&env);
+    for h in fx::PUBS {
+        pubs.push_back(bytes32(&env, h));
+    }
+    assert_eq!(ic.len(), 8, "IC must have num_public_inputs + 1 = 8 points");
+    assert_eq!(pubs.len(), 7, "claim.circom (Pedersen shape) has 7 public inputs");
+
+    let alpha1 = bytes96(&env, fx::ALPHA1);
+    let beta2 = bytes192(&env, fx::BETA2);
+    let gamma2 = bytes192(&env, fx::GAMMA2);
+    let delta2 = bytes192(&env, fx::DELTA2);
+    let a = bytes96(&env, fx::PROOF_A);
+    let b = bytes192(&env, fx::PROOF_B);
+    let c = bytes96(&env, fx::PROOF_C);
+
+    env.cost_estimate().budget().reset_unlimited();
+    let ok = client.bench_verify_real(
+        &alpha1, &beta2, &gamma2, &delta2, &ic, &a, &b, &c, &pubs,
+    );
+    let cpu = env.cost_estimate().budget().cpu_instruction_cost();
+    let mem = env.cost_estimate().budget().memory_bytes_cost();
+
+    const SIX_INPUT_CPU: u64 = 77_665_920;
+    let delta = cpu as i64 - SIX_INPUT_CPU as i64;
+
+    std::println!("=== Real 7-input claim proof verify (measured) ===");
+    std::println!("verify result        : {}", ok);
+    std::println!("CPU instructions     : {}", cpu);
+    std::println!("memory bytes         : {}", mem);
+    std::println!("tx CPU limit         : {}", TX_CPU_LIMIT);
+    std::println!(
+        "budget used          : {:.2}%",
+        (cpu as f64 / TX_CPU_LIMIT as f64) * 100.0
+    );
+    std::println!(
+        "headroom             : {:.2}%",
+        100.0 - (cpu as f64 / TX_CPU_LIMIT as f64) * 100.0
+    );
+    std::println!("6-input measured cpu : {}", SIX_INPUT_CPU);
+    std::println!("delta vs 6-input     : {:+}", delta);
+
+    assert!(ok, "real 7-input claim proof must verify true on-chain");
+    assert!(
+        cpu < TX_CPU_LIMIT,
+        "real 7-input claim verify ({} CPU) exceeds tx limit ({})",
+        cpu,
+        TX_CPU_LIMIT
+    );
 }

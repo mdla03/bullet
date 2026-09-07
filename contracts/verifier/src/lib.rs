@@ -13,6 +13,8 @@
 extern crate std;
 #[cfg(test)]
 mod test;
+#[cfg(test)]
+mod claim_fixture_7in;
 
 // Minimal bump allocator — BENCHMARK ONLY, to let ark-ff link in the wasm build
 // for the Poseidon-Merkle deposit-cost measurement. Never frees; not for product.
@@ -113,6 +115,68 @@ impl BenchContract {
             }
             let _acc = bls.g1_msm(ic, scalars);
         }
+
+        bls.pairing_check(g1s, g2s)
+    }
+
+    /// Real Groth16 verify against actual proof/vk bytes (not the synthetic
+    /// canceling-pairs construction `bench_verify` uses above), so the cost
+    /// of a specific real proof shape can be *measured* rather than read off
+    /// the synthetic scaling table. Byte layout and verify equation are an
+    /// exact copy of `contracts/zeekpay/src/verifier.rs`'s `verify` (not
+    /// imported from there to avoid coupling the benchmark crate to the
+    /// product contract crate). `ic.len()` must equal `pubs.len() + 1`.
+    pub fn bench_verify_real(
+        env: Env,
+        alpha1: soroban_sdk::BytesN<96>,
+        beta2: soroban_sdk::BytesN<192>,
+        gamma2: soroban_sdk::BytesN<192>,
+        delta2: soroban_sdk::BytesN<192>,
+        ic: Vec<soroban_sdk::BytesN<96>>,
+        a: soroban_sdk::BytesN<96>,
+        b: soroban_sdk::BytesN<192>,
+        c: soroban_sdk::BytesN<96>,
+        pubs: Vec<soroban_sdk::BytesN<32>>,
+    ) -> bool {
+        use soroban_sdk::crypto::bls12_381::{Fr, G1Affine, G2Affine};
+
+        let bls = env.crypto().bls12_381();
+
+        if ic.len() != pubs.len() + 1 {
+            return false;
+        }
+
+        let ic_alpha = G1Affine::from_bytes(ic.get(0).unwrap());
+
+        // L = IC[0] + Sum pub_i * IC[i+1]
+        let mut ic_rest: Vec<G1Affine> = Vec::new(&env);
+        let mut fr_pubs: Vec<Fr> = Vec::new(&env);
+        let mut i = 0u32;
+        while i < pubs.len() {
+            ic_rest.push_back(G1Affine::from_bytes(ic.get(i + 1).unwrap()));
+            fr_pubs.push_back(Fr::from_bytes(pubs.get(i).unwrap()));
+            i += 1;
+        }
+        let acc = bls.g1_msm(ic_rest, fr_pubs);
+        let l = bls.g1_add(&ic_alpha, &acc);
+
+        let zero = Fr::from_u256(soroban_sdk::U256::from_u32(&env, 0));
+        let one = Fr::from_u256(soroban_sdk::U256::from_u32(&env, 1));
+        let neg_one = bls.fr_sub(&zero, &one);
+        let proof_a = G1Affine::from_bytes(a);
+        let neg_a = bls.g1_mul(&proof_a, &neg_one);
+
+        let mut g1s: Vec<G1Affine> = Vec::new(&env);
+        g1s.push_back(neg_a);
+        g1s.push_back(G1Affine::from_bytes(alpha1));
+        g1s.push_back(l);
+        g1s.push_back(G1Affine::from_bytes(c));
+
+        let mut g2s: Vec<G2Affine> = Vec::new(&env);
+        g2s.push_back(G2Affine::from_bytes(b));
+        g2s.push_back(G2Affine::from_bytes(beta2));
+        g2s.push_back(G2Affine::from_bytes(gamma2));
+        g2s.push_back(G2Affine::from_bytes(delta2));
 
         bls.pairing_check(g1s, g2s)
     }
