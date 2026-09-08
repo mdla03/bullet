@@ -5,6 +5,14 @@ pragma circom 2.0.0;
 // Contains NO equality constraints (no ===) so the witness calculator never
 // throws — all signals are computed and stored, then read back by the script.
 //
+// The amount commitment is deliberately NOT computed here. It is a Pedersen
+// commitment on Jubjub (see src/jubjub/pedersen_commit.circom), and this helper
+// has no equality constraints by design, so there is nothing for it to add over
+// the off-circuit `commit()` in scripts/jubjub-ref.mjs, which the 21 tests in
+// test/jubjub.test.mjs pin against the in-circuit gadget. It also must not
+// carry the old Poseidon([amount, blinding]) commitment: claim.circom has not
+// used that shape since the Pedersen swap.
+//
 // Not part of the ZeekPay proof system. Test-only helper.
 
 include "../node_modules/circomlib/circuits/poseidon.circom";
@@ -14,21 +22,13 @@ template ComputeHashes() {
     signal input recipientDigest;
     signal input amount;
     signal input tokenId;
-    signal input blinding;
     signal output nullifier;
     signal output root;
-    signal output amountCommitment;
 
     // nullifier = Poseidon([secret])
     component n = Poseidon(1);
     n.inputs[0] <== secret;
     nullifier <== n.out;
-
-    // amountCommitment = Poseidon([amount, blinding])
-    component ac = Poseidon(2);
-    ac.inputs[0] <== amount;
-    ac.inputs[1] <== blinding;
-    amountCommitment <== ac.out;
 
     // commitment = Poseidon([secret, recipientDigest, amount, tokenId])
     component c = Poseidon(4);
