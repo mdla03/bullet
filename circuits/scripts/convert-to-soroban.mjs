@@ -5,14 +5,21 @@
 //   Fr (32B): BE
 // snarkjs stores Fp2 as [c0, c1], so we swap to c1,c0.
 import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 
-// Usage:
+// Usage (from any directory):
 //   node convert-to-soroban.mjs            -> claim circuit (default, unchanged)
 //   node convert-to-soroban.mjs joinsplit  -> shielded-pool join-split
 //
+// Paths are anchored to this file, not to the working directory, so
+// build-claim.sh / build-joinsplit.sh work from anywhere rather than only
+// from the repo root.
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+
 // claim circuit build uses claim_vk/claim_proof/claim_public;
 // fall back to the benchmark names for backward compatibility.
-const dir = "circuits/build";
+const dir = path.join(ROOT, "circuits/build");
 const circuit = process.argv[2] ?? null;
 const vkFile = circuit
   ? `${circuit}_vk`
@@ -25,9 +32,12 @@ const pubFile = circuit
   : fs.existsSync(`${dir}/claim_public.json`) ? "claim_public" : "public";
 // Claim keeps its historical output names so build-claim.sh is unaffected.
 const jsonOut = circuit ? `${dir}/${circuit}_soroban.json` : `${dir}/groth16_soroban.json`;
-const rsOut = circuit
-  ? `contracts/zeekpay/src/${circuit}_fixture.rs`
-  : "contracts/zeekpay/src/groth16_fixture.rs";
+const rsOut = path.join(
+  ROOT,
+  circuit
+    ? `contracts/zeekpay/src/${circuit}_fixture.rs`
+    : "contracts/zeekpay/src/groth16_fixture.rs",
+);
 // groth16_fixture.rs is pinned at the 5-public-input shape ON PURPOSE. The
 // deployed contract's derive_public_inputs pushes 5 Fr while claim.circom now
 // has 6, and verifier::verify rejects the mismatch before any pairing math, so

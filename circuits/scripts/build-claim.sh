@@ -14,8 +14,14 @@ set -euo pipefail
 
 CIRCOM="${CIRCOM:-$HOME/.local/bin/circom}"
 HERE="$(cd "$(dirname "$0")/.." && pwd)"   # circuits/
+ROOT="$(cd "$HERE/.." && pwd)"             # repo root
 BUILD="$HERE/build"
 SNARKJS="$HERE/node_modules/.bin/snarkjs"
+
+command -v "$CIRCOM" >/dev/null 2>&1 || {
+    echo "circom not found at '$CIRCOM'. Set CIRCOM=/path/to/circom." >&2
+    exit 1
+}
 
 mkdir -p "$BUILD"
 
@@ -71,7 +77,7 @@ echo "== DONE =="
 echo "Tracked artifacts:"
 ls -la "$BUILD/claim_vk.json" "$BUILD/claim_proof.json" "$BUILD/claim_public.json"
 ls -la "$BUILD/groth16_soroban.json"
-ls -la contracts/zeekpay/src/groth16_fixture.rs 2>/dev/null || true
+ls -la "$ROOT/contracts/zeekpay/src/groth16_fixture.rs" 2>/dev/null || true
 echo ""
 echo "WASM (for in-browser proving):"
 ls -la "$BUILD/claim_js/claim.wasm"
