@@ -6,18 +6,27 @@
 // on-chain verify cost for this proof shape. Not the deployed contract
 // fixture.
 //
-// Produced with the shared conversion logic in
-// circuits/scripts/convert-to-soroban.mjs, via its --out option, which
-// writes only a JSON conversion and never touches a contract fixture:
-//   node circuits/scripts/convert-to-soroban.mjs --out /tmp/claim_soroban.json
-// Then ALPHA1/BETA2/GAMMA2/DELTA2/IC (the verification key) are copied in
-// from that JSON as-is; those are deterministic for a given claim.zkey.
-// PROOF_A/PROOF_B/PROOF_C and PUBS are NOT regenerated this way: a Groth16
-// proof includes randomized blinding factors, so re-running the prover
-// (even for the same input) never reproduces the same proof bytes, and PUBS
-// changes if the test input (e.g. the Merkle path) changes. Re-pin those
-// four constants only deliberately, by hand, from a specific
-// claim_proof.json / claim_public.json you intend to freeze.
+// Re-pin with the shared conversion logic in
+// circuits/scripts/convert-to-soroban.mjs, via its --rs option, which writes
+// the constants below and nothing else (this comment block is preserved, and
+// no tracked contract fixture is touched):
+//
+//   node circuits/scripts/gen-test-proof.mjs
+//   node circuits/scripts/convert-to-soroban.mjs \
+//     --rs contracts/verifier/src/claim_fixture_7in.rs
+//
+// ALPHA1/BETA2/GAMMA2/DELTA2/IC (the verification key) are deterministic for
+// a given claim.zkey. PROOF_A/PROOF_B/PROOF_C and PUBS are not: a Groth16
+// proof carries randomized blinding factors, so re-running the prover never
+// reproduces the same proof bytes, and PUBS changes whenever the test input
+// changes (e.g. the Merkle path in gen-test-proof.mjs). Re-pinning is
+// therefore a deliberate act, not something to run to tidy a diff: do it when
+// the circuit or the test vector changed, and re-measure section 7.2 of
+// BENCHMARK.md afterwards, since the CPU figure there is measured against
+// exactly these bytes.
+//
+// Last re-pinned 2026-09-09, for the distinct-sibling / alternating-index
+// Merkle path in gen-test-proof.mjs.
 
 pub const ALPHA1: &str = "184000ca3138130bd981d51472fe2840d4da7003ff1e7041ff556a0bc16dc2d4fe781bc0776b71a3b6009f11b1013b6d08ab5fca45d24ac373a00a7fc619c8ad1ab13fd97b8cedc279050f0c88c2a3bfb437cf9136054f211c9180c78cb05de1";
 pub const BETA2: &str = "0a51718057b484f9b6d19f37db2f88a0a121cfd9eaac34b0aa2baee89e49253f0418bfa8593eb38166df6c6b0b0ad1070183c75eea779ffc90b1ca30ede489f7e1d969145390ccd9c526daa9c921b5ca06c323ec3ffe47fa09fd17289b3794670053b390bc6f9d58bb5776ce21f4b47e26e8da909fc08749b639dec2b7977e61b644cc06b2dcd88f5923313a0ff5c1910b228b07e78c9ada359ce1c77b5ecce7ea7c25e6cdb7a422d726ba6ae6480f7c0d4e77a221326b279f318f6b12e8c429";
@@ -33,11 +42,11 @@ pub const IC: &[&str] = &[
     "0abaee236eab299014ea2b16fac762046f05857a8479e3c8bae7bc72026baa10c4fe1635098bd1012884e64a9385c44a061079c4c43d73584f5d0cb6b927773807b9deb3cb18d0011b86d71458003707dff02cdbfce58451d7cefdc11dc54bb2",
     "0591df2c2e5b89e57b0809420dc84ae0ec76de5e9cc0da898dcc5d3520bd7b43e8a7d1110d8e4824ac6694021472448001bd1e3835c931642ba3488ec343554aa2675f7d3c5e9b96388388833045d6969c2ad59310956be40e6baeb72ac9f111",
 ];
-pub const PROOF_A: &str = "05a54b0ed8050230a53a067b4ff74cb39e02f7090119f9028c19c86a85a0bb173876c4dd822b56b23431c16dbe38585b02487d68251bc3fd61bfb06f9d3a4a2387442861ff48801d4636a14f22a2245984816d13480862adacb67a637d5cc630";
-pub const PROOF_B: &str = "19351904386cecdc25bae7f184782e8188bb74032dd1fbfb2b28833ba28a0cf2669019199bc1d6a8d41515f251c9e7a3096442d2e466cc3397d976162387c42ad565e71bb9c67bc4c66cdf09d259d74af7b7c3ae6c3ef576dc9ead6dac9600ef0455b40c29f4d699db60153956bb5fdea6f0726290b1876a50171789756e6dc85faf0cd43f8a5a823de57f6f16767aec07cf67e7ef50f2ce1924f700fb98f9b5eb356d5aa8863ab34ffe00eb5290bf31f4ee099ded366ff67cf3913187f952e1";
-pub const PROOF_C: &str = "024b597c1add0745737458cd193dc63d859ad280260e03559021b8747504a792eaf0744fd53fe3df03f59b153a9c9f8e18f202eb157346e189e61f36bbacefb26cd08dfea742b7ec7d7c83e178668dc4cb851026e5a8a744fb7e8581b15833f7";
+pub const PROOF_A: &str = "0a7b78d3aec6315f4919a8035cfb9d4a4a0392843ba37947607a176832380821ec30314c7b3ca5ee568c9edb220f91ca0501cab7e0164ec800f288957e7c35dbf172b024422d4cd1716df904cd75465030712526cc098c6336088cfe1518c013";
+pub const PROOF_B: &str = "0d42af689e7234ddc4ea9b47db74a9f34a5ccbadf8b71369c5990c62700ba89f64ede5c8e58a349cca3d0f5eac90f5e20eefe877e7839cb4d2f91a6039b98ab7657ed3b53e5ea3074e7be30812cd701846b3f24e3bfda761c3997715d8991f2407da91cf48261b10d3e3b9eb14245a0aab319aa90c3354c3db8adc07f0a6150f2d37ec2dbec3826aec36604dea86a339049b5292997cd9b2302c9ea6b8d0da08cc68d340c033b8e3400f9265934ae2a8bcc0903c416f5ee4cc21ddc50429bfa4";
+pub const PROOF_C: &str = "182952e77aef5b4257e63702214303b26d8589bf88d27ae0ac8a440899ea7465070a4e59d98c6aeb007d9136d0e7df57139f70660fb21d3888e913542e4410a592258465e3ab86d005cd0c5bdf1f3cba081e974225ddfffb0c00b9f591d98f25";
 pub const PUBS: &[&str] = &[
-    "47d6c83b1d7ae3b6fdecceb17accaa2179fd20d9881617f1ff3cf56528e27213",
+    "1ac75b679bc3500d0269732485a714c8f387c37b56302ec69b365b153f138fd0",
     "42ca46a3eedf453fd7084659cc006f2e5d6abb5319442eadfdd2d2e8c8117262",
     "000000000000000000000000000000000000000000000000000000000000002a",
     "000000000000000000000000000000000000000000000000000000000000000a",

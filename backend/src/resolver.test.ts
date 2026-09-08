@@ -4,6 +4,7 @@
 // Run: node --import tsx/esm --experimental-test-module-mocks --test src/resolver.test.ts
 import { describe, it, before, after, mock } from "node:test";
 import assert from "node:assert/strict";
+import type { ResolveCandidate } from "@zeekpay/shared";
 
 process.env.ZEEKPAY_CONTRACT_ID = "CTEST_CONTRACT";
 process.env.USDC_SAC_ID = "CTEST_USDC";
@@ -23,7 +24,8 @@ const X_USER = { id: "usr_x_muskaroo", stellarAddress: "GX0000000000000000000000
 const EMAIL_USER = { id: "usr_email_bob", stellarAddress: "GEMAIL00000000000000000000000000000000000000000000BOB", pubKey: "3".repeat(64) };
 const AMBIG_X_USER = { id: "usr_amb_x_alice", stellarAddress: "GAMBX0000000000000000000000000000000000000000000ALICE", pubKey: "4".repeat(64) };
 const AMBIG_GH_USER = { id: "usr_amb_gh_alice", stellarAddress: "GAMBGH000000000000000000000000000000000000000000ALICE", pubKey: "5".repeat(64) };
-const ALL_FAKE_USERS = [GH_USER, X_USER, EMAIL_USER, AMBIG_X_USER, AMBIG_GH_USER];
+const DUAL_USER = { id: "usr_dual_dana", stellarAddress: "GDUAL0000000000000000000000000000000000000000000DANA", pubKey: "6".repeat(64) };
+const ALL_FAKE_USERS = [GH_USER, X_USER, EMAIL_USER, AMBIG_X_USER, AMBIG_GH_USER, DUAL_USER];
 
 const FAKE_HANDLES = [
   { handle_normalized: "github:torvalds", user_id: GH_USER.id },
@@ -33,6 +35,12 @@ const FAKE_HANDLES = [
   // user and, separately, a github user.
   { handle_normalized: "@alice", user_id: AMBIG_X_USER.id },
   { handle_normalized: "github:alice", user_id: AMBIG_GH_USER.id },
+  // One person, one address, two rows: google and email canonicalize a bare
+  // email to the same string on purpose (see the parse() contract in
+  // shared/src/handles.ts), so a lookup for it returns two rows that must
+  // still resolve rather than read as an ambiguity.
+  { handle_normalized: "dana@example.com", user_id: DUAL_USER.id },
+  { handle_normalized: "dana@example.com", user_id: DUAL_USER.id },
 ];
 
 mock.module("./store.js", {
@@ -136,6 +144,9 @@ describe("GET /health", () => {
   });
 });
 
+// /resolve is rate-limited at 20 requests per minute per IP and the whole
+// suite shares one IP, so this block has a budget: keep the request count
+// comfortably under 20 or the last cases start coming back 429.
 describe("GET /resolve", () => {
   it("returns found:false for empty query", async () => {
     const r = await req("GET", "/resolve?q=");
@@ -181,9 +192,69 @@ describe("GET /resolve", () => {
   it("returns explicit ambiguity (HTTP 300) when a bare name matches two different people", async () => {
     const r = await req("GET", "/resolve?q=alice");
     assert.equal(r.status, 300);
-    const body = r.body as { found: boolean; candidates?: string[] };
+    const body = r.body as { found: boolean; candidates?: ResolveCandidate[] };
     assert.equal(body.found, false);
-    assert.deepEqual(new Set(body.candidates), new Set(["@alice", "github:alice"]));
+    // Label + canonical per candidate, so the client can prompt with "GitHub
+    // alice" rather than the raw namespaced string.
+    assert.deepEqual(
+      [...(body.candidates ?? [])].sort((a, b) => a.handle.localeCompare(b.handle)),
+      [
+        { type: "x", label: "X", handle: "@alice" },
+        { type: "github", label: "GitHub", handle: "github:alice" },
+      ]
+    );
+  });
+
+  it("resolves an unregistered handle to 404, not 200", async () => {
+    // The sender's "send an invite instead" branch keys off this status, so a
+    // not-found must not look like the 300 above, which also has found:false.
+    const r = await req("GET", "/resolve?q=" + encodeURIComponent("github:nobodyhere"));
+    assert.equal(r.status, 404);
+    assert.deepEqual(r.body, { found: false });
+  });
+
+  // Regression guard, not a test of the exact-canonical rule: "github:alice"
+  // parses to one candidate (parseX rejects it), so only one row comes back
+  // and the ambiguity branch is never entered. Verified by mutation: with the
+  // exact-match rule disabled this case still passes, and only the "@Alice"
+  // case below fails. That one is the rule's real guard, because "@Alice"
+  // parses to both "@alice" and "github:alice".
+  it("exact canonical wins: github:alice picks the github user, no 300", async () => {
+    const r = await req("GET", "/resolve?q=" + encodeURIComponent("github:alice"));
+    assert.equal(r.status, 200);
+    assert.equal(
+      (r.body as { stellarAddress: string }).stellarAddress,
+      AMBIG_GH_USER.stellarAddress
+    );
+  });
+
+  it("exact canonical wins case-insensitively: @Alice picks the X user", async () => {
+    // Canonical forms are lowercase, so "@Alice" is the exact canonical form
+    // just as much as "@alice" is. Comparing the raw query made this a 300.
+    const r = await req("GET", "/resolve?q=" + encodeURIComponent("@Alice"));
+    assert.equal(r.status, 200);
+    assert.equal(
+      (r.body as { stellarAddress: string }).stellarAddress,
+      AMBIG_X_USER.stellarAddress
+    );
+  });
+
+  it("resolves an uppercase email", async () => {
+    const r = await req("GET", "/resolve?q=" + encodeURIComponent("BOB@Example.COM"));
+    assert.equal(r.status, 200);
+    assert.equal(
+      (r.body as { stellarAddress: string }).stellarAddress,
+      EMAIL_USER.stellarAddress
+    );
+  });
+
+  it("resolves one user holding both a google and an email row on one address", async () => {
+    const r = await req("GET", "/resolve?q=" + encodeURIComponent("dana@example.com"));
+    assert.equal(r.status, 200);
+    assert.equal(
+      (r.body as { stellarAddress: string }).stellarAddress,
+      DUAL_USER.stellarAddress
+    );
   });
 });
 

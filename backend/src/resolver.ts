@@ -2,7 +2,7 @@ import { fileURLToPath } from "node:url";
 import express, { type Request, type Response, type NextFunction } from "express";
 import cors from "cors";
 import type { ResolveResult } from "@zeekpay/shared";
-import { enabledHandleTypes } from "@zeekpay/shared";
+import { enabledHandleTypes, handleTypeForCanonical } from "@zeekpay/shared";
 import * as store from "./store.js";
 import * as leaves from "./leaves.js";
 import * as tree from "./tree.js";
@@ -119,10 +119,21 @@ app.get("/health", (_req: Request, res: Response) => {
   });
 });
 
-app.get("/resolve", async (req: Request, res: Response) => {
+// Not-found is 404, not 200, so a client can tell "nobody owns this handle"
+// (offer to send an invite) apart from the 300 below ("several people might,
+// pick one"). Both bodies carry found:false, so a client that only reads the
+// body still behaves as it did.
+function resolveNotFound(res: Response): void {
+  res.status(404).json({ found: false } satisfies ResolveResult);
+}
+
+// Rate-limited per IP on the same terms as /auth/lookup: /resolve is public
+// and answers "does this handle exist", so it leaks account-existence in bulk
+// unless the window caps it.
+app.get("/resolve", rateLimit(20, 60 * 1000), async (req: Request, res: Response) => {
   const q = String(req.query.q ?? "").trim();
   if (!q || q.length > 256) {
-    return void res.json({ found: false } satisfies ResolveResult);
+    return void resolveNotFound(res);
   }
 
   // Every enabled handle type's parse() (shared/src/handles.ts) gets a shot at
@@ -137,7 +148,7 @@ app.get("/resolve", async (req: Request, res: Response) => {
     ),
   ];
   if (candidates.length === 0) {
-    return void res.json({ found: false } satisfies ResolveResult);
+    return void resolveNotFound(res);
   }
 
   const rows = await store.findManyByLookup(candidates);
@@ -151,24 +162,41 @@ app.get("/resolve", async (req: Request, res: Response) => {
     // and a github "github:alice"). If the caller already typed the exact
     // canonical form, that alone says which one they meant; otherwise this
     // is genuinely ambiguous and must not be resolved silently.
-    const exact = rows.find((r) => r.handle_normalized === q);
+    //
+    // Compare the case-folded query, not the raw one: canonical forms are
+    // lowercase, so "@Alice" and "GitHub:Alice" are the exact canonical form
+    // just as much as "@alice" and "github:alice" are, and used to fall
+    // through to the ambiguity prompt. Not each row's own parse() of the
+    // query: parseGithub("alice") returns "github:alice", which would make a
+    // bare name silently pick the GitHub row instead of asking.
+    const qCanonical = q.toLowerCase();
+    const exact = rows.find((r) => r.handle_normalized === qCanonical);
     if (exact) {
       userId = exact.user_id;
     } else {
       res.status(300).json({
         found: false,
-        candidates: rows.map((r) => r.handle_normalized),
+        // Label + canonical per row, so the client renders "GitHub alice"
+        // without re-deriving a handle type from a namespaced string.
+        candidates: rows.map((r) => {
+          const t = handleTypeForCanonical(r.handle_normalized);
+          return {
+            type: t?.id ?? "unknown",
+            label: t?.label ?? "Handle",
+            handle: r.handle_normalized,
+          };
+        }),
       } satisfies ResolveResult);
       return;
     }
   }
   if (!userId) {
-    return void res.json({ found: false } satisfies ResolveResult);
+    return void resolveNotFound(res);
   }
 
   const user = await store.getUser(userId);
   if (!user || !user.wallet) {
-    return void res.json({ found: false } satisfies ResolveResult);
+    return void resolveNotFound(res);
   }
   res.json({
     found: true,

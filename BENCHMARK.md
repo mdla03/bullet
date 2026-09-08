@@ -306,7 +306,7 @@ The circuit's 64-bit bound and the contract's `AMOUNT_MAX_EXCLUSIVE = 1i128 << 6
 
 ```
 cd circuits && npm install
-npm test                                    # 23 Jubjub/Pedersen cross-checks
+npm test                                    # 24 Jubjub/Pedersen cross-checks
 node scripts/jubjub-ref.mjs                 # generator + Montgomery constants, self-check
 node scripts/gen-test-proof.mjs             # the five vectors in 7.4
 cd ../contracts && cargo test -p verifier real_7in_claim_proof_verify_cost -- --nocapture

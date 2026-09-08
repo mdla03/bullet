@@ -220,6 +220,23 @@ export function asOAuthProviderId(
   return undefined;
 }
 
+/** The enabled handle type that owns a canonical form, i.e. the one whose
+ *  parse() returns that exact string back. Canonical forms are namespaced to
+ *  be globally unique (see the parse() contract above), so "github:alice"
+ *  finds GitHub and "@alice" finds X.
+ *
+ *  Google and email are the deliberate exception: both canonicalize a bare
+ *  email to itself, because they mean the same person at the same address.
+ *  Registry order decides, and either label is truthful for that row.
+ *
+ *  Used to label a stored handle when only the canonical string is at hand
+ *  (the resolver's ambiguity response), never to decide which row a typed
+ *  query meant: parse() would happily turn a bare "alice" into "github:alice",
+ *  which is exactly the ambiguity the caller is trying to report. */
+export function handleTypeForCanonical(canonical: string): HandleType | undefined {
+  return enabledHandleTypes().find((t) => t.parse(canonical) === canonical);
+}
+
 /** Handle type whose identityProviders includes a raw Supabase
  *  auth.identities.provider value, e.g. "twitter_v2" or "github". */
 export function handleTypeForIdentityProvider(provider: string): HandleType | undefined {

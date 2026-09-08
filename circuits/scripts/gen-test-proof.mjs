@@ -73,7 +73,7 @@ const helperSigIdx = symIndex(HELPER_SYM);
 
 // The Pedersen (Jubjub) commitment comes from the off-circuit reference in
 // jubjub-ref.mjs, which circuits/test/jubjub.test.mjs pins against the
-// in-circuit PedersenCommit gadget (23 tests). The helper circuit does not
+// in-circuit PedersenCommit gadget (24 tests). The helper circuit does not
 // compute it: see the note in src/compute_hashes.circom.
 function pedersen(amount, blinding) {
   const point = commit(amount, blinding);

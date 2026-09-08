@@ -29,6 +29,20 @@ update public.handles
 -- Mirrors the deployed function. The github branch and the delete-then-insert
 -- below are the changes.
 --
+-- REVISION 2026-09-09b IS NOT APPLIED. Re-apply this whole file. The
+-- newest-wins delete below gained `and user_id <> new.user_id` (a user linking
+-- a second identity that canonicalizes to the same handle was evicting their
+-- own row) and a `raise notice` naming both users on a real eviction. The
+-- live function predates both. Confirm with:
+--
+--   select position('user_id <> new.user_id' in p.prosrc) > 0 as has_self_guard
+--   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+--   where n.nspname = 'public' and p.proname = 'handle_new_identity';
+--
+-- The paragraph below records the state of the PREVIOUS revision, which is
+-- applied. Both statements are true at once: the github branch is live, the
+-- self-eviction guard is not.
+--
 -- Applied to the project on 2026-09-08. CONFIRMED APPLIED 2026-09-09 by
 -- introspecting the live catalog:
 --
@@ -71,6 +85,7 @@ set search_path to 'public'
 as $function$
 declare
   v_handle text;
+  v_evicted uuid;
 begin
   if new.provider in ('twitter', 'twitter_v2', 'x') then
     -- X OAuth 2.0 puts the handle in preferred_username; OAuth 1.0a in user_name.
@@ -110,9 +125,27 @@ begin
   -- in front of Supabase right now has just proven control of this one. Without
   -- this delete the unique index on handle_normalized would reject their row
   -- and leave the payments flowing to the previous owner.
+  --
+  -- Scoped to OTHER users. Without `user_id <> new.user_id` a user linking a
+  -- second identity that canonicalizes to the same handle evicts their own
+  -- row: google and email both canonicalize to the bare email address, so
+  -- adding an email identity to a Google account deleted the Google handle
+  -- row and left one row where there had been two. The (provider, subject)
+  -- clause alone does not catch that, because the two rows differ in both.
+  -- The insert below already upserts the caller's own row.
   delete from public.handles
    where handle_normalized = v_handle
-     and (provider, subject) <> (new.provider, new.provider_id);
+     and user_id <> new.user_id
+     and (provider, subject) <> (new.provider, new.provider_id)
+   returning user_id into v_evicted;
+
+  -- A handle changing hands silently is the kind of thing that only gets
+  -- noticed when someone's payments stop arriving. handle_normalized is
+  -- unique, so there is at most one evicted row to name.
+  if v_evicted is not null then
+    raise notice 'handle_new_identity: % moved from user % to user %',
+      v_handle, v_evicted, new.user_id;
+  end if;
 
   insert into public.handles (user_id, provider, subject, handle, handle_normalized)
   values (new.user_id, new.provider, new.provider_id, v_handle, v_handle)

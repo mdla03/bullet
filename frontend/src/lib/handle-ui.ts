@@ -1,6 +1,7 @@
 import type { SVGProps } from "react";
 import {
   enabledHandleTypes,
+  handleTypeForCanonical,
   handleTypeForIdentityProvider,
   type HandleProof,
   type HandleType,
@@ -50,6 +51,14 @@ export function oauthProviderForIdentity(provider: string): OAuthProviderId | nu
 export function displayHandle(provider: string, handle: string | null | undefined): string {
   if (!handle) return "";
   return handleTypeForIdentityProvider(provider)?.format(handle) ?? handle;
+}
+
+/** Same, for a canonical handle whose provider is not to hand: the send box
+ *  holds one after the sender picks a /resolve candidate. Anything the
+ *  registry does not own comes back unchanged, so a half-typed string in the
+ *  same field still renders as itself. */
+export function displayCanonical(canonical: string): string {
+  return handleTypeForCanonical(canonical)?.format(canonical) ?? canonical;
 }
 
 // Icons for the OAuth-backed handle types. Discord/telegram stay hidden
