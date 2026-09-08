@@ -290,9 +290,9 @@ Section 5's table is the Poseidon-shape record and does not apply to this circui
 
 | Case | Mechanism | Result |
 |---|---|---|
-| Valid proof (secret=12345, recipientDigest=42, amount=10, tokenId=0, blinding=999999) | `snarkjs groth16 verify` | **OK** — verifies true |
-| Boundary amount (`amount = 2^64 - 1`) | full witness → prove → verify | **OK** — valid proof, verifies true, so the bound is not off by one |
-| Out-of-range amount (`amount = 2^64`, with the Merkle root and Pedersen commitment recomputed for that amount so only the range is wrong) | `snarkjs wtns calculate` | **Assert Failed** in `Num2Bits` — no witness, so no proof can be constructed |
+| Valid proof (secret=12345, recipientDigest=42, amount=10, tokenId=0, blinding=999999) | `snarkjs groth16 verify` | **OK**, verifies true |
+| Boundary amount (`amount = 2^64 - 1`) | full witness → prove → verify | **OK**, valid proof, verifies true, so the bound is not off by one |
+| Out-of-range amount (`amount = 2^64`, with the Merkle root and Pedersen commitment recomputed for that amount so only the range is wrong) | `snarkjs wtns calculate` | **Assert Failed** in `Num2Bits`, no witness, so no proof can be constructed |
 | Tampered commitment x (`amountCommitmentX + 1`, public signal index 5) | same proof, mutated public signals, `snarkjs.groth16.verify()` | **Invalid proof**, verify returns false |
 | Tampered commitment y (`amountCommitmentY + 1`, public signal index 6) | same proof, mutated public signals, `snarkjs.groth16.verify()` | **Invalid proof**, verify returns false |
 

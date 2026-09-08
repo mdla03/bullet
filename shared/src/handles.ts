@@ -169,6 +169,34 @@ export const HANDLE_TYPES: readonly HandleType[] = [
   },
 ];
 
+/** Throws if two types in `types` share a raw identityProviders value.
+ *  handleTypeForIdentityProvider() below finds the first type whose
+ *  identityProviders includes a given raw provider id; if two types claimed
+ *  the same raw id, that lookup would silently route one type's identities
+ *  to the other type's row instead of raising anything. Exported (rather than
+ *  only run at module load) so a test can call it against a deliberately
+ *  overlapping registry and assert it throws. */
+export function assertDisjointIdentityProviders(
+  types: readonly { id: string; identityProviders: string[] }[]
+): void {
+  const owner = new Map<string, string>();
+  for (const t of types) {
+    for (const p of t.identityProviders) {
+      const existing = owner.get(p);
+      if (existing !== undefined) {
+        throw new Error(
+          `handle registry: identityProviders value "${p}" is claimed by both ` +
+            `"${existing}" and "${t.id}"; identityProviders must be pairwise ` +
+            `disjoint across handle types`
+        );
+      }
+      owner.set(p, t.id);
+    }
+  }
+}
+
+assertDisjointIdentityProviders(HANDLE_TYPES);
+
 export function getHandleType(id: string): HandleType | undefined {
   return HANDLE_TYPES.find((h) => h.id === id);
 }

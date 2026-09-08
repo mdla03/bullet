@@ -99,6 +99,13 @@ template Montgomery2Edwards() {
 
  */
 
+// Precondition: in1 and in2 must be non-identity points with distinct x
+// coordinates. The lamda division is unconstrained division by
+// (in2[0] - in1[0]); if that divisor is zero (equal x, x = 0, or an
+// identity input), the constraint degenerates to 0 === 0 and lamda is left
+// unconstrained. EscalarMulFix satisfies this precondition via its
+// accumulator separation (segments never add a point to itself or to the
+// identity), a property inherited from circomlib.
 template MontgomeryAdd() {
     signal input in1[2];
     signal input in2[2];
@@ -132,6 +139,12 @@ template MontgomeryAdd() {
     y3 = lamda * ( x1 - x3 ) - y1
 
  */
+// Precondition: in must be a non-identity point with a non-zero x
+// coordinate. The lamda division is unconstrained division by (2*B*in[1]);
+// if in[1] is zero (identity or a 2-torsion point), the constraint
+// degenerates to 0 === 0 and lamda is left unconstrained. EscalarMulFix
+// satisfies this precondition via its accumulator separation, a property
+// inherited from circomlib.
 template MontgomeryDouble() {
     signal input in[2];
     signal output out[2];

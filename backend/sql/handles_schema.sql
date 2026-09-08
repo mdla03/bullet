@@ -23,7 +23,7 @@
 -- `(provider, subject)` constraint that handles_github.sql's ON CONFLICT
 -- depends on.
 --
--- ⚠ RECONSTRUCTED, NOT DUMPED. Written 2026-09-09 from what is actually
+-- NOTE: RECONSTRUCTED, NOT DUMPED. Written 2026-09-09 from what is actually
 -- verifiable: the live column list (information_schema, 7 columns, types as
 -- below), the ON CONFLICT target in handles_github.sql, and the columns the
 -- backend selects (store.ts, invite.ts). Defaults, nullability, foreign keys,
@@ -107,6 +107,13 @@ $$;
 -- lookups. Kept so this file alone still leaves the resolver's hot path indexed.
 create index if not exists handles_handle_normalized_idx on public.handles (handle_normalized);
 create index if not exists handles_user_id_idx           on public.handles (user_id);
+
+-- The live project's actual unique index on handle_normalized is named
+-- handles_handle_normalized_key (confirmed by catalog on 2026-09-09), not the
+-- plain handles_handle_normalized_idx above. It is created by
+-- handles_unique.sql (CONCURRENTLY, so it must run as its own statement, not
+-- from this file); this comment records its existence for anyone reading this
+-- file as the schema reference.
 
 -- Same model as notes/merkle_store: writes are service-role only. A browser
 -- that could insert here could publish a key against someone else's handle and

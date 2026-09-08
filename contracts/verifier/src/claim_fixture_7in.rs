@@ -1,10 +1,23 @@
 // @generated: real Groth16/BLS12-381 vk+proof for the 7-public-input
 // Pedersen-shape claim circuit (circuits/build/claim_vk.json /
 // claim_proof.json / claim_public.json at HEAD), encoded in Soroban
-// bls12_381 byte layout via a copy of circuits/scripts/convert-to-soroban.mjs
-// conversion logic. Public, throwaway-setup data (safe to commit). Used only
-// by the verifier-benchmark crate to measure real (not synthetic) on-chain
-// verify cost for this proof shape. Not the deployed contract fixture.
+// bls12_381 byte layout. Public, throwaway-setup data (safe to commit). Used
+// only by the verifier-benchmark crate to measure real (not synthetic)
+// on-chain verify cost for this proof shape. Not the deployed contract
+// fixture.
+//
+// Produced with the shared conversion logic in
+// circuits/scripts/convert-to-soroban.mjs, via its --out option, which
+// writes only a JSON conversion and never touches a contract fixture:
+//   node circuits/scripts/convert-to-soroban.mjs --out /tmp/claim_soroban.json
+// Then ALPHA1/BETA2/GAMMA2/DELTA2/IC (the verification key) are copied in
+// from that JSON as-is; those are deterministic for a given claim.zkey.
+// PROOF_A/PROOF_B/PROOF_C and PUBS are NOT regenerated this way: a Groth16
+// proof includes randomized blinding factors, so re-running the prover
+// (even for the same input) never reproduces the same proof bytes, and PUBS
+// changes if the test input (e.g. the Merkle path) changes. Re-pin those
+// four constants only deliberately, by hand, from a specific
+// claim_proof.json / claim_public.json you intend to freeze.
 
 pub const ALPHA1: &str = "184000ca3138130bd981d51472fe2840d4da7003ff1e7041ff556a0bc16dc2d4fe781bc0776b71a3b6009f11b1013b6d08ab5fca45d24ac373a00a7fc619c8ad1ab13fd97b8cedc279050f0c88c2a3bfb437cf9136054f211c9180c78cb05de1";
 pub const BETA2: &str = "0a51718057b484f9b6d19f37db2f88a0a121cfd9eaac34b0aa2baee89e49253f0418bfa8593eb38166df6c6b0b0ad1070183c75eea779ffc90b1ca30ede489f7e1d969145390ccd9c526daa9c921b5ca06c323ec3ffe47fa09fd17289b3794670053b390bc6f9d58bb5776ce21f4b47e26e8da909fc08749b639dec2b7977e61b644cc06b2dcd88f5923313a0ff5c1910b228b07e78c9ada359ce1c77b5ecce7ea7c25e6cdb7a422d726ba6ae6480f7c0d4e77a221326b279f318f6b12e8c429";

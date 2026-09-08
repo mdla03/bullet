@@ -34,5 +34,8 @@
 -- handles_schema.sql) becomes redundant once this exists. Left in place: it is
 -- cheap, and dropping it while this index is still being built would leave the
 -- resolver's hot path without an index.
+-- NOTE: the live project already has this exact index, under this exact name
+-- (confirmed by catalog on 2026-09-09). Running this file there is a no-op:
+-- `if not exists` skips it.
 create unique index concurrently if not exists handles_handle_normalized_key
   on public.handles (handle_normalized);

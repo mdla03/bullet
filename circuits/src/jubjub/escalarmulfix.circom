@@ -248,6 +248,9 @@ template EscalarMulFix(n, BASE) {
 
     var nsegments = (n-1)\246 +1;       // 249 probably would work. But I'm not sure and for security I keep 246
     var nlastsegment = n - (nsegments-1)*249;
+    // nsegments is sized off a stride of 246 above, but the loop below indexes
+    // segments with stride 249, so nlastsegment must stay positive.
+    assert(nlastsegment > 0);
 
     component segments[nsegments];
 

@@ -8,16 +8,17 @@ import {
   CopyIcon,
   ExternalLinkIcon,
   LoaderIcon,
-  MailIcon,
   TrashIcon,
   WalletIcon,
 } from "@/components/icons";
 import { createClient } from "@/lib/supabase/client";
 import { getMe, type MeResponse } from "@/lib/api";
 import { Skeleton } from "@/components/Skeleton";
+import { enabledHandleTypes } from "@zeekpay/shared";
 import {
   OAUTH_ICON,
   displayHandle,
+  isOAuthProof,
   oauthHandleTypes,
   providerIcon,
   providerRank,
@@ -25,6 +26,12 @@ import {
 
 // "Connect X" buttons: every enabled handle type proven via Supabase OAuth.
 const OAUTH_HANDLE_TYPES = oauthHandleTypes();
+
+// Enabled handle types with no connect flow here at all: neither OAuth nor
+// the hand-built add-email form.
+const UNSUPPORTED_TYPES = enabledHandleTypes().filter(
+  (h) => !isOAuthProof(h.proof) && h.proof.type !== "email-otp"
+);
 
 export function AccountView() {
   const supabase = createClient();
@@ -138,14 +145,22 @@ export function AccountView() {
   const linkedWallet = me.wallet ?? null;
   const handles = me.identities ?? [];
   const linkedProviders = new Set(handles.map((h) => h.provider));
+  // Types without a configured icon are skipped rather than shown with a
+  // wrong (mail) icon; UNSUPPORTED_TYPES below covers enabled types missing
+  // more than just an icon.
   const missingOAuth = OAUTH_HANDLE_TYPES.filter(
     (h) => !h.identityProviders.some((p) => linkedProviders.has(p))
-  ).map((h) => ({
-    key: h.proof.provider,
-    label: h.label,
-    Icon: OAUTH_ICON[h.id] ?? MailIcon,
-  }));
+  ).flatMap((h) => {
+    const Icon = OAUTH_ICON[h.id];
+    return Icon ? [{ key: h.proof.provider, label: h.label, Icon }] : [];
+  });
   const hasEmail = linkedProviders.has("email");
+  // Enabled handle types this screen has no connect flow for at all: neither
+  // OAuth (missingOAuth above) nor the hand-built add-email form. Shown as an
+  // explicit "not supported yet" note instead of silently vanishing.
+  const unsupportedTypes = UNSUPPORTED_TYPES.filter(
+    (h) => !h.identityProviders.some((p) => linkedProviders.has(p))
+  );
 
   return (
     <div className="space-y-4">
@@ -208,7 +223,7 @@ export function AccountView() {
           })}
         </div>
 
-        {(missingOAuth.length > 0 || !hasEmail) && (
+        {(missingOAuth.length > 0 || !hasEmail || unsupportedTypes.length > 0) && (
           <div className="space-y-2 border-t border-fog pt-4">
             {missingOAuth.map((p) => (
               <button
@@ -224,6 +239,14 @@ export function AccountView() {
                 )}
                 Connect {p.label}
               </button>
+            ))}
+            {unsupportedTypes.map((h) => (
+              <div
+                key={h.id}
+                className="flex w-full items-center justify-center rounded-full border border-fog px-4 py-2.5 text-sm font-medium text-graphite"
+              >
+                {h.label} is not supported yet
+              </div>
             ))}
             {!hasEmail && (
               <div className="space-y-2">

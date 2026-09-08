@@ -34,8 +34,12 @@ const RECIPIENT_DIGEST = "42";  // small test value (< BLS12-381 r)
 const AMOUNT = "10";            // raw stroop value for test
 const TOKEN_ID = "0";           // 0 = USDC
 const BLINDING = "999999";      // amountCommitment blinding factor (test value)
-const PATH_ELEMENTS = Array(20).fill("0");  // all siblings are zero
-const PATH_INDICES = Array(20).fill(0);     // leaf is at index 0 (always left)
+// Distinct non-zero siblings, and indices that alternate left/right, so the
+// Merkle selector in claim.circom (and its mirror in compute_hashes.circom)
+// is exercised both ways rather than only ever taking the "current is left"
+// branch.
+const PATH_ELEMENTS = Array.from({length: 20}, (_, i) => String(1000 + i));
+const PATH_INDICES = Array.from({length: 20}, (_, i) => i % 2);
 
 // ── step 1: compile the helper circuit (wasm only, no r1cs/zkey needed) ──────
 // Recompiled whenever the source is newer than the wasm, not just when the wasm
@@ -86,6 +90,8 @@ function claimInputFor(amount, blinding) {
     recipientDigest: RECIPIENT_DIGEST,
     amount,
     tokenId: TOKEN_ID,
+    pathElements: PATH_ELEMENTS,
+    pathIndices: PATH_INDICES,
   }));
   execSync(`${SNJ} wtns calculate ${HELPER_WASM} ${helperInputPath} ${helperWtnsPath}`, {stdio: "pipe"});
   execSync(`${SNJ} wtns export json ${helperWtnsPath} ${helperWtnsJsonPath}`, {stdio: "pipe"});
@@ -97,17 +103,6 @@ function claimInputFor(amount, blinding) {
     return witness[idx];
   };
 
-  // For leaf at index 0 (left child all the way), pathElements[i] = zeroHashes[i]:
-  //   pathElements[0] = zeroHashes[0] = 0            (empty leaf)
-  //   pathElements[1] = zeroHashes[1] = Poseidon([0,0])
-  //   pathElements[i] = zeroHashes[i]  for i=0..19
-  //
-  // Circom optimizes away the constant signal zeroHashes[0]=0, so the sym file
-  // maps "main.zeroHashes[i]" to the witness slot for zeroHashes[i+1] (one-off).
-  // Compensate: pathElements[0]="0" (hardcoded), pathElements[i+1]=sym[i] for i=0..18.
-  const pathElements = ["0"];
-  for (let i = 0; i < 19; i++) pathElements.push(sig(`main.zeroHashes[${i}]`));
-
   return {
     root: sig("main.root"),
     nullifier: sig("main.nullifier"),
@@ -116,7 +111,7 @@ function claimInputFor(amount, blinding) {
     tokenId: TOKEN_ID,
     ...pedersen(amount, blinding),
     secret: SECRET,
-    pathElements,
+    pathElements: PATH_ELEMENTS,
     pathIndices: PATH_INDICES,
     blinding,
   };
@@ -171,6 +166,29 @@ const tamperedYPath = path.join(BUILD, "claim_public_tampered_commitment_cy.json
 
 const AMOUNT_MAX = (1n << 64n) - 1n;  // AMOUNT_BITS = 64 in claim.circom
 
+// The source line each side of the expected out-of-range call path sits on,
+// read out of the circuit rather than hardcoded (same technique as
+// test/jubjub.test.mjs's circuitLineOf/failsAt). `amount` is decomposed by
+// Num2Bits at two different call sites (claim.circom's own amountBits, and
+// PedersenCommit's internal amountBits); witness calculation stops at the
+// first failure, and PedersenCommit's runs first, so pinning to it (and not
+// just any Num2Bits failure) also rules out PedersenCommit's unrelated
+// Num2Bits(251) over `blinding`.
+function circuitLineOf(filePath, needle) {
+  const lines = fs.readFileSync(filePath, "utf8").split(/\r?\n/);
+  const i = lines.findIndex((l) => l.includes(needle));
+  if (i < 0) throw new Error(`${filePath} no longer contains "${needle}"`);
+  return i + 1;
+}
+const PEDERSEN_AMOUNT_LINE = circuitLineOf(
+  path.join(HERE, "../src/jubjub/pedersen_commit.circom"),
+  "amountBits.in <== amount;",
+);
+const CLAIM_COMMITTER_LINE = circuitLineOf(
+  path.join(HERE, "../src/claim.circom"),
+  "component amountCommitter = PedersenCommit();",
+);
+
 // (a) boundary: amount = 2^64 - 1 must still prove and verify, so the bound is
 //     not off by one.
 console.log("\n[vector] boundary amount 2^64-1: proving...");
@@ -192,11 +210,16 @@ let outOfRangeRejected = false;
 try {
   execSync(`${SNJ} wtns calculate ${CLAIM_WASM} ${outOfRangePath} ${path.join(BUILD, "_outofrange.wtns")}`, {stdio: "pipe"});
 } catch (e) {
-  // Pin the failure site: it has to be the Num2Bits range decomposition, not
-  // some unrelated unsatisfied constraint that would pass for the wrong reason.
+  // Pin the failure to the exact call path (Claim's amountCommitter ->
+  // PedersenCommit's amountBits -> Num2Bits), not just any Num2Bits failure
+  // anywhere in the circuit.
   const out = `${e.stdout ?? ""}${e.stderr ?? ""}`;
-  if (!/Num2Bits/.test(out)) {
-    throw new Error(`out-of-range vector failed, but not in Num2Bits:\n${out}`);
+  const pinned =
+    /template Num2Bits_\d+ line:/.test(out) &&
+    new RegExp(`template PedersenCommit_\\d+ line: ${PEDERSEN_AMOUNT_LINE}\\b`).test(out) &&
+    new RegExp(`template Claim_\\d+ line: ${CLAIM_COMMITTER_LINE}\\b`).test(out);
+  if (!pinned) {
+    throw new Error(`out-of-range vector failed, but not at the expected amount Num2Bits site:\n${out}`);
   }
   outOfRangeRejected = true;
 }

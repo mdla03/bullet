@@ -7,7 +7,6 @@ import type { SVGProps } from "react";
 import {
   CheckIcon,
   LoaderIcon,
-  MailIcon,
   WalletIcon,
 } from "@/components/icons";
 import { createClient } from "@/lib/supabase/client";
@@ -30,16 +29,27 @@ import {
   signatureToHex,
 } from "@/lib/register";
 
-// Sign-in buttons: every enabled handle type proven via Supabase OAuth.
+// Sign-in buttons: every enabled handle type proven via Supabase OAuth, that
+// also has an icon configured. A type with no icon in OAUTH_ICON is skipped
+// here rather than shown with a wrong (mail) icon; see UNSUPPORTED_TYPES
+// below for enabled types that are missing more than just an icon.
 const PROVIDERS: {
   key: OAuthProviderId;
   label: string;
   icon: (p: SVGProps<SVGSVGElement>) => React.ReactElement;
-}[] = oauthHandleTypes().map((h) => ({
-  key: h.proof.provider,
-  label: h.label,
-  icon: OAUTH_ICON[h.id] ?? MailIcon,
-}));
+}[] = oauthHandleTypes().flatMap((h) => {
+  const icon = OAUTH_ICON[h.id];
+  return icon ? [{ key: h.proof.provider, label: h.label, icon }] : [];
+});
+
+// Enabled handle types this screen has no sign-in flow for at all: neither
+// OAuth (PROVIDERS above) nor the hand-built email-OTP form. Shown as an
+// explicit "not supported yet" note instead of silently vanishing, so
+// flipping a type's `enabled` flag on before its UI flow is built is
+// noticeable rather than a quiet no-op.
+const UNSUPPORTED_TYPES = enabledHandleTypes().filter(
+  (h) => !isOAuthProof(h.proof) && h.proof.type !== "email-otp"
+);
 
 // Raw auth.identities.provider values that mean "this account signs in through
 // OAuth", taken from the registry rather than a hardcoded list, so a type
@@ -414,6 +424,14 @@ export function RegisterFlow({
               )}
               <span>Continue with {p.label}</span>
             </button>
+          ))}
+          {UNSUPPORTED_TYPES.map((h) => (
+            <div
+              key={h.id}
+              className="flex w-full items-center justify-center rounded-full border border-fog px-5 py-3 font-medium text-graphite"
+            >
+              {h.label} sign-in is not supported yet.
+            </div>
           ))}
         </div>
       )}

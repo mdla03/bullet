@@ -24,7 +24,7 @@ mod test;
 #[cfg(all(test, feature = "real-proof"))]
 mod claim_fixture_7in;
 
-// Minimal bump allocator — BENCHMARK ONLY, to let ark-ff link in the wasm build
+// Minimal bump allocator, BENCHMARK ONLY, to let ark-ff link in the wasm build
 // for the Poseidon-Merkle deposit-cost measurement. Never frees; not for product.
 #[cfg(all(target_arch = "wasm32", not(test)))]
 mod bench_alloc {
@@ -129,7 +129,7 @@ impl BenchContract {
 
     /// Deposit-cost benchmark for Option A (on-chain Merkle insert).
     /// Runs a faithful Poseidon(2) arithmetic workload (t=3, 8 full + 57 partial
-    /// rounds, x^5 S-box, 3x3 MDS) over BLS12-381 Fr in PURE WASM (no host fn —
+    /// rounds, x^5 S-box, 3x3 MDS) over BLS12-381 Fr in PURE WASM (no host fn,
     /// Soroban has no Poseidon host fn) for `levels` tree levels. Returns a
     /// value derived from the result to defeat dead-code elimination. Measure
     /// the real instruction cost by deploying + invoking on testnet.

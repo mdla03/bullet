@@ -31,7 +31,18 @@ const VK_PATH = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
   "../public/circuits/bench/claim_vk.json"
 );
-const nPublic = JSON.parse(fs.readFileSync(VK_PATH, "utf8")).nPublic;
+let nPublic;
+try {
+  nPublic = JSON.parse(fs.readFileSync(VK_PATH, "utf8")).nPublic;
+} catch (e) {
+  if (e.code !== "ENOENT") throw e;
+  console.error(`missing ${VK_PATH}. Stage the bench artifacts first:\n`);
+  console.error("  mkdir -p frontend/public/circuits/bench");
+  console.error("  cp circuits/build/claim_js/claim.wasm circuits/build/claim.zkey \\");
+  console.error("     circuits/build/claim_input.json circuits/build/claim_vk.json \\");
+  console.error("     frontend/public/circuits/bench/");
+  process.exit(1);
+}
 
 // Proving holds the main thread for seconds at a time; the default 30s
 // protocol timeout trips well before a 5-run sweep finishes.

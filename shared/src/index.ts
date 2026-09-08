@@ -1,6 +1,9 @@
 // Shared types between @zeekpay/backend and @zeekpay/frontend.
 
-export * from "./handles.js";
+// Self-reference through the package's own name (not a relative import), so
+// this goes through the `exports` map in package.json under both bundlers:
+// see the note there and in frontend/next.config.ts's webpack config.
+export * from "@zeekpay/shared/handles.js";
 
 export interface ResolveResult {
   found: boolean;

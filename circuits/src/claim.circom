@@ -1,6 +1,6 @@
 pragma circom 2.0.0;
 
-// ZeekPay claim circuit — Groth16/BLS12-381, Poseidon-Merkle membership + nullifier.
+// ZeekPay claim circuit, Groth16/BLS12-381, Poseidon-Merkle membership + nullifier.
 //
 // Proof statement:
 //   prover knows `secret` such that:
@@ -12,7 +12,7 @@ pragma circom 2.0.0;
 //                       = amount*G + blinding*H on Jubjub (Pedersen commitment)
 //     amount            < 2^64 (range proof, see below)
 //
-// Public inputs (LOCKED — must match derive_public_inputs in contracts/zeekpay/src/lib.rs):
+// Public inputs (LOCKED, must match derive_public_inputs in contracts/zeekpay/src/lib.rs):
 //   [root, nullifier, recipientDigest, amount, tokenId,
 //    amountCommitmentX, amountCommitmentY]
 //   `amount` is the raw stroop value (7 decimal places; e.g. 100000000 for 10 USDC).
@@ -20,8 +20,10 @@ pragma circom 2.0.0;
 //   deposit of token A cannot be claimed as token B.
 //   `amountCommitmentX` / `amountCommitmentY` are the two affine coordinates of
 //   the Pedersen commitment point, appended after the five pre-existing public
-//   signals, never inserted between them (public-input order is locked; snarkjs
-//   assigns indices by declaration order in `component main {public [...]}`).
+//   signals, never inserted between them (public-input order is locked; indices
+//   follow the order the public signals are declared in the template, not the
+//   order they are listed in `component main {public [...]}`, which today
+//   coincides with declaration order).
 //
 // Security: recipientDigest, amount, and tokenId are inside the commitment preimage
 // so that a front-runner cannot substitute their own recipient, amount, or token
@@ -33,7 +35,7 @@ pragma circom 2.0.0;
 // this is not canonical Poseidon over the BLS12-381 scalar field. Acceptable for
 // the hackathon demo; replace with a native BLS12-381 Poseidon for production.
 //
-// ── amountCommitment / range proof — honest scope note ──────────────────────
+// ── amountCommitment / range proof, honest scope note ──────────────────────
 // SPEC.md designates a fully-encrypted, Pedersen-commitment amount scheme as P3
 // ("the real destination for amount privacy"), out of scope for v1 because a
 // flawed range proof lets someone withdraw more than they deposited, and v1's
@@ -99,7 +101,7 @@ template Claim(DEPTH, AMOUNT_BITS) {
     signal input secret;
     signal input pathElements[DEPTH];  // Merkle sibling hashes
     signal input pathIndices[DEPTH];   // 0 = current node is left, 1 = right
-    signal input blinding;             // NEW — randomness for amountCommitment
+    signal input blinding;             // NEW, randomness for amountCommitment
 
     // ── nullifier derivation ──────────────────────────────────────────────────
     component nullifierHasher = Poseidon(1);

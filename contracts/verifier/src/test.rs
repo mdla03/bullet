@@ -16,8 +16,8 @@ const TX_CPU_LIMIT: u64 = 100_000_000;
 
 #[cfg(feature = "real-proof")]
 fn hex_to<const N: usize>(env: &Env, h: &str) -> BytesN<N> {
-    let v = hex::decode(h).unwrap();
-    let a: [u8; N] = v.try_into().unwrap();
+    let v = hex::decode(h).expect("bad fixture hex");
+    let a: [u8; N] = v.try_into().expect("bad fixture hex");
     BytesN::from_array(env, &a)
 }
 
@@ -132,8 +132,16 @@ fn real_7in_claim_proof_verify_cost() {
     let cpu = env.cost_estimate().budget().cpu_instruction_cost();
     let mem = env.cost_estimate().budget().memory_bytes_cost();
 
-    const SIX_INPUT_CPU: u64 = 77_665_920;
-    let delta = cpu as i64 - SIX_INPUT_CPU as i64;
+    // From cost_scaling_table's "4 pairings + MSM-7" row (6 public inputs):
+    // the synthetic bench_verify, which builds its test points with four
+    // hash-to-curve calls that a real verify never performs. A real verify
+    // decodes points from bytes instead, so this figure overstates real
+    // verify cost by roughly 25M instructions (see BENCHMARK.md section 7.3).
+    // It is not a real 6-input proof measurement, so the delta below is a
+    // synthetic-vs-real comparison, not a same-methodology cost delta from
+    // adding a public input.
+    const SIX_INPUT_SYNTHETIC_CPU: u64 = 77_665_920;
+    let delta = cpu as i64 - SIX_INPUT_SYNTHETIC_CPU as i64;
 
     std::println!("=== Real 7-input claim proof verify (measured) ===");
     std::println!("verify result        : {}", ok);
@@ -148,8 +156,11 @@ fn real_7in_claim_proof_verify_cost() {
         "headroom             : {:.2}%",
         100.0 - (cpu as f64 / TX_CPU_LIMIT as f64) * 100.0
     );
-    std::println!("6-input measured cpu : {}", SIX_INPUT_CPU);
-    std::println!("delta vs 6-input     : {:+}", delta);
+    std::println!("6-input synthetic cpu (hash-to-curve points, not a real proof) : {}", SIX_INPUT_SYNTHETIC_CPU);
+    std::println!(
+        "delta vs 6-input synthetic (not a real cost drop from adding an input; the synthetic figure overstates cost) : {:+}",
+        delta
+    );
 
     assert!(ok, "real 7-input claim proof must verify true on-chain");
     assert!(

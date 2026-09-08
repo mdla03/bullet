@@ -2,7 +2,12 @@
 // Run: node --import tsx/esm --test src/registry.test.ts
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { HANDLE_TYPES, enabledHandleTypes, getHandleType } from "@zeekpay/shared";
+import {
+  HANDLE_TYPES,
+  enabledHandleTypes,
+  getHandleType,
+  assertDisjointIdentityProviders,
+} from "@zeekpay/shared";
 
 // One representative raw input per enabled type, chosen to exercise the "@"
 // stripping / casing normalization each parser does.
@@ -90,6 +95,23 @@ describe("handle registry: canonical forms are globally unique", () => {
     assert.equal(
       getHandleType("google")!.parse(addr),
       getHandleType("email")!.parse(addr)
+    );
+  });
+});
+
+describe("handle registry: identityProviders are pairwise disjoint", () => {
+  it("the real registry does not throw", () => {
+    assert.doesNotThrow(() => assertDisjointIdentityProviders(HANDLE_TYPES));
+  });
+
+  it("throws when two types claim the same raw provider id", () => {
+    const overlapping = [
+      { id: "a", identityProviders: ["shared_provider"] },
+      { id: "b", identityProviders: ["shared_provider"] },
+    ];
+    assert.throws(
+      () => assertDisjointIdentityProviders(overlapping),
+      /identityProviders value "shared_provider" is claimed by both "a" and "b"/
     );
   });
 });

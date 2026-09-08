@@ -182,6 +182,31 @@ test('EscalarMulFix: random 64-bit scalar 1', () => checkMulFix(randomScalar64()
 test('EscalarMulFix: random 64-bit scalar 2', () => checkMulFix(randomScalar64()));
 test('EscalarMulFix: random 64-bit scalar 3', () => checkMulFix(randomScalar64()));
 
+test('EscalarMulFix: fixed-base multiply by random scalars never hits the identity', async () => {
+  // Guards the unconstrained-division degeneracy in MontgomeryAdd/
+  // MontgomeryDouble (see circuits/src/jubjub/montgomery.circom): if a
+  // segment adder inside EscalarMulFix ever added a point to itself, to the
+  // identity, or hit a zero divisor, both the reference and the circuit
+  // output would collapse to the identity here. For nonzero seeded random
+  // scalars neither should, so this surfaces a degenerate path instead of
+  // passing silently.
+  const idx = symIndexFor('jubjub_mulfix_test');
+  for (let i = 0; i < 8; i++) {
+    const k = randomScalar64();
+    const w = await calculateWitness('jubjub_mulfix_test', { scalar: k.toString() });
+    const expected = mul(k, G);
+    const where = `k=${k} (seed ${SEED})`;
+    assert.notStrictEqual(expected.x, 0n, `reference itself hit the identity for ${where}`);
+    assert.strictEqual(w[idx['main.out[0]']], expected.x.toString(), `x mismatch for ${where}`);
+    assert.strictEqual(w[idx['main.out[1]']], expected.y.toString(), `y mismatch for ${where}`);
+    assert.notDeepStrictEqual(
+      [w[idx['main.out[0]']], w[idx['main.out[1]']]],
+      ['0', '1'],
+      `EscalarMulFix output was the identity for ${where}`
+    );
+  }
+});
+
 // ── PedersenCommit ───────────────────────────────────────────────────────────
 async function checkCommit(amount, blinding) {
   const idx = symIndexFor('pedersen_commit_test');

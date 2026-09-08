@@ -7,7 +7,7 @@
 #   circuits/build/groth16_soroban.json
 #   contracts/zeekpay/src/groth16_fixture.rs
 #
-# Outputs (gitignored — do NOT commit):
+# Outputs (gitignored, do NOT commit):
 #   circuits/build/claim.r1cs   *.sym   *.zkey   *.wtns   pot15*.ptau
 #   circuits/build/claim_js/
 set -euo pipefail
