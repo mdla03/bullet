@@ -21,9 +21,13 @@
 // Changes from the original:
 //   - a, d replaced with Jubjub's curve constants (see circuits/scripts/jubjub-ref.mjs).
 //   - The A = 2*(a+d)/(a-d) and B = 4/(a-d) derivations are left as compile-time
-//     expressions over a/d, unchanged; on Jubjub they evaluate to different
-//     values than Baby Jubjub's A=168698, B=1 (Jubjub's own A=40962, B=1, per
-//     jubjub-ref.mjs's montgomeryA/montgomeryB, cross-checked there for A).
+//     expressions over a/d, unchanged; on Jubjub they evaluate to A=40962 and
+//     B=-40964 mod r, against Baby Jubjub's A=168698, B=1. Both are asserted in
+//     jubjub-ref.mjs as montgomeryA/montgomeryB.
+//     Do NOT hardcode B=1 here. The Zcash spec's B=1 is for a differently-scaled
+//     Montgomery model; the map Edwards2Montgomery below implements pins
+//     B = 4/(a-d). Substituting 1 fails all 7 EscalarMulFix cases in
+//     circuits/test/jubjub.test.mjs (verified by mutation).
 // Only valid when compiled with `circom -p bls12381`.
 
 /*

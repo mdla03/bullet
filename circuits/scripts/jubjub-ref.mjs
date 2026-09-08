@@ -8,10 +8,11 @@
 //   the real curve object + group-hash helpers from misc.js. It ships a ready
 //   made `jubjub` twistedEdwards() curve and `findGroupHash`, so we used that
 //   directly instead of building the curve by hand with twistedEdwards().
-// - Montgomery A/B: hardcoded as the known spec constants (40962, 1). The
-//   derivation formula A = 2(a+d)/(a-d), B = 4/(a-d) mod r is cross-checked
-//   for A only below (A is invariant under Jubjub's twist scaling; B is not
-//   see comment at the self-check for why).
+// - Montgomery A/B: derived from (a, d) with A = 2(a+d)/(a-d), B = 4/(a-d)
+//   mod r, the exact pair for the birational map circomlib's
+//   montgomery.circom implements. A is cross-checked below against the spec's
+//   40962. B is NOT 1: see the montgomeryB comment for why the spec's B and
+//   this B are different numbers for different maps.
 // - H (second generator): noble exposes findGroupHash, so we derive H via
 //   Zcash's own group hash, domain "Zcash_cv", message "r" (this is Sapling's
 //   *value-commitment randomness* base, repurposed here as an independent
@@ -30,8 +31,18 @@ export const a = jubjub.CURVE.a;
 export const d = jubjub.CURVE.d;
 export const subgroupOrder = jubjub.CURVE.n;
 export const cofactor = jubjub.CURVE.h; // 8n
-export const montgomeryA = 40962n; // known Zcash spec constant (cross-checked below)
-export const montgomeryB = 1n;
+const modr = (x) => { x %= Fr; return x < 0n ? x + Fr : x; };
+
+// Derived, never pasted. circomlib's montgomery.circom computes A and B from
+// (a, d) at compile time with exactly these formulas, so these are the values
+// the circuit actually runs on.
+export const montgomeryA = modr(2n * modr(a + d) * invert(modr(a - d), Fr)); // 40962
+// DO NOT replace this with the Zcash spec's B = 1. The spec states B for a
+// differently-scaled Montgomery model of Jubjub; the map circomlib implements
+// (u = (1+y)/(1-y), v = u/x) pins B = 4/(a-d) = -40964 mod r. Hardcoding 1
+// makes EscalarMulFix silently compute the wrong point: proved by mutation,
+// it fails all 7 EscalarMulFix cases in circuits/test/jubjub.test.mjs.
+export const montgomeryB = modr(4n * invert(modr(a - d), Fr)); // -40964 mod r
 
 export const G = { x: jubjub.CURVE.Gx, y: jubjub.CURVE.Gy };
 
@@ -59,8 +70,6 @@ export function mul(k, P) {
   }
   return fromExt(acc);
 }
-
-const modr = (x) => { x %= Fr; return x < 0n ? x + Fr : x; };
 
 export function isOnCurve(P) {
   const x2 = modr(P.x * P.x), y2 = modr(P.y * P.y);
@@ -123,19 +132,12 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const zero = commit(0, 0);
   assert(zero.x === 0n && zero.y === 1n, 'commit(0,0) != identity');
 
-  // Modular inverse (Fr is prime) to cross-check A = 2(a+d)/(a-d).
-  // Note: B = 4/(a-d) is NOT cross-checked here. Jubjub's published (a,d) is a
-  // non-square-scaled (quadratic twist) copy of the "canonical" a=1-style
-  // Edwards curve reached by the textbook birational map; that scaling
-  // (x,y) -> (c*x, y) leaves A invariant (confirmed below) but rescales B by
-  // 1/c^2, so B can't be recovered from (a,d) without also knowing c. We take
-  // montgomeryB=1 directly from the spec instead, as the task allows.
-  const invAminusD = invert(modr(a - d), Fr);
-  const computedA = modr(2n * modr(a + d) * invAminusD);
-  if (computedA !== montgomeryA) {
-    console.log('montgomery A mismatch: computed', computedA.toString(), 'expected', montgomeryA.toString());
-    assert(false, 'montgomery A derived from a,d does not match the known constant');
-  }
+  // A is the one Montgomery constant the Zcash spec and circomlib's map agree
+  // on, so it cross-checks the derivation against a published number.
+  assert.strictEqual(montgomeryA, 40962n, 'derived Montgomery A != the Zcash spec constant 40962');
+  // B does not agree, and that is the point: guard the exact value so nobody
+  // "corrects" it back to the spec's B = 1 (see the comment on montgomeryB).
+  assert.strictEqual(montgomeryB, modr(-40964n), 'derived Montgomery B != -40964; do not substitute the spec B = 1');
 
   console.log('self-check ok');
 }
