@@ -237,9 +237,15 @@ export function asOAuthProviderId(
  *  Used to label a stored handle when only the canonical string is at hand
  *  (the resolver's ambiguity response), never to decide which row a typed
  *  query meant: parse() would happily turn a bare "alice" into "github:alice",
- *  which is exactly the ambiguity the caller is trying to report. */
+ *  which is exactly the ambiguity the caller is trying to report.
+ *
+ *  Checks every registered type, not just the enabled ones: a canonical form
+ *  stored while discord/telegram were enabled (or restored from a backup)
+ *  must still map to its type after they're disabled, and /resolve never
+ *  reaches this with a disabled type's canonical since enabledHandleTypes()
+ *  gates parsing upstream. */
 export function handleTypeForCanonical(canonical: string): HandleType | undefined {
-  return enabledHandleTypes().find((t) => t.parse(canonical) === canonical);
+  return HANDLE_TYPES.find((t) => t.parse(canonical) === canonical);
 }
 
 /** Handle type whose identityProviders includes a raw Supabase

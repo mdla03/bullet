@@ -35,10 +35,12 @@ const FAKE_HANDLES = [
   // user and, separately, a github user.
   { handle_normalized: "@alice", user_id: AMBIG_X_USER.id },
   { handle_normalized: "github:alice", user_id: AMBIG_GH_USER.id },
-  // One person, one address, two rows: google and email canonicalize a bare
-  // email to the same string on purpose (see the parse() contract in
-  // shared/src/handles.ts), so a lookup for it returns two rows that must
-  // still resolve rather than read as an ambiguity.
+  // Two rows, same handle_normalized: the unique index on handle_normalized
+  // (backend/sql/handles_schema.sql) forbids this in production, and the
+  // trigger never inserts a second row that would collide with it (see the
+  // delete's user-scope comment in handles_github.sql). This fixture only
+  // pins the defensive distinctUserIds.length === 1 branch below, which
+  // stays correct if that invariant is ever violated some other way.
   { handle_normalized: "dana@example.com", user_id: DUAL_USER.id },
   { handle_normalized: "dana@example.com", user_id: DUAL_USER.id },
 ];
@@ -68,16 +70,12 @@ const STORE_STUBS = {
     };
   },
 };
-const STORE_UNSTUBBED = [
-  "allPubkeys",
-  "nextPrevious",
-  "markNoteClaimedIfOwned",
-  "pubkeyIsRegistered",
-  "insertNote",
-  "insertActivity",
-  "listActivity",
-  "attachWallet",
-];
+// Derived from the real module instead of hand-listed, so a new store.js
+// export is caught here rather than drifting silently. Imported before
+// mock.module() below, while "./store.js" still resolves to the real file.
+const STORE_UNSTUBBED = Object.keys(await import("./store.js")).filter(
+  (k) => !(k in STORE_STUBS)
+);
 function notStubbed(name: string) {
   return () => {
     throw new Error(`store mock: ${name} not stubbed in resolver.test.ts`);

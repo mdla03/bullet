@@ -457,7 +457,10 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
               {candidates.map((c) => (
                 <button
                   key={c.handle}
-                  onClick={() => handleResolve(c.handle)}
+                  onClick={() => {
+                    setRecipient(displayCanonical(c.handle));
+                    handleResolve(c.handle);
+                  }}
                   disabled={resolving}
                   className="flex w-full items-center justify-between gap-3 rounded-full border border-fog bg-white px-4 py-2.5 text-sm transition-colors hover:border-graphite disabled:opacity-50"
                 >
@@ -617,7 +620,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="text-lg font-bold tracking-tight">
-              {unregistered} isn&apos;t on Bullet yet
+              {displayCanonical(unregistered)} isn&apos;t on Bullet yet
             </h3>
             <p className="text-sm text-graphite">
               The funds sit in a custody wallet and land in their inbox the

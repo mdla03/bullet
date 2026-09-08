@@ -101,6 +101,8 @@ begin
     from pg_index i
     where i.indrelid = 'public.handles'::regclass
       and i.indisunique
+      and i.indpred is null
+      and i.indisvalid
       and i.indnkeyatts = 2
       and (select attnum from pg_attribute
             where attrelid = i.indrelid and attname = 'provider') = any(i.indkey)

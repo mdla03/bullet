@@ -7,6 +7,7 @@ import {
   enabledHandleTypes,
   getHandleType,
   assertDisjointIdentityProviders,
+  handleTypeForCanonical,
 } from "@zeekpay/shared";
 
 // One representative raw input per enabled type, chosen to exercise the "@"
@@ -193,5 +194,14 @@ describe("handle registry: disabled bare-name types are namespaced", () => {
       assert.ok(canonical);
       assert.equal(handleType.parse(handleType.format(canonical)), canonical);
     }
+  });
+
+  it("handleTypeForCanonical still maps a disabled type's stored canonical to its type", () => {
+    // A row written while discord/telegram were enabled (or restored from a
+    // backup) must not become unlabelable just because the type is now
+    // disabled: enabledHandleTypes() gates parsing new input, not looking up
+    // what a canonical string already is.
+    assert.equal(handleTypeForCanonical("discord:alice")?.id, "discord");
+    assert.equal(handleTypeForCanonical("telegram:alice_99")?.id, "telegram");
   });
 });

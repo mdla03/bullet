@@ -125,13 +125,17 @@ begin
   -- this delete the unique index on handle_normalized would reject their row
   -- and leave the payments flowing to the previous owner.
   --
-  -- Scoped to OTHER users. Without `user_id <> new.user_id` a user linking a
-  -- second identity that canonicalizes to the same handle evicts their own
-  -- row: google and email both canonicalize to the bare email address, so
-  -- adding an email identity to a Google account deleted the Google handle
-  -- row and left one row where there had been two. The (provider, subject)
-  -- clause alone does not catch that, because the two rows differ in both.
-  -- The insert below already upserts the caller's own row.
+  -- Scoped to OTHER users. With the unique index on handle_normalized live,
+  -- two rows can never share a handle, so this scope does not decide between
+  -- "one row" and "two rows": it decides whose row the delete is allowed to
+  -- touch. google and email both canonicalize to the bare email address, so
+  -- a user linking email after google hits this clause on their own existing
+  -- row, and `user_id <> new.user_id` skips the delete rather than removing
+  -- it. The insert below then raises a unique violation on handle_normalized
+  -- (not on the (provider, subject) conflict target, which never matches
+  -- because the two rows differ in both columns), the exception block below
+  -- swallows it, and the email identity is simply never inserted as its own
+  -- row. The user keeps their original google row.
   delete from public.handles
    where handle_normalized = v_handle
      and user_id <> new.user_id

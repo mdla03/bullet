@@ -1,6 +1,6 @@
-// D1 evidence: in-browser proving-time benchmark for the 6-public-input
+// D1 evidence: in-browser proving-time benchmark for the 7-public-input
 // claim circuit (root, nullifier, recipientDigest, amount, tokenId,
-// amountCommitment).
+// amountCommitmentX, amountCommitmentY).
 //
 // Local only. notFound() in production so this never ships on sendbullet.xyz.
 //
