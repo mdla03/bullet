@@ -91,6 +91,15 @@ const nextConfig: NextConfig = {
         os: false,
       };
     }
+    // @zeekpay/shared is consumed as raw TypeScript (its package.json main is
+    // src/index.ts), and its internal specifiers carry the ".js" extension that
+    // the backend's NodeNext resolver requires. Webpack resolves those
+    // literally and fails: "Can't resolve './handles.js'". Map them back onto
+    // the .ts sources so one shared package can serve both resolvers.
+    config.resolve.extensionAlias = {
+      ...config.resolve.extensionAlias,
+      ".js": [".ts", ".tsx", ".js"],
+    };
     // Suppress "Critical dependency" warning from web-worker (snarkjs dep).
     config.module.exprContextCritical = false;
     return config;

@@ -1,7 +1,38 @@
 -- Adds GitHub to the trigger that turns a linked Supabase identity into a
--- handles row. Applied to the project on 2026-09-08. Mirrors the deployed
--- function; the only change is the github branch. Canonical GitHub handle is
--- the bare lowercase username, matching parseGithub in shared/src/handles.ts.
+-- handles row. Mirrors the deployed function; the only change is the github
+-- branch. Canonical GitHub handle is the bare lowercase username, matching
+-- parseGithub in shared/src/handles.ts.
+--
+-- Applied to the project on 2026-09-08. CONFIRMED APPLIED 2026-09-09 by
+-- introspecting the live catalog:
+--
+--   select position('github' in p.prosrc) > 0 as has_github_branch
+--   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+--   where n.nspname = 'public' and p.proname = 'handle_new_identity';
+--   -> true
+--
+-- Read the commit that introduced this file with that in mind: its subject
+-- says "sql recorded, not yet applied", which was true when written and is
+-- not true now. The catalog is the authority, not the commit message.
+--
+-- PROVEN END TO END 2026-09-09 by a real GitHub sign-in against the live
+-- project. Before this, no GitHub identity had ever existed, so the branch had
+-- never actually run. Resulting row:
+--
+--   provider | handle | handle_normalized | subject   | linked_at
+--   github   | mdla03 | mdla03            | 119711499 | 2026-09-08 19:08:19+00
+--
+-- That single row closes three separate unknowns at once: the provider is
+-- configured in Supabase Auth, the trigger fires on the github branch, and
+-- identity_data really does carry user_name/preferred_username. The last one
+-- was the risk worth testing: if it carried neither, v_handle would be null,
+-- the guard below would return early, and NO handle row would be created with
+-- no error raised anywhere. Silent. Re-test this way, not by reading the
+-- function, after any change to the branch.
+--
+-- `subject` is GitHub's numeric user id, not the login, so the
+-- `on conflict (provider, subject)` upsert survives a username change.
+-- Table/trigger DDL: see handles_schema.sql.
 create or replace function public.handle_new_identity()
 returns trigger
 language plpgsql
