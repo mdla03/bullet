@@ -5,11 +5,12 @@
 # Outputs (tracked, safe to commit):
 #   circuits/build/claim_vk.json
 #   circuits/build/groth16_soroban.json
+#   circuits/build/claim.zkey       (whitelisted: backend /prove needs it at runtime)
+#   circuits/build/claim_js/        (whitelisted, same reason)
 #   contracts/zeekpay/src/groth16_fixture.rs
 #
 # Outputs (gitignored, do NOT commit):
-#   circuits/build/claim.r1cs   *.sym   *.zkey   *.wtns   pot15*.ptau
-#   circuits/build/claim_js/
+#   circuits/build/claim.r1cs   claim.sym   claim.wtns   pot15*.ptau
 set -euo pipefail
 
 CIRCOM="${CIRCOM:-$HOME/.local/bin/circom}"

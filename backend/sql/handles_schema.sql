@@ -79,7 +79,9 @@ create table if not exists public.handles (
 -- does land whenever the name happens to match, and until the ADD completes
 -- there is nothing stopping two rows claiming the same (provider, subject).
 -- Add one only when no unique constraint on exactly those columns exists,
--- whatever it is named.
+-- whatever it is named, and no bare unique index over them exists either
+-- (a `create unique index` with no backing constraint, which pg_constraint
+-- alone would miss).
 do $$
 begin
   if not exists (
@@ -94,6 +96,16 @@ begin
           where attrelid = c.conrelid and attname = 'subject')
       ]
       and array_length(c.conkey, 1) = 2
+  ) and not exists (
+    select 1
+    from pg_index i
+    where i.indrelid = 'public.handles'::regclass
+      and i.indisunique
+      and i.indnkeyatts = 2
+      and (select attnum from pg_attribute
+            where attrelid = i.indrelid and attname = 'provider') = any(i.indkey)
+      and (select attnum from pg_attribute
+            where attrelid = i.indrelid and attname = 'subject') = any(i.indkey)
   ) then
     alter table public.handles add constraint handles_provider_subject_key
       unique (provider, subject);

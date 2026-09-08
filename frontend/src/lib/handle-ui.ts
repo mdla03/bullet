@@ -71,6 +71,16 @@ export const OAUTH_ICON: Partial<
   github: GithubIcon,
 };
 
+// Enabled handle types with no working sign-in/connect flow: neither OAuth
+// with a configured icon (PROVIDERS/OAUTH_HANDLE_TYPES render those) nor the
+// hand-built email-OTP form. An enabled OAuth type missing an OAUTH_ICON
+// entry lands here too, rather than silently vanishing from every screen.
+export function unsupportedHandleTypes(): HandleType[] {
+  return enabledHandleTypes().filter((h) =>
+    isOAuthProof(h.proof) ? !OAUTH_ICON[h.id] : h.proof.type !== "email-otp"
+  );
+}
+
 export function providerIcon(
   provider: string
 ): (p: SVGProps<SVGSVGElement>) => React.ReactElement {

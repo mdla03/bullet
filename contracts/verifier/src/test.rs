@@ -132,6 +132,8 @@ fn real_7in_claim_proof_verify_cost() {
     let cpu = env.cost_estimate().budget().cpu_instruction_cost();
     let mem = env.cost_estimate().budget().memory_bytes_cost();
 
+    assert!(ok, "real 7-input claim proof must verify true on-chain");
+
     // From cost_scaling_table's "4 pairings + MSM-7" row (6 public inputs):
     // the synthetic bench_verify, which builds its test points with four
     // hash-to-curve calls that a real verify never performs. A real verify
@@ -162,7 +164,6 @@ fn real_7in_claim_proof_verify_cost() {
         delta
     );
 
-    assert!(ok, "real 7-input claim proof must verify true on-chain");
     assert!(
         cpu < TX_CPU_LIMIT,
         "real 7-input claim verify ({} CPU) exceeds tx limit ({})",

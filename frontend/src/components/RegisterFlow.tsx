@@ -21,6 +21,7 @@ import {
   oauthProviderForIdentity,
   providerIcon,
   providerRank,
+  unsupportedHandleTypes,
 } from "@/lib/handle-ui";
 import {
   KEY_DOMAIN_MESSAGE,
@@ -43,13 +44,11 @@ const PROVIDERS: {
 });
 
 // Enabled handle types this screen has no sign-in flow for at all: neither
-// OAuth (PROVIDERS above) nor the hand-built email-OTP form. Shown as an
-// explicit "not supported yet" note instead of silently vanishing, so
-// flipping a type's `enabled` flag on before its UI flow is built is
-// noticeable rather than a quiet no-op.
-const UNSUPPORTED_TYPES = enabledHandleTypes().filter(
-  (h) => !isOAuthProof(h.proof) && h.proof.type !== "email-otp"
-);
+// OAuth with an icon (PROVIDERS above) nor the hand-built email-OTP form.
+// Shown as an explicit "not supported yet" note instead of silently
+// vanishing, so flipping a type's `enabled` flag on before its UI flow is
+// built is noticeable rather than a quiet no-op.
+const UNSUPPORTED_TYPES = unsupportedHandleTypes();
 
 // Raw auth.identities.provider values that mean "this account signs in through
 // OAuth", taken from the registry rather than a hardcoded list, so a type

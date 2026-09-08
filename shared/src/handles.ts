@@ -62,14 +62,21 @@ export interface HandleType {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-/** Strips a leading "<ns>:" and then a leading "@", so a canonical form fed
- *  back through parse() round-trips and a user pasting either shape is
- *  accepted. */
-function unnamespace(input: string, ns: string): string {
+/** Strips a leading "<ns>:" and, when `stripAt` is set, a leading "@" too.
+ *  parse() call sites pass stripAt so a canonical form fed back through
+ *  parse() round-trips and a user pasting either shape is accepted; format()
+ *  call sites leave it unset since a canonical form never carries an "@"
+ *  before this strips the namespace. */
+function unnamespace(input: string, ns: string, stripAt = false): string {
   const t = input.trim();
   const prefix = ns + ":";
   const body = t.toLowerCase().startsWith(prefix) ? t.slice(prefix.length) : t;
-  return body.replace(/^@/, "");
+  return stripAt ? body.replace(/^@/, "") : body;
+}
+
+/** Builds a namespaced canonical form. The inverse of unnamespace(). */
+function namespace(type: string, body: string): string {
+  return type + ":" + body.toLowerCase();
 }
 
 function parseEmailLike(input: string): string | null {
@@ -88,26 +95,24 @@ function parseX(input: string): string | null {
 // (backend/sql/handles_github.sql) so a value the trigger writes and a value
 // this file parses can never disagree.
 function parseGithub(input: string): string | null {
-  const body = unnamespace(input, "github");
+  const body = unnamespace(input, "github", true);
   if (!/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(body)) return null;
-  return "github:" + body.toLowerCase();
+  return namespace("github", body);
 }
 
 function parseDiscord(input: string): string | null {
-  const body = unnamespace(input, "discord").toLowerCase();
+  const body = unnamespace(input, "discord", true).toLowerCase();
   if (!/^[a-z0-9._]{2,32}$/.test(body)) return null;
-  return "discord:" + body;
+  return namespace("discord", body);
 }
 
 function parseTelegram(input: string): string | null {
-  const body = unnamespace(input, "telegram");
+  const body = unnamespace(input, "telegram", true);
   if (!/^[A-Za-z0-9_]{5,32}$/.test(body)) return null;
-  return "telegram:" + body.toLowerCase();
+  return namespace("telegram", body);
 }
 
 const identity = (c: string) => c;
-const stripNamespace = (ns: string) => (c: string) =>
-  c.startsWith(ns + ":") ? c.slice(ns.length + 1) : c;
 
 export const HANDLE_TYPES: readonly HandleType[] = [
   {
@@ -147,7 +152,7 @@ export const HANDLE_TYPES: readonly HandleType[] = [
     parse: parseGithub,
     // Bare login, no "@": GitHub logins are not "@handles" and the UI puts the
     // GitHub icon and label next to the value already.
-    format: stripNamespace("github"),
+    format: (c) => unnamespace(c, "github"),
   },
   {
     id: "discord",
@@ -156,7 +161,7 @@ export const HANDLE_TYPES: readonly HandleType[] = [
     proof: { type: "supabase-oauth", provider: "discord" },
     identityProviders: ["discord"],
     parse: parseDiscord,
-    format: stripNamespace("discord"),
+    format: (c) => unnamespace(c, "discord"),
   },
   {
     id: "telegram",
@@ -165,7 +170,7 @@ export const HANDLE_TYPES: readonly HandleType[] = [
     proof: { type: "telegram-widget" },
     identityProviders: ["telegram"],
     parse: parseTelegram,
-    format: (c) => "@" + stripNamespace("telegram")(c),
+    format: (c) => "@" + unnamespace(c, "telegram"),
   },
 ];
 

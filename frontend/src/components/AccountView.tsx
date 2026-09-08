@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { Provider, Session } from "@supabase/supabase-js";
+import type { Session } from "@supabase/supabase-js";
+import type { OAuthProviderId } from "@zeekpay/shared";
 import {
   CheckIcon,
   CopyIcon,
@@ -14,24 +15,21 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { getMe, type MeResponse } from "@/lib/api";
 import { Skeleton } from "@/components/Skeleton";
-import { enabledHandleTypes } from "@zeekpay/shared";
 import {
   OAUTH_ICON,
   displayHandle,
-  isOAuthProof,
   oauthHandleTypes,
   providerIcon,
   providerRank,
+  unsupportedHandleTypes,
 } from "@/lib/handle-ui";
 
 // "Connect X" buttons: every enabled handle type proven via Supabase OAuth.
 const OAUTH_HANDLE_TYPES = oauthHandleTypes();
 
-// Enabled handle types with no connect flow here at all: neither OAuth nor
-// the hand-built add-email form.
-const UNSUPPORTED_TYPES = enabledHandleTypes().filter(
-  (h) => !isOAuthProof(h.proof) && h.proof.type !== "email-otp"
-);
+// Enabled handle types with no connect flow here at all: neither OAuth with
+// an icon (OAUTH_HANDLE_TYPES above) nor the hand-built add-email form.
+const UNSUPPORTED_TYPES = unsupportedHandleTypes();
 
 export function AccountView() {
   const supabase = createClient();
@@ -68,7 +66,7 @@ export function AccountView() {
     else if (session === null) router.replace("/register");
   }, [session, refreshMe, router]);
 
-  async function linkProvider(provider: Provider) {
+  async function linkProvider(provider: OAuthProviderId) {
     setError("");
     setWorking("oauth");
     const { error: err } = await supabase.auth.linkIdentity({

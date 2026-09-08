@@ -98,7 +98,10 @@ export async function findManyByLookup(candidates: string[]): Promise<LookupRow[
     .from("handles")
     .select("handle_normalized, user_id")
     .in("handle_normalized", candidates);
-  if (error || !data) return [];
+  if (error || !data) {
+    if (error) console.error("[store] findManyByLookup failed:", error.message);
+    return [];
+  }
   return data as LookupRow[];
 }
 

@@ -29,19 +29,18 @@ update public.handles
 -- Mirrors the deployed function. The github branch and the delete-then-insert
 -- below are the changes.
 --
--- REVISION 2026-09-09b IS NOT APPLIED. Re-apply this whole file. The
--- newest-wins delete below gained `and user_id <> new.user_id` (a user linking
--- a second identity that canonicalizes to the same handle was evicting their
--- own row) and a `raise notice` naming both users on a real eviction. The
--- live function predates both. Confirm with:
+-- REVISION 2026-09-09b IS APPLIED. It shipped as migration
+-- handles_github_scoped_eviction on 2026-09-09: the newest-wins delete below
+-- gained `and user_id <> new.user_id` and its `raise notice` on eviction.
+-- Confirmed against the live catalog:
 --
 --   select position('user_id <> new.user_id' in p.prosrc) > 0 as has_self_guard
 --   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
 --   where n.nspname = 'public' and p.proname = 'handle_new_identity';
+--   -> true
 --
--- The paragraph below records the state of the PREVIOUS revision, which is
--- applied. Both statements are true at once: the github branch is live, the
--- self-eviction guard is not.
+-- The paragraph below records the state of the PREVIOUS revision. Both the
+-- github branch and the self-eviction guard are live now.
 --
 -- Applied to the project on 2026-09-08. CONFIRMED APPLIED 2026-09-09 by
 -- introspecting the live catalog:

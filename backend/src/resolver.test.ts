@@ -43,30 +43,66 @@ const FAKE_HANDLES = [
   { handle_normalized: "dana@example.com", user_id: DUAL_USER.id },
 ];
 
-mock.module("./store.js", {
-  namedExports: {
-    findManyByLookup: async (candidates: string[]) =>
-      FAKE_HANDLES.filter((h) => candidates.includes(h.handle_normalized)),
-    getUser: async (userId: string) => {
-      const u = ALL_FAKE_USERS.find((u) => u.id === userId);
-      if (!u) return null;
-      return {
-        id: u.id,
-        createdAt: "2026-01-01T00:00:00.000Z",
-        identities: [],
-        wallet: {
-          user_id: u.id,
-          stellar_address: u.stellarAddress,
-          bullet_pubkey: u.pubKey,
-          signature: "sig",
-          attached_at: "2026-01-01T00:00:00.000Z",
-          previous: [],
-        },
-        unreadCount: 0,
-      };
-    },
+// store.js exports more than /resolve needs. Anything not stubbed below gets
+// a Proxy fallback that throws a clear error instead of letting the caller
+// hit "undefined is not a function".
+const STORE_STUBS = {
+  findManyByLookup: async (candidates: string[]) =>
+    FAKE_HANDLES.filter((h) => candidates.includes(h.handle_normalized)),
+  getUser: async (userId: string) => {
+    const u = ALL_FAKE_USERS.find((u) => u.id === userId);
+    if (!u) return null;
+    return {
+      id: u.id,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      identities: [],
+      wallet: {
+        user_id: u.id,
+        stellar_address: u.stellarAddress,
+        bullet_pubkey: u.pubKey,
+        signature: "sig",
+        attached_at: "2026-01-01T00:00:00.000Z",
+        previous: [],
+      },
+      unreadCount: 0,
+    };
+  },
+};
+const STORE_UNSTUBBED = [
+  "allPubkeys",
+  "nextPrevious",
+  "markNoteClaimedIfOwned",
+  "pubkeyIsRegistered",
+  "insertNote",
+  "insertActivity",
+  "listActivity",
+  "attachWallet",
+];
+function notStubbed(name: string) {
+  return () => {
+    throw new Error(`store mock: ${name} not stubbed in resolver.test.ts`);
+  };
+}
+function storeProp(target: Record<string, unknown>, prop: PropertyKey): unknown {
+  if (Reflect.has(target, prop)) return Reflect.get(target, prop);
+  return typeof prop === "string" ? notStubbed(prop) : undefined;
+}
+const storeMock: Record<string, unknown> = new Proxy(STORE_STUBS as Record<string, unknown>, {
+  get(target, prop) {
+    return storeProp(target, prop);
+  },
+  ownKeys(target) {
+    return [...Reflect.ownKeys(target), ...STORE_UNSTUBBED];
+  },
+  getOwnPropertyDescriptor(target, prop) {
+    if (Reflect.has(target, prop) || (typeof prop === "string" && STORE_UNSTUBBED.includes(prop))) {
+      return { enumerable: true, configurable: true, value: storeProp(target, prop) };
+    }
+    return undefined;
   },
 });
+
+mock.module("./store.js", { namedExports: storeMock });
 
 const { app, rateLimit } = await import("./resolver.js");
 const { Keypair, hash } = await import("@stellar/stellar-base");
