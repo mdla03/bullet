@@ -2,6 +2,7 @@ import { fileURLToPath } from "node:url";
 import express, { type Request, type Response, type NextFunction } from "express";
 import cors from "cors";
 import type { ResolveResult } from "@zeekpay/shared";
+import { enabledHandleTypes } from "@zeekpay/shared";
 import * as store from "./store.js";
 import * as leaves from "./leaves.js";
 import * as tree from "./tree.js";
@@ -123,7 +124,49 @@ app.get("/resolve", async (req: Request, res: Response) => {
   if (!q || q.length > 256) {
     return void res.json({ found: false } satisfies ResolveResult);
   }
-  const user = await store.findByLookup(q);
+
+  // Every enabled handle type's parse() (shared/src/handles.ts) gets a shot at
+  // the raw query, so "torvalds", "@torvalds" and "github:torvalds" all reach
+  // the same github:torvalds row. X ("@name") and email are just two of the
+  // types in this loop now, parsing exactly as they always did.
+  const candidates = [
+    ...new Set(
+      enabledHandleTypes()
+        .map((t) => t.parse(q))
+        .filter((c): c is string => c !== null)
+    ),
+  ];
+  if (candidates.length === 0) {
+    return void res.json({ found: false } satisfies ResolveResult);
+  }
+
+  const rows = await store.findManyByLookup(candidates);
+  const distinctUserIds = [...new Set(rows.map((r) => r.user_id))];
+
+  let userId: string | undefined;
+  if (distinctUserIds.length === 1) {
+    userId = distinctUserIds[0];
+  } else if (distinctUserIds.length > 1) {
+    // Different candidates belong to different people (e.g. an X "@alice"
+    // and a github "github:alice"). If the caller already typed the exact
+    // canonical form, that alone says which one they meant; otherwise this
+    // is genuinely ambiguous and must not be resolved silently.
+    const exact = rows.find((r) => r.handle_normalized === q);
+    if (exact) {
+      userId = exact.user_id;
+    } else {
+      res.status(300).json({
+        found: false,
+        candidates: rows.map((r) => r.handle_normalized),
+      } satisfies ResolveResult);
+      return;
+    }
+  }
+  if (!userId) {
+    return void res.json({ found: false } satisfies ResolveResult);
+  }
+
+  const user = await store.getUser(userId);
   if (!user || !user.wallet) {
     return void res.json({ found: false } satisfies ResolveResult);
   }

@@ -8,7 +8,7 @@
     "dev": "tsx watch --env-file-if-exists=../.env src/resolver.ts",
     "start": "tsx --env-file-if-exists=../.env src/resolver.ts",
     "build": "tsc",
-    "test": "node --import tsx/esm --test src/resolver.test.ts src/wallet_history.test.ts src/registry.test.ts"
+    "test": "node --import tsx/esm --experimental-test-module-mocks --test src/resolver.test.ts src/wallet_history.test.ts src/registry.test.ts"
   },
   "dependencies": {
     "@sendgrid/mail": "^8.1.6",

@@ -2,6 +2,20 @@
 -- handle -> user mapping. Written only by the handle_new_identity trigger
 -- (see handles_github.sql); read by the resolver and the register/account UI.
 --
+-- APPLY ORDER for the three handles files, on a fresh project or an existing
+-- one:
+--   1. handles_schema.sql   (this file: table, constraints, indexes, RLS, trigger)
+--   2. handles_github.sql   (the trigger function, plus the GitHub namespace
+--                            data migration, which must run before step 3)
+--   3. handles_unique.sql   (the unique index on handle_normalized; runs
+--                            CONCURRENTLY, so submit it on its own)
+--
+-- On a FRESH project, run this file once more after step 2. The trigger block
+-- at the bottom needs public.handle_new_identity() to exist, and step 2 is what
+-- creates it; the first pass raises a warning and skips, the second pass wires
+-- the trigger up. On the existing project every statement here is already a
+-- no-op.
+--
 -- WHY THIS FILE EXISTS: the table, its unique constraint and the trigger were
 -- all created directly in the Supabase console and lived nowhere else. Every
 -- other object in backend/sql/ is reproducible from the repo; this one was not,
@@ -56,12 +70,41 @@ create table if not exists public.handles (
 -- handles_github.sql's `on conflict (provider, subject) do update` REQUIRES
 -- this. Without it the trigger raises instead of upserting, and re-linking an
 -- identity fails.
-alter table public.handles drop constraint if exists handles_provider_subject_key;
-alter table public.handles add  constraint handles_provider_subject_key
-  unique (provider, subject);
+--
+-- Deliberately NOT `drop constraint if exists; add constraint`: the live
+-- constraint's name was never recorded either (same reason as the trigger
+-- below). If it is called something else, the DROP is a silent no-op and the
+-- ADD builds a SECOND identical unique index over the same two columns. The
+-- window between the two statements is worse: on the existing project the DROP
+-- does land whenever the name happens to match, and until the ADD completes
+-- there is nothing stopping two rows claiming the same (provider, subject).
+-- Add one only when no unique constraint on exactly those columns exists,
+-- whatever it is named.
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint c
+    where c.conrelid = 'public.handles'::regclass
+      and c.contype = 'u'
+      and c.conkey @> array[
+        (select attnum from pg_attribute
+          where attrelid = c.conrelid and attname = 'provider'),
+        (select attnum from pg_attribute
+          where attrelid = c.conrelid and attname = 'subject')
+      ]
+      and array_length(c.conkey, 1) = 2
+  ) then
+    alter table public.handles add constraint handles_provider_subject_key
+      unique (provider, subject);
+  end if;
+end
+$$;
 
 -- store.ts resolves a payee with `.eq("handle_normalized", key)` on every send,
 -- and store.ts/invite.ts list a user's handles by user_id.
+-- Superseded by the UNIQUE index in handles_unique.sql, which serves the same
+-- lookups. Kept so this file alone still leaves the resolver's hot path indexed.
 create index if not exists handles_handle_normalized_idx on public.handles (handle_normalized);
 create index if not exists handles_user_id_idx           on public.handles (user_id);
 
@@ -83,12 +126,22 @@ revoke all on public.handles from anon, authenticated;
 -- handle_new_identity twice. Instead, create one only when the function has no
 -- trigger bound to it at all. On the existing project this is a no-op; on a
 -- fresh one it wires the function up.
+--
+-- to_regproc(), not `'public.handle_new_identity'::regproc`: the cast RAISES
+-- when the function does not exist, which is exactly the state a fresh project
+-- is in if this file is run before handles_github.sql. to_regproc() returns
+-- null instead, so the block skips and the apply order at the top of this file
+-- stays a preference rather than a hard requirement.
 do $$
+declare
+  v_fn regproc := to_regproc('public.handle_new_identity');
 begin
-  if not exists (
+  if v_fn is null then
+    raise warning 'public.handle_new_identity does not exist yet; apply handles_github.sql, then re-run this file to create the trigger';
+  elsif not exists (
     select 1 from pg_trigger
     where not tgisinternal
-      and tgfoid = 'public.handle_new_identity'::regproc
+      and tgfoid = v_fn
   ) then
     create trigger on_auth_identity_created
       after insert on auth.identities

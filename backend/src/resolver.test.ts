@@ -1,8 +1,8 @@
 // Backend HTTP tests. Store/auth flows that need real Supabase are exercised
 // end-to-end from the frontend; this file covers the public surface and the
 // Ed25519 wallet-link signature verifier.
-// Run: node --import tsx/esm --test src/resolver.test.ts
-import { describe, it, before, after } from "node:test";
+// Run: node --import tsx/esm --experimental-test-module-mocks --test src/resolver.test.ts
+import { describe, it, before, after, mock } from "node:test";
 import assert from "node:assert/strict";
 
 process.env.ZEEKPAY_CONTRACT_ID = "CTEST_CONTRACT";
@@ -12,6 +12,53 @@ process.env.FRONTEND_URL = "http://localhost:3000";
 process.env.SUPABASE_URL ??= "https://placeholder.supabase.co";
 process.env.SUPABASE_ANON_KEY ??= "placeholder_anon_key";
 process.env.SUPABASE_SERVICE_ROLE_KEY ??= "placeholder_service_role_key";
+
+// Fake "handles" + "wallets" tables for /resolve. store.js talks to real
+// Supabase, which these placeholder creds cannot reach, so the two functions
+// /resolve calls are mocked at the module boundary instead
+// (--experimental-test-module-mocks). Nothing else in this file touches
+// store.js, so mocking the whole module here is safe.
+const GH_USER = { id: "usr_gh_torvalds", stellarAddress: "GGH000000000000000000000000000000000000000000000TORV", pubKey: "1".repeat(64) };
+const X_USER = { id: "usr_x_muskaroo", stellarAddress: "GX0000000000000000000000000000000000000000000MUSKAROO", pubKey: "2".repeat(64) };
+const EMAIL_USER = { id: "usr_email_bob", stellarAddress: "GEMAIL00000000000000000000000000000000000000000000BOB", pubKey: "3".repeat(64) };
+const AMBIG_X_USER = { id: "usr_amb_x_alice", stellarAddress: "GAMBX0000000000000000000000000000000000000000000ALICE", pubKey: "4".repeat(64) };
+const AMBIG_GH_USER = { id: "usr_amb_gh_alice", stellarAddress: "GAMBGH000000000000000000000000000000000000000000ALICE", pubKey: "5".repeat(64) };
+const ALL_FAKE_USERS = [GH_USER, X_USER, EMAIL_USER, AMBIG_X_USER, AMBIG_GH_USER];
+
+const FAKE_HANDLES = [
+  { handle_normalized: "github:torvalds", user_id: GH_USER.id },
+  { handle_normalized: "@muskaroo", user_id: X_USER.id },
+  { handle_normalized: "bob@example.com", user_id: EMAIL_USER.id },
+  // Deliberately ambiguous: the same bare name "alice" is claimed by an X
+  // user and, separately, a github user.
+  { handle_normalized: "@alice", user_id: AMBIG_X_USER.id },
+  { handle_normalized: "github:alice", user_id: AMBIG_GH_USER.id },
+];
+
+mock.module("./store.js", {
+  namedExports: {
+    findManyByLookup: async (candidates: string[]) =>
+      FAKE_HANDLES.filter((h) => candidates.includes(h.handle_normalized)),
+    getUser: async (userId: string) => {
+      const u = ALL_FAKE_USERS.find((u) => u.id === userId);
+      if (!u) return null;
+      return {
+        id: u.id,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        identities: [],
+        wallet: {
+          user_id: u.id,
+          stellar_address: u.stellarAddress,
+          bullet_pubkey: u.pubKey,
+          signature: "sig",
+          attached_at: "2026-01-01T00:00:00.000Z",
+          previous: [],
+        },
+        unreadCount: 0,
+      };
+    },
+  },
+});
 
 const { app, rateLimit } = await import("./resolver.js");
 const { Keypair, hash } = await import("@stellar/stellar-base");
@@ -98,6 +145,45 @@ describe("GET /resolve", () => {
   it("returns found:false for oversized query without hitting Supabase", async () => {
     const r = await req("GET", "/resolve?q=" + "a".repeat(300));
     assert.deepEqual(r.body, { found: false });
+  });
+
+  it("resolves a bare github login (no @, no namespace)", async () => {
+    const r = await req("GET", "/resolve?q=torvalds");
+    assert.equal(r.status, 200);
+    assert.equal((r.body as { found: boolean }).found, true);
+    assert.equal((r.body as { stellarAddress: string }).stellarAddress, GH_USER.stellarAddress);
+  });
+
+  it("resolves an @-prefixed github login", async () => {
+    const r = await req("GET", "/resolve?q=" + encodeURIComponent("@torvalds"));
+    assert.equal(r.status, 200);
+    assert.equal((r.body as { stellarAddress: string }).stellarAddress, GH_USER.stellarAddress);
+  });
+
+  it("resolves the fully namespaced github:login canonical form", async () => {
+    const r = await req("GET", "/resolve?q=" + encodeURIComponent("github:torvalds"));
+    assert.equal(r.status, 200);
+    assert.equal((r.body as { stellarAddress: string }).stellarAddress, GH_USER.stellarAddress);
+  });
+
+  it("still resolves an email", async () => {
+    const r = await req("GET", "/resolve?q=" + encodeURIComponent("bob@example.com"));
+    assert.equal(r.status, 200);
+    assert.equal((r.body as { stellarAddress: string }).stellarAddress, EMAIL_USER.stellarAddress);
+  });
+
+  it("still resolves an X @name", async () => {
+    const r = await req("GET", "/resolve?q=" + encodeURIComponent("@muskaroo"));
+    assert.equal(r.status, 200);
+    assert.equal((r.body as { stellarAddress: string }).stellarAddress, X_USER.stellarAddress);
+  });
+
+  it("returns explicit ambiguity (HTTP 300) when a bare name matches two different people", async () => {
+    const r = await req("GET", "/resolve?q=alice");
+    assert.equal(r.status, 300);
+    const body = r.body as { found: boolean; candidates?: string[] };
+    assert.equal(body.found, false);
+    assert.deepEqual(new Set(body.candidates), new Set(["@alice", "github:alice"]));
   });
 });
 

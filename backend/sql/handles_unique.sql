@@ -1,0 +1,38 @@
+-- One unique index over public.handles.handle_normalized: the constraint that
+-- makes the resolver's "one handle, one payee" promise true in the database
+-- rather than only in application code.
+--
+-- APPLY ORDER: handles_schema.sql, then handles_github.sql, then THIS FILE.
+-- handles_github.sql's data migration rewrites existing bare GitHub logins to
+-- the namespaced form first. Creating this index before that migration is not
+-- guaranteed to fail today, but it locks in whichever duplicates already exist
+-- and leaves the namespacing half-applied.
+--
+-- CONCURRENTLY cannot run inside a transaction block. Run this statement on its
+-- own, not wrapped in begin/commit and not pasted together with other
+-- statements in one editor submission. It is used anyway because it takes no
+-- write lock on handles: a plain CREATE UNIQUE INDEX would block every sign-in
+-- for the duration.
+--
+-- If it fails (a duplicate handle_normalized that the migration did not cover)
+-- Postgres leaves an INVALID index behind. Find and drop it before retrying:
+--
+--   select indexrelid::regclass from pg_index
+--   where not indisvalid and indrelid = 'public.handles'::regclass;
+--   drop index concurrently public.handles_handle_normalized_key;
+--
+-- Then find the duplicates and decide who keeps the handle:
+--
+--   select handle_normalized, count(*), array_agg(user_id)
+--   from public.handles group by 1 having count(*) > 1;
+--
+-- The trigger's own delete-then-insert (handles_github.sql) is what keeps new
+-- duplicates from appearing: the most recently proven identity takes the
+-- handle. This index is the backstop for anything that writes around it.
+--
+-- handles_handle_normalized_idx (the non-unique lookup index in
+-- handles_schema.sql) becomes redundant once this exists. Left in place: it is
+-- cheap, and dropping it while this index is still being built would leave the
+-- resolver's hot path without an index.
+create unique index concurrently if not exists handles_handle_normalized_key
+  on public.handles (handle_normalized);

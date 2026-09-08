@@ -15,18 +15,16 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { getMe, type MeResponse } from "@/lib/api";
 import { Skeleton } from "@/components/Skeleton";
-import { enabledHandleTypes } from "@zeekpay/shared";
 import {
   OAUTH_ICON,
-  isOAuthProof,
+  displayHandle,
+  oauthHandleTypes,
   providerIcon,
   providerRank,
 } from "@/lib/handle-ui";
 
 // "Connect X" buttons: every enabled handle type proven via Supabase OAuth.
-const OAUTH_HANDLE_TYPES = enabledHandleTypes().filter(
-  (h) => h.proof.type === "supabase-oauth"
-);
+const OAUTH_HANDLE_TYPES = oauthHandleTypes();
 
 export function AccountView() {
   const supabase = createClient();
@@ -142,10 +140,11 @@ export function AccountView() {
   const linkedProviders = new Set(handles.map((h) => h.provider));
   const missingOAuth = OAUTH_HANDLE_TYPES.filter(
     (h) => !h.identityProviders.some((p) => linkedProviders.has(p))
-  ).flatMap((h) => {
-    if (!isOAuthProof(h.proof)) return [];
-    return [{ key: h.proof.provider, label: h.label, Icon: OAUTH_ICON[h.id] ?? MailIcon }];
-  });
+  ).map((h) => ({
+    key: h.proof.provider,
+    label: h.label,
+    Icon: OAUTH_ICON[h.id] ?? MailIcon,
+  }));
   const hasEmail = linkedProviders.has("email");
 
   return (
@@ -157,13 +156,17 @@ export function AccountView() {
             const unlinkKey = `unlink:${h.provider}:${h.handle}`;
             const canUnlink = handles.length > 1;
             const Icon = providerIcon(h.provider);
+            // Stored form is namespaced ("github:alice"); the row shows the
+            // display form beside the provider icon. Unlink still sends the
+            // stored value.
+            const shown = displayHandle(h.provider, h.handle);
             return (
               <div
                 key={`${h.provider}:${h.handle}`}
                 className="flex items-center gap-3 rounded-xl border border-fog px-4 py-3 text-sm"
               >
                 <Icon className="h-4 w-4 shrink-0" />
-                <span className="min-w-0 flex-1 truncate font-medium">{h.handle}</span>
+                <span className="min-w-0 flex-1 truncate font-medium">{shown}</span>
                 {canUnlink && (() => {
                   const confirming = confirmingUnlink === unlinkKey;
                   const busy = working === unlinkKey;
@@ -183,7 +186,7 @@ export function AccountView() {
                           }, 3000);
                         }
                       }}
-                      aria-label={confirming ? `Confirm removal of ${h.handle}` : `Remove ${h.handle}`}
+                      aria-label={confirming ? `Confirm removal of ${shown}` : `Remove ${shown}`}
                       className={`flex shrink-0 items-center justify-center rounded-full border p-2 transition-all ${
                         confirming
                           ? "border-red-300 bg-red-50 px-3 text-xs font-semibold text-red-600"

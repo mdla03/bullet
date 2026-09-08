@@ -12,6 +12,7 @@ import {execSync} from "child_process";
 import fs from "fs";
 import path from "path";
 import {fileURLToPath} from "url";
+import * as snarkjs from "snarkjs";
 import {symIndex} from "./sym.mjs";
 import {commit} from "./jubjub-ref.mjs";
 
@@ -37,14 +38,22 @@ const PATH_ELEMENTS = Array(20).fill("0");  // all siblings are zero
 const PATH_INDICES = Array(20).fill(0);     // leaf is at index 0 (always left)
 
 // ── step 1: compile the helper circuit (wasm only, no r1cs/zkey needed) ──────
-if (!fs.existsSync(HELPER_WASM)) {
+// Recompiled whenever the source is newer than the wasm, not just when the wasm
+// is missing. build/*_js/ is gitignored, so the wasm is a local artifact that
+// outlives the source it was built from: an existing-but-stale one used to be
+// picked up silently, and the run failed several steps later with "Not all
+// inputs have been set" instead of naming the real problem.
+const helperStale =
+  !fs.existsSync(HELPER_WASM) ||
+  fs.statSync(HELPER_SRC).mtimeMs > fs.statSync(HELPER_WASM).mtimeMs;
+if (helperStale) {
   console.log("compiling helper circuit (compute_hashes.circom)...");
   execSync(
     `${CIRCOM} ${HELPER_SRC} --wasm --sym -p bls12381 -o ${BUILD}`,
     {stdio: "inherit"}
   );
 } else {
-  console.log("helper wasm exists, skipping compile.");
+  console.log("helper wasm is up to date, skipping compile.");
 }
 
 // ── step 2: run helper witness to extract nullifier and root ──────────────────
@@ -60,7 +69,7 @@ const helperSigIdx = symIndex(HELPER_SYM);
 
 // The Pedersen (Jubjub) commitment comes from the off-circuit reference in
 // jubjub-ref.mjs, which circuits/test/jubjub.test.mjs pins against the
-// in-circuit PedersenCommit gadget (21 tests). The helper circuit does not
+// in-circuit PedersenCommit gadget (23 tests). The helper circuit does not
 // compute it: see the note in src/compute_hashes.circom.
 function pedersen(amount, blinding) {
   const point = commit(amount, blinding);
@@ -158,6 +167,7 @@ const boundaryProofPath = path.join(BUILD, "claim_boundary_proof.json");
 const boundaryPublicPath = path.join(BUILD, "claim_boundary_public.json");
 const outOfRangePath = path.join(BUILD, "claim_input_outofrange.json");
 const tamperedPath = path.join(BUILD, "claim_public_tampered_commitment.json");
+const tamperedYPath = path.join(BUILD, "claim_public_tampered_commitment_cy.json");
 
 const AMOUNT_MAX = (1n << 64n) - 1n;  // AMOUNT_BITS = 64 in claim.circom
 
@@ -195,21 +205,50 @@ if (!outOfRangeRejected) {
   throw new Error("amount = 2^64 produced a witness: the range proof is not binding");
 }
 
-// (c) tampered commitment: the valid proof's public signals with the Pedersen
-//     x coordinate incremented. Same proof, so verify must return false.
-const tampered = JSON.parse(fs.readFileSync(publicPath, "utf8"));
-const X_INDEX = 5;  // [root, nullifier, recipientDigest, amount, tokenId, cx, cy]
-tampered[X_INDEX] = (BigInt(tampered[X_INDEX]) + 1n).toString();
-fs.writeFileSync(tamperedPath, JSON.stringify(tampered, null, 1));
-console.log("[vector] tampered commitment x: expecting verify false...");
-let tamperRejected = false;
-try {
-  execSync(`${SNJ} groth16 verify ${CLAIM_VK} ${tamperedPath} ${proofPath}`, {stdio: "pipe"});
-} catch {
-  tamperRejected = true;
+// (c, d) tampered commitment: the valid proof's public signals with one
+//     Pedersen coordinate incremented. Same proof, so verify must return FALSE.
+//
+//     snarkjs is called as a library here, not through the CLI. The CLI exits
+//     non-zero for a rejected proof AND for a missing file, a malformed vk, or
+//     an argument typo, so "it threw" was never evidence that the commitment is
+//     bound: this block used to pass if the vk path went stale. groth16.verify()
+//     returns a boolean, which is the thing actually being asserted.
+const vkJson = JSON.parse(fs.readFileSync(CLAIM_VK, "utf8"));
+const proofJson = JSON.parse(fs.readFileSync(proofPath, "utf8"));
+const validSignals = JSON.parse(fs.readFileSync(publicPath, "utf8"));
+
+// Control. A `false` below proves nothing unless the same call returns `true`
+// for the untouched signals, on the same vk and the same proof object.
+const baseline = await snarkjs.groth16.verify(vkJson, validSignals, proofJson);
+if (baseline !== true) {
+  throw new Error(
+    `in-process verify returned ${baseline} for the UNTAMPERED signals; ` +
+    "the tampered vectors below would be meaningless"
+  );
 }
-if (!tamperRejected) {
-  throw new Error("tampered commitment still verified: the commitment is not bound");
+console.log("[control] untampered public signals verify:", baseline);
+
+// [root, nullifier, recipientDigest, amount, tokenId, cx, cy]
+const COMMITMENT_INDEX = {cx: 5, cy: 6};
+for (const [coord, index, outPath] of [
+  ["cx", COMMITMENT_INDEX.cx, tamperedPath],
+  ["cy", COMMITMENT_INDEX.cy, tamperedYPath],
+]) {
+  const tampered = validSignals.slice();
+  tampered[index] = (BigInt(tampered[index]) + 1n).toString();
+  if (tampered[index] === validSignals[index]) {
+    throw new Error(`tampering ${coord} (index ${index}) did not change the signal`);
+  }
+  fs.writeFileSync(outPath, JSON.stringify(tampered, null, 1));
+
+  const ok = await snarkjs.groth16.verify(vkJson, tampered, proofJson);
+  console.log(`[vector] tampered commitment ${coord} (index ${index}): verify ->`, ok);
+  if (ok !== false) {
+    throw new Error(
+      `tampered commitment ${coord} verified as ${ok}: that coordinate is not bound ` +
+      "to the proof"
+    );
+  }
 }
 
 // ── cleanup temp files ────────────────────────────────────────────────────────
@@ -223,5 +262,10 @@ console.log("  claim_public.json");
 console.log("Test vectors:");
 console.log("  claim_input_boundary.json / claim_boundary_{proof,public}.json  (valid at 2^64-1)");
 console.log("  claim_input_outofrange.json                                    (no witness at 2^64)");
-console.log("  claim_public_tampered_commitment.json                          (verify false)");
-console.log("public signals:", JSON.parse(fs.readFileSync(publicPath, "utf8")));
+console.log("  claim_public_tampered_commitment.json                          (cx, verify false)");
+console.log("  claim_public_tampered_commitment_cy.json                       (cy, verify false)");
+console.log("public signals:", validSignals);
+
+// snarkjs leaves its wasm curve workers running, so an otherwise finished
+// script would hang here instead of exiting.
+await globalThis.curve_bls12381?.terminate();

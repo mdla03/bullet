@@ -293,9 +293,12 @@ Section 5's table is the Poseidon-shape record and does not apply to this circui
 | Valid proof (secret=12345, recipientDigest=42, amount=10, tokenId=0, blinding=999999) | `snarkjs groth16 verify` | **OK** — verifies true |
 | Boundary amount (`amount = 2^64 - 1`) | full witness → prove → verify | **OK** — valid proof, verifies true, so the bound is not off by one |
 | Out-of-range amount (`amount = 2^64`, with the Merkle root and Pedersen commitment recomputed for that amount so only the range is wrong) | `snarkjs wtns calculate` | **Assert Failed** in `Num2Bits` — no witness, so no proof can be constructed |
-| Tampered commitment (`amountCommitmentX + 1`, public signal index 5) | same proof, mutated public signals, `snarkjs groth16 verify` | **Invalid proof** — verify returns false |
+| Tampered commitment x (`amountCommitmentX + 1`, public signal index 5) | same proof, mutated public signals, `snarkjs.groth16.verify()` | **Invalid proof**, verify returns false |
+| Tampered commitment y (`amountCommitmentY + 1`, public signal index 6) | same proof, mutated public signals, `snarkjs.groth16.verify()` | **Invalid proof**, verify returns false |
 
-`circuits/scripts/gen-test-proof.mjs` writes all four and asserts each outcome as it goes, including that the out-of-range failure is in `Num2Bits` and not somewhere else. A vector that started passing for the wrong reason fails the script rather than being committed. This matters because the previous hand-written vectors went stale in the Pedersen swap: the committed boundary proof stopped verifying against `claim_vk.json` and nothing noticed, since nothing regenerated or re-checked them.
+`circuits/scripts/gen-test-proof.mjs` writes all five and asserts each outcome as it goes, including that the out-of-range failure is in `Num2Bits` and not somewhere else.
+
+The two tampered vectors are checked with snarkjs as a library, asserting `groth16.verify()` returns literally `false`. The CLI was used before, and its non-zero exit meant only "something went wrong": a stale vk path or a typo'd argument satisfied the check just as well as a rejected proof did. The script also verifies the untampered signals return `true` on the same vk and the same proof object first, so a `false` cannot come from a broken harness. A vector that started passing for the wrong reason fails the script rather than being committed. This matters because the previous hand-written vectors went stale in the Pedersen swap: the committed boundary proof stopped verifying against `claim_vk.json` and nothing noticed, since nothing regenerated or re-checked them.
 
 The circuit's 64-bit bound and the contract's `AMOUNT_MAX_EXCLUSIVE = 1i128 << 64` are the two halves of one mechanism and are equal, as the `claim.circom` header requires.
 
@@ -303,13 +306,15 @@ The circuit's 64-bit bound and the contract's `AMOUNT_MAX_EXCLUSIVE = 1i128 << 6
 
 ```
 cd circuits && npm install
-npm test                                    # 21 Jubjub/Pedersen cross-checks
+npm test                                    # 23 Jubjub/Pedersen cross-checks
 node scripts/jubjub-ref.mjs                 # generator + Montgomery constants, self-check
-node scripts/gen-test-proof.mjs             # the four vectors in 7.4
+node scripts/gen-test-proof.mjs             # the five vectors in 7.4
 cd ../contracts && cargo test -p verifier real_7in_claim_proof_verify_cost -- --nocapture
 ```
 
-`npm test` compiles the harness circuits in `circuits/test/` first (`scripts/build-jubjub-tests.sh`); they are gitignored, so a fresh clone has to build them. Both need `circom` for BLS12-381, found at `$CIRCOM` or `~/.local/bin/circom`.
+`npm test` compiles the harness circuits in `circuits/test/` first (`scripts/build-jubjub-tests.sh`); they are gitignored, so a fresh clone has to build them. Both need `circom` for BLS12-381, found at `$CIRCOM` or `~/.local/bin/circom`. The random inputs in `jubjub.test.mjs` come from a seeded generator and the seed is printed on every run: re-run with `JUBJUB_SEED=<seed>` to replay a failure exactly.
+
+The `bench_verify_real` path used above is behind the `real-proof` cargo feature (off by default, so the default `verifier` wasm build does not export `zeekpay`'s product contract ABI); `contracts/verifier/Cargo.toml` enables it automatically for the test target via a self dev-dependency, so no extra `--features` flag is needed for the command above.
 
 ### 7.6 Gate verdict for the Pedersen shape
 

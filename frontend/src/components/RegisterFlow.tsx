@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import type { Provider, Session } from "@supabase/supabase-js";
+import type { Session } from "@supabase/supabase-js";
 import type { SVGProps } from "react";
 import {
   CheckIcon,
@@ -13,10 +13,13 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { apiFetch, getMe, lookupEmailProviders, type MeResponse } from "@/lib/api";
 import { Skeleton } from "@/components/Skeleton";
-import { enabledHandleTypes } from "@zeekpay/shared";
+import { enabledHandleTypes, type OAuthProviderId } from "@zeekpay/shared";
 import {
   OAUTH_ICON,
+  displayHandle,
   isOAuthProof,
+  oauthHandleTypes,
+  oauthProviderForIdentity,
   providerIcon,
   providerRank,
 } from "@/lib/handle-ui";
@@ -29,21 +32,37 @@ import {
 
 // Sign-in buttons: every enabled handle type proven via Supabase OAuth.
 const PROVIDERS: {
-  key: Provider;
+  key: OAuthProviderId;
   label: string;
   icon: (p: SVGProps<SVGSVGElement>) => React.ReactElement;
-  enabled: boolean;
-}[] = enabledHandleTypes().flatMap((h) => {
-  if (!isOAuthProof(h.proof)) return [];
-  return [
-    {
-      key: h.proof.provider,
-      label: h.label,
-      icon: OAUTH_ICON[h.id] ?? MailIcon,
-      enabled: true,
-    },
-  ];
-});
+}[] = oauthHandleTypes().map((h) => ({
+  key: h.proof.provider,
+  label: h.label,
+  icon: OAUTH_ICON[h.id] ?? MailIcon,
+}));
+
+// Raw auth.identities.provider values that mean "this account signs in through
+// OAuth", taken from the registry rather than a hardcoded list, so a type
+// enabled there (GitHub) is recognised here without a second edit. X alone
+// contributes three of them.
+const OAUTH_IDENTITY_PROVIDERS = new Set(
+  enabledHandleTypes().flatMap((h) => (isOAuthProof(h.proof) ? h.identityProviders : []))
+);
+
+/** "Google", "Google or X", "Google, X or GitHub". */
+function joinLabels(labels: string[]): string {
+  if (labels.length <= 1) return labels[0] ?? "";
+  return `${labels.slice(0, -1).join(", ")} or ${labels[labels.length - 1]}`;
+}
+
+const ALL_OAUTH_LABELS = joinLabels(PROVIDERS.map((p) => p.label));
+
+/** The OAuth provider an account signs in with, from the identity providers
+ *  /auth/lookup reported. null when none of them is one we offer. */
+function oauthOnlyFrom(providers: string[]): OAuthProviderId | null {
+  const raw = providers.find((p) => OAUTH_IDENTITY_PROVIDERS.has(p));
+  return raw ? oauthProviderForIdentity(raw) : null;
+}
 
 const OAUTH_ERRORS: Record<string, string> = {
   missing_code: "The sign-in didn't complete. Start again.",
@@ -56,7 +75,7 @@ export function RegisterFlow({
   changeWallet,
 }: {
   oauthError?: string;
-  autoProvider?: "google" | "x";
+  autoProvider?: OAuthProviderId;
   /** Arrived from "Change wallet": run the wallet steps even though one is
    *  already linked. */
   changeWallet?: boolean;
@@ -74,8 +93,8 @@ export function RegisterFlow({
   const [sentAt, setSentAt] = useState(0);
   const [resendIn, setResendIn] = useState(0);
   // provider === null means we know the email is OAuth-only but not which one;
-  // UI then offers both Google and X.
-  const [oauthOnly, setOauthOnly] = useState<{ provider: "google" | "x" | null } | null>(null);
+  // the UI then offers every OAuth provider.
+  const [oauthOnly, setOauthOnly] = useState<{ provider: OAuthProviderId | null } | null>(null);
   const [changing, setChanging] = useState(Boolean(changeWallet));
   // Unclaimed notes on the wallet being replaced. Shown before the switch:
   // they stay claimable only with that wallet.
@@ -155,7 +174,7 @@ export function RegisterFlow({
     return () => clearInterval(id);
   }, [sentAt]);
 
-  async function signIn(provider: Provider) {
+  async function signIn(provider: OAuthProviderId) {
     setError("");
     setWorking("oauth");
     const { error: oauthErr } = await supabase.auth.signInWithOAuth({
@@ -182,12 +201,10 @@ export function RegisterFlow({
         providers: [] as string[],
       }));
       const hasEmail = providers.includes("email");
-      const oauth = providers.find((p) =>
-        ["google", "twitter", "twitter_v2"].includes(p)
-      );
+      const oauth = oauthOnlyFrom(providers);
       if (providers.length > 0 && !hasEmail && oauth) {
         setWorking("");
-        setOauthOnly({ provider: oauth === "google" ? "google" : "x" });
+        setOauthOnly({ provider: oauth });
         return;
       }
     }
@@ -219,12 +236,7 @@ export function RegisterFlow({
         const { providers } = await lookupEmailProviders(trimmed).catch(() => ({
           providers: [] as string[],
         }));
-        const oauth = providers.find((p) =>
-          ["google", "twitter", "twitter_v2"].includes(p)
-        );
-        setOauthOnly({
-          provider: oauth === "google" ? "google" : oauth ? "x" : null,
-        });
+        setOauthOnly({ provider: oauthOnlyFrom(providers) });
         return;
       }
       setError(
@@ -342,7 +354,9 @@ export function RegisterFlow({
 
   const linkedWallet = me?.wallet ?? null;
   const handles = me?.identities ?? [];
-  const primaryHandle = handles[0]?.handle ?? session?.user.email ?? "";
+  const primaryHandle = handles[0]
+    ? displayHandle(handles[0].provider, handles[0].handle)
+    : (session?.user.email ?? "");
   // While changing wallets the flow re-enters the wallet step even though one
   // is already linked.
   const needsWallet = !linkedWallet || changing;
@@ -389,24 +403,16 @@ export function RegisterFlow({
           {PROVIDERS.map((p) => (
             <button
               key={p.key}
-              onClick={() => p.enabled && signIn(p.key)}
-              disabled={!p.enabled || working === "oauth"}
-              className={`flex w-full items-center justify-center gap-3 rounded-full border px-5 py-3 font-medium transition-colors ${p.enabled
-                  ? "border-fog bg-white hover:border-graphite disabled:opacity-50"
-                  : "cursor-not-allowed border-fog bg-paper text-graphite/70"
-                }`}
+              onClick={() => signIn(p.key)}
+              disabled={working === "oauth"}
+              className="flex w-full items-center justify-center gap-3 rounded-full border border-fog bg-white px-5 py-3 font-medium transition-colors hover:border-graphite disabled:opacity-50"
             >
-              {working === "oauth" && p.enabled ? (
+              {working === "oauth" ? (
                 <LoaderIcon className="h-5 w-5 animate-spin" />
               ) : (
                 <p.icon className="h-5 w-5" />
               )}
               <span>Continue with {p.label}</span>
-              {!p.enabled && (
-                <span className="rounded-full border border-fog bg-white px-2 py-0.5 text-[10px] text-graphite">
-                  Soon
-                </span>
-              )}
             </button>
           ))}
         </div>
@@ -414,11 +420,10 @@ export function RegisterFlow({
 
       {/* Step 1b: oauth-only account detected */}
       {!session && oauthOnly && (() => {
-        const known = oauthOnly.provider
-          ? PROVIDERS.filter((x) => x.key === oauthOnly.provider)
-          : PROVIDERS.slice();
-        const primary = known[0];
-        const label = oauthOnly.provider ? primary.label : "Google or X";
+        // A known provider narrows to one button, otherwise offer them all.
+        const matched = PROVIDERS.filter((x) => x.key === oauthOnly.provider);
+        const known = matched.length > 0 ? matched : PROVIDERS;
+        const label = matched.length === 1 ? matched[0].label : ALL_OAUTH_LABELS;
         return (
           <div className="space-y-4">
             <h2 className="text-xl font-bold tracking-tight">
@@ -426,7 +431,7 @@ export function RegisterFlow({
             </h2>
             <p className="text-sm text-graphite">
               <span className="font-medium text-ink">{email}</span> is already
-              signed up with {label}. Use {oauthOnly.provider ? "that" : "one of those"} to sign in.
+              signed up with {label}. Use {matched.length === 1 ? "that" : "one of those"} to sign in.
             </p>
             {known.map((p, i) => (
               <button
@@ -662,7 +667,9 @@ export function RegisterFlow({
                     className="flex items-center gap-3 rounded-xl border border-fog px-4 py-3 text-sm"
                   >
                     <Icon className="h-4 w-4 shrink-0" />
-                    <span className="min-w-0 flex-1 truncate font-medium">{h.handle}</span>
+                    <span className="min-w-0 flex-1 truncate font-medium">
+                      {displayHandle(h.provider, h.handle)}
+                    </span>
                   </div>
                 );
               })}

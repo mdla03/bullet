@@ -1,7 +1,33 @@
 -- Adds GitHub to the trigger that turns a linked Supabase identity into a
--- handles row. Mirrors the deployed function; the only change is the github
--- branch. Canonical GitHub handle is the bare lowercase username, matching
--- parseGithub in shared/src/handles.ts.
+-- handles row, and namespaces the GitHub canonical form.
+--
+-- APPLY ORDER: handles_schema.sql, then THIS FILE, then handles_unique.sql.
+-- The data migration at the top of this file has to run before the unique index
+-- is created, or a pre-existing bare "alice" GitHub row and a future "alice"
+-- from another bare-name provider would already be a duplicate.
+--
+-- WHY THE NAMESPACE. public.handles keys the resolver on one handle_normalized
+-- column. The GitHub canonical form used to be the bare lowercase login, which
+-- collides with any other bare-name provider (a Discord or Telegram "alice"
+-- resolves to the same string as a GitHub "alice", and whichever row the
+-- resolver happened to pick would take the other person's payments). The
+-- canonical form is now 'github:' || lower(login), matching parseGithub in
+-- shared/src/handles.ts. Display strips the prefix back off (format() there);
+-- the UI shows the bare login next to the GitHub icon.
+--
+-- ── one-time data migration ──────────────────────────────────────────────────
+-- Existing rows were written with the bare login. Idempotent: the NOT LIKE
+-- makes a second run a no-op, and no other provider is touched.
+update public.handles
+   set handle            = 'github:' || handle,
+       handle_normalized = 'github:' || handle_normalized
+ where provider = 'github'
+   and handle_normalized not like 'github:%';
+
+-- ── the trigger function ─────────────────────────────────────────────────────
+--
+-- Mirrors the deployed function. The github branch and the delete-then-insert
+-- below are the changes.
 --
 -- Applied to the project on 2026-09-08. CONFIRMED APPLIED 2026-09-09 by
 -- introspecting the live catalog:
@@ -22,13 +48,17 @@
 --   provider | handle | handle_normalized | subject   | linked_at
 --   github   | mdla03 | mdla03            | 119711499 | 2026-09-08 19:08:19+00
 --
+-- (That row predates the namespace; the migration above rewrites it to
+-- github:mdla03.)
+--
 -- That single row closes three separate unknowns at once: the provider is
 -- configured in Supabase Auth, the trigger fires on the github branch, and
 -- identity_data really does carry user_name/preferred_username. The last one
 -- was the risk worth testing: if it carried neither, v_handle would be null,
 -- the guard below would return early, and NO handle row would be created with
--- no error raised anywhere. Silent. Re-test this way, not by reading the
--- function, after any change to the branch.
+-- no error raised anywhere. Silent. That silence is why the guard now raises a
+-- warning. Re-test this way, not by reading the function, after any change to
+-- the branch.
 --
 -- `subject` is GitHub's numeric user id, not the login, so the
 -- `on conflict (provider, subject)` upsert survives a username change.
@@ -50,15 +80,39 @@ begin
     v_handle := lower(new.identity_data->>'email');
   elsif new.provider = 'github' then
     -- Supabase's GitHub provider sets user_name and preferred_username to the login.
-    v_handle := lower(coalesce(new.identity_data->>'user_name',
-                               new.identity_data->>'preferred_username'));
+    -- Namespaced so a bare login cannot collide with another provider's.
+    v_handle := 'github:' || lower(coalesce(new.identity_data->>'user_name',
+                                            new.identity_data->>'preferred_username'));
   else
     return new;
   end if;
 
   if v_handle is null or v_handle = '@' or v_handle = '' then
+    -- Used to return silently, which is how a provider that stops sending the
+    -- field would look exactly like a provider that was never configured.
+    raise warning 'handle_new_identity: % identity % had no usable handle field',
+      new.provider, new.provider_id;
     return new;
   end if;
+
+  -- Charset guard, mirroring parseGithub in shared/src/handles.ts. A login the
+  -- registry would refuse to parse must never reach the table: the resolver
+  -- could then hold a key nothing can look up.
+  if new.provider = 'github'
+     and v_handle !~ '^github:[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$' then
+    raise warning 'handle_new_identity: github identity % has an unparseable login %',
+      new.provider_id, v_handle;
+    return new;
+  end if;
+
+  -- Newest proven control wins. Handles move between people (GitHub logins get
+  -- renamed and re-registered, X handles get released), and the person standing
+  -- in front of Supabase right now has just proven control of this one. Without
+  -- this delete the unique index on handle_normalized would reject their row
+  -- and leave the payments flowing to the previous owner.
+  delete from public.handles
+   where handle_normalized = v_handle
+     and (provider, subject) <> (new.provider, new.provider_id);
 
   insert into public.handles (user_id, provider, subject, handle, handle_normalized)
   values (new.user_id, new.provider, new.provider_id, v_handle, v_handle)
@@ -68,6 +122,9 @@ begin
 
   return new;
 exception when unique_violation then
+  -- Live once handles_unique.sql has been applied: a row inserted between the
+  -- delete above and this insert raises here. Swallowing it keeps the identity
+  -- link itself from failing; the loser retries on their next sign-in.
   return new;
 end;
 $function$;

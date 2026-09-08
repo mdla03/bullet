@@ -17,6 +17,51 @@ import { G, H, add, double, mul, isOnCurve, subgroupOrder, commit, randomBlindin
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BUILD = path.join(HERE, 'build');
 
+// Reproducible "random" inputs. A failure that reproduces only on the run that
+// found it is not a failure anyone can fix, so every random value below comes
+// from a seeded xorshift32 rather than Math.random(). The seed is printed on
+// every run: to replay a failing one, re-run with JUBJUB_SEED set to it.
+const SEED = (Number(process.env.JUBJUB_SEED ?? 0x5eed1234) >>> 0) || 1;
+console.log(`jubjub.test.mjs random seed: ${SEED} (set JUBJUB_SEED to change)`);
+let rngState = SEED;
+function rand32() {
+  rngState ^= rngState << 13; rngState >>>= 0;
+  rngState ^= rngState >>> 17;
+  rngState ^= rngState << 5; rngState >>>= 0;
+  return rngState;
+}
+
+// The source line each range check sits on, read out of the circuit instead of
+// hardcoded. The witness error names the line, so the rejection tests below can
+// pin the exact constraint that failed rather than accepting any failure
+// anywhere in PedersenCommit: the amount bound and the blinding bound are two
+// different Num2Bits instances and would otherwise be indistinguishable.
+const PEDERSEN_SRC = fs
+  .readFileSync(path.join(HERE, '..', 'src', 'jubjub', 'pedersen_commit.circom'), 'utf8')
+  .split(/\r?\n/);
+function circuitLineOf(needle) {
+  const i = PEDERSEN_SRC.findIndex((l) => l.includes(needle));
+  assert.ok(i >= 0, `pedersen_commit.circom no longer contains "${needle}"`);
+  return i + 1;
+}
+const AMOUNT_RANGE_LINE = circuitLineOf('amountBits.in <== amount;');
+const BLINDING_RANGE_LINE = circuitLineOf('blindingBits.in <== blinding;');
+assert.notEqual(AMOUNT_RANGE_LINE, BLINDING_RANGE_LINE);
+
+/** Asserts the witness failed in `template` at `line` of pedersen_commit.circom
+ *  and nowhere else. snarkjs puts both in the thrown message, e.g.
+ *  "Assert Failed. Error in template Num2Bits_0 line: 38
+ *   Error in template PedersenCommit_14 line: 55". */
+function failsAt(template, line) {
+  return (e) => {
+    assert.match(e.message, new RegExp(`template ${template}_\\d+ line:`),
+      `expected the failure inside ${template}, got: ${e.message}`);
+    assert.match(e.message, new RegExp(`template PedersenCommit_\\d+ line: ${line}\\b`),
+      `expected the failure at pedersen_commit.circom line ${line}, got: ${e.message}`);
+    return true;
+  };
+}
+
 function symIndexFor(circuitName) {
   return symIndex(path.join(BUILD, `${circuitName}.sym`));
 }
@@ -25,8 +70,9 @@ function symIndexFor(circuitName) {
 // spawn). Returns the witness as an array of decimal strings, or throws if
 // witness generation fails (e.g. an unsatisfied constraint, such as
 // JubjubCheck rejecting an off-curve point).
+let wtnsCounter = 0;
 async function calculateWitness(circuitName, input) {
-  const tag = Math.random().toString(36).slice(2);
+  const tag = `${process.pid}_${wtnsCounter++}`;
   const wtnsPath = path.join(BUILD, `_${circuitName}_${tag}.wtns`);
   const wasmPath = path.join(BUILD, `${circuitName}_js`, `${circuitName}.wasm`);
   try {
@@ -40,14 +86,23 @@ async function calculateWitness(circuitName, input) {
 
 function randomPoint() {
   // A random valid curve point: k*G for a random small-ish scalar.
-  const k = BigInt(1 + Math.floor(Math.random() * 1_000_000));
+  const k = BigInt(1 + (rand32() % 1_000_000));
   return mul(k, G);
 }
 
 function randomScalar64() {
   let v = 0n;
-  for (let i = 0; i < 8; i++) v = (v << 8n) | BigInt(Math.floor(Math.random() * 256));
+  for (let i = 0; i < 8; i++) v = (v << 8n) | BigInt(rand32() & 0xff);
   return v & ((1n << 64n) - 1n);
+}
+
+/** Seeded stand-in for jubjub-ref's randomBlinding(), same [0, 2^251) range.
+ *  The reference's own crypto-random version is exercised by the sanity test at
+ *  the bottom; the commitment tests need a value they can reproduce. */
+function seededBlinding() {
+  let v = 0n;
+  for (let i = 0; i < 32; i++) v = (v << 8n) | BigInt(rand32() & 0xff);
+  return v & (blindingMax - 1n);
 }
 
 // ── JubjubAdd ────────────────────────────────────────────────────────────────
@@ -99,7 +154,13 @@ test('JubjubCheck: accepts a random valid point', async () => {
 
 test('JubjubCheck: rejects an off-curve point', async () => {
   assert.ok(!isOnCurve({ x: 1n, y: 1n }));
-  await assert.rejects(calculateWitness('jubjub_check_test', { x: '1', y: '1' }));
+  // Matched on the component name: (1,1) is off-curve, so the ONLY constraint
+  // that may reject it is JubjubCheck's curve equation. Any other unsatisfied
+  // constraint would be this test passing for the wrong reason.
+  await assert.rejects(
+    calculateWitness('jubjub_check_test', { x: '1', y: '1' }),
+    /template JubjubCheck_\d+ line:/
+  );
 });
 
 // ── EscalarMulFix ────────────────────────────────────────────────────────────
@@ -128,8 +189,9 @@ async function checkCommit(amount, blinding) {
     amount: amount.toString(), blinding: blinding.toString(),
   });
   const expected = commit(amount, blinding);
-  assert.strictEqual(w[idx['main.cx']], expected.x.toString());
-  assert.strictEqual(w[idx['main.cy']], expected.y.toString());
+  const where = `amount=${amount} blinding=${blinding} (seed ${SEED})`;
+  assert.strictEqual(w[idx['main.cx']], expected.x.toString(), `cx mismatch for ${where}`);
+  assert.strictEqual(w[idx['main.cy']], expected.y.toString(), `cy mismatch for ${where}`);
   return expected;
 }
 
@@ -148,15 +210,32 @@ test('PedersenCommit: (0, 0) is the identity point', async () => {
 });
 
 test('PedersenCommit: amount 2^64-1 with a random blinding', () =>
-  checkCommit((1n << 64n) - 1n, randomBlinding()));
+  checkCommit((1n << 64n) - 1n, seededBlinding()));
 
 test('PedersenCommit: random 64-bit amount with a random blinding', () =>
-  checkCommit(randomScalar64(), randomBlinding()));
+  checkCommit(randomScalar64(), seededBlinding()));
 
 test('PedersenCommit: rejects amount = 2^64', () =>
-  assert.rejects(calculateWitness('pedersen_commit_test', {
-    amount: (1n << 64n).toString(), blinding: '0',
-  })));
+  assert.rejects(
+    calculateWitness('pedersen_commit_test', {
+      amount: (1n << 64n).toString(), blinding: '0',
+    }),
+    // Pinned to the amount decomposition. The blinding has its own Num2Bits a
+    // few lines down, and a rejection there would mean the amount bound is not
+    // the thing being proven.
+    failsAt('Num2Bits', AMOUNT_RANGE_LINE)
+  ));
+
+test('PedersenCommit: rejects blinding = 2^251', () =>
+  assert.rejects(
+    calculateWitness('pedersen_commit_test', {
+      amount: '1', blinding: blindingMax.toString(),
+    }),
+    failsAt('Num2Bits', BLINDING_RANGE_LINE)
+  ));
+
+test('PedersenCommit: accepts blinding = 2^251 - 1, the largest in range', () =>
+  checkCommit(1n, blindingMax - 1n));
 
 // sanity on the reference itself, so a broken subgroupOrder import fails loud
 test('reference sanity: subgroupOrder is nonzero', () => {

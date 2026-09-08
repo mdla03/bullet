@@ -40,7 +40,7 @@ const rsOut = path.join(
 );
 // groth16_fixture.rs is pinned at the 5-public-input shape ON PURPOSE. The
 // deployed contract's derive_public_inputs pushes 5 Fr while claim.circom now
-// has 6, and verifier::verify rejects the mismatch before any pairing math, so
+// has 7, and verifier::verify rejects the mismatch before any pairing math, so
 // the staleness is safe rather than silently broken. Regenerating this file on
 // its own does not fix anything, it just moves the mismatch: see the D1 -> D2
 // handoff in pipeline/circom-circuit/changes.md, which lists the four changes

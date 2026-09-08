@@ -9,6 +9,11 @@ export interface ResolveResult {
   zeekPayPubKey?: string;
   contractAddress?: string;
   usdcSac?: string;
+  /** Set (with an HTTP 300 status) when the query's candidate canonical forms
+   *  matched more than one person, e.g. a bare "alice" matching both an X and
+   *  a GitHub user. The canonical handles that matched, for a disambiguation
+   *  prompt; found is always false alongside this. */
+  candidates?: string[];
 }
 
 export interface RegisterRequest {

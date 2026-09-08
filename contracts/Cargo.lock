@@ -1553,6 +1553,7 @@ dependencies = [
  "ark-ff",
  "hex",
  "soroban-sdk",
+ "verifier",
  "zeekpay",
 ]
 

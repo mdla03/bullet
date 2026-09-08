@@ -1,20 +1,55 @@
-import type { Provider } from "@supabase/supabase-js";
 import type { SVGProps } from "react";
 import {
   enabledHandleTypes,
   handleTypeForIdentityProvider,
   type HandleProof,
+  type HandleType,
   type HandleTypeId,
+  type OAuthProviderId,
 } from "@zeekpay/shared";
 import { GithubIcon, GoogleIcon, MailIcon, XBrandIcon } from "@/components/icons";
 
-/** Narrows a handle type's proof to the OAuth-backed variant, typing its
- *  provider as a Supabase `Provider` (register/account pass it straight into
- *  signInWithOAuth / linkIdentity). */
-export function isOAuthProof(
-  p: HandleProof
-): p is { type: "supabase-oauth"; provider: Provider } {
+/** The OAuth-backed variant of a handle proof. Its `provider` is the registry's
+ *  own `OAuthProviderId`, every member of which is also a Supabase `Provider`,
+ *  so register/account can pass it straight into signInWithOAuth /
+ *  linkIdentity. */
+export type OAuthProof = Extract<HandleProof, { type: "supabase-oauth" }>;
+
+/** Narrows a handle type's proof to the OAuth-backed variant. The narrowing is
+ *  real: it restates a member of the union rather than asserting an unrelated
+ *  provider type onto it. */
+export function isOAuthProof(p: HandleProof): p is OAuthProof {
   return p.type === "supabase-oauth";
+}
+
+/** An enabled handle type whose proof is OAuth-backed. */
+export type OAuthHandleType = Omit<HandleType, "proof"> & { proof: OAuthProof };
+
+/** OAuth handle types the register/account UI offers, in registry order. The
+ *  single source for "which providers do we sign in with": no screen should
+ *  carry its own provider list. */
+export function oauthHandleTypes(): OAuthHandleType[] {
+  return enabledHandleTypes().flatMap((h) =>
+    isOAuthProof(h.proof) ? [{ ...h, proof: h.proof }] : []
+  );
+}
+
+/** Registry OAuth provider id for a raw auth.identities.provider value
+ *  ("twitter_v2" -> "x"), or null when no enabled OAuth type claims it. */
+export function oauthProviderForIdentity(provider: string): OAuthProviderId | null {
+  const handleType = handleTypeForIdentityProvider(provider);
+  return handleType && handleType.enabled && isOAuthProof(handleType.proof)
+    ? handleType.proof.provider
+    : null;
+}
+
+/** A stored handle as it should read on screen. Canonical forms are namespaced
+ *  so they stay unique in one column ("github:torvalds"); the registry's
+ *  format() strips that back off for display, and is the identity function for
+ *  every type whose canonical form is already the display form. */
+export function displayHandle(provider: string, handle: string | null | undefined): string {
+  if (!handle) return "";
+  return handleTypeForIdentityProvider(provider)?.format(handle) ?? handle;
 }
 
 // Icons for the OAuth-backed handle types. Discord/telegram stay hidden

@@ -8,11 +8,13 @@
 use soroban_sdk::{BytesN, Env};
 
 use crate::{BenchContract, BenchContractClient};
+#[cfg(feature = "real-proof")]
 use crate::claim_fixture_7in as fx;
 
 /// Soroban network per-transaction CPU instruction limit.
 const TX_CPU_LIMIT: u64 = 100_000_000;
 
+#[cfg(feature = "real-proof")]
 fn hex_to<const N: usize>(env: &Env, h: &str) -> BytesN<N> {
     let v = hex::decode(h).unwrap();
     let a: [u8; N] = v.try_into().unwrap();
@@ -97,6 +99,7 @@ fn cost_scaling_table() {
 /// budget-metered `env.register` + client-call path `measure()` above uses.
 /// A cost number for a proof that doesn't verify is meaningless, so this
 /// also asserts the real proof verifies `true`.
+#[cfg(feature = "real-proof")]
 #[test]
 fn real_7in_claim_proof_verify_cost() {
     let env = Env::default();

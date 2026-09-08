@@ -1,4 +1,5 @@
 import { RegisterFlow } from "@/components/RegisterFlow";
+import { asOAuthProviderId } from "@zeekpay/shared";
 
 export const metadata = { title: "Sign in · bullet" };
 
@@ -8,10 +9,8 @@ export default async function RegisterPage({
   searchParams: Promise<{ error?: string; provider?: string; change?: string }>;
 }) {
   const params = await searchParams;
-  const autoProvider =
-    params.provider === "google" || params.provider === "x"
-      ? params.provider
-      : undefined;
+  // ?provider= is untrusted; the registry decides which ids are real.
+  const autoProvider = asOAuthProviderId(params.provider);
   const changeWallet = params.change === "1";
 
   return (
