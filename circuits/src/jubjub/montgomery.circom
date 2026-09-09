@@ -1,0 +1,170 @@
+/*
+    Copyright 2018 0KIMS association.
+
+    This file is part of circom (Zero Knowledge Circuit Compiler).
+
+    circom is a free software: you can redistribute it and/or modify it
+    under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    circom is distributed in the hope that it will be useful, but WITHOUT
+    ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+    or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public
+    License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with circom. If not, see <https://www.gnu.org/licenses/>.
+*/
+// Ported from: circomlib/circuits/montgomery.circom (circomlib v2.0.5, vendored
+// in circuits/node_modules/circomlib).
+// Changes from the original:
+//   - a, d replaced with Jubjub's curve constants (see circuits/scripts/jubjub-ref.mjs).
+//   - The A = 2*(a+d)/(a-d) and B = 4/(a-d) derivations are left as compile-time
+//     expressions over a/d, unchanged; on Jubjub they evaluate to A=40962 and
+//     B=-40964 mod r, against Baby Jubjub's A=168698, B=1. Both are asserted in
+//     jubjub-ref.mjs as montgomeryA/montgomeryB.
+//     Do NOT hardcode B=1 here. The Zcash spec's B=1 is for a differently-scaled
+//     Montgomery model; the map Edwards2Montgomery below implements pins
+//     B = 4/(a-d). Substituting 1 fails all 7 EscalarMulFix cases in
+//     circuits/test/jubjub.test.mjs (verified by mutation).
+// Only valid when compiled with `circom -p bls12381`.
+
+/*
+    Source: https://en.wikipedia.org/wiki/Montgomery_curve
+
+                1 + y       1 + y
+    [u, v] = [ -------  , ---------- ]
+                1 - y      (1 - y)x
+
+ */
+ pragma circom 2.0.0;
+
+template Edwards2Montgomery() {
+    signal input in[2];
+    signal output out[2];
+
+    out[0] <-- (1 + in[1]) / (1 - in[1]);
+    out[1] <-- out[0] / in[0];
+
+
+    out[0] * (1-in[1]) === (1 + in[1]);
+    out[1] * in[0] === out[0];
+}
+
+/*
+
+                u    u - 1
+    [x, y] = [ ---, ------- ]
+                v    u + 1
+
+ */
+template Montgomery2Edwards() {
+    signal input in[2];
+    signal output out[2];
+
+    out[0] <-- in[0] / in[1];
+    out[1] <-- (in[0] - 1) / (in[0] + 1);
+
+    out[0] * in[1] === in[0];
+    out[1] * (in[0] + 1) === in[0] - 1;
+}
+
+
+/*
+             x2 - x1
+    lamda = ---------
+             y2 - y1
+
+                                                    x3 + A + x1 + x2
+    x3 = B * lamda^2 - A - x1 -x2    =>  lamda^2 = ------------------
+                                                         B
+
+    y3 = (2*x1 + x2 + A)*lamda - B*lamda^3 - y1  =>
+
+
+    =>  y3 = lamda * ( 2*x1 + x2 + A  - x3 - A - x1 - x2)  - y1 =>
+
+    =>  y3 = lamda * ( x1 - x3 ) - y1
+
+----------
+
+             y2 - y1
+    lamda = ---------
+             x2 - x1
+
+    x3 = B * lamda^2 - A - x1 -x2
+
+    y3 = lamda * ( x1 - x3 ) - y1
+
+ */
+
+// Precondition: in1 and in2 must be non-identity points with distinct x
+// coordinates. The lamda division is unconstrained division by
+// (in2[0] - in1[0]); if that divisor is zero (equal x, x = 0, or an
+// identity input), the constraint degenerates or becomes unsatisfiable (P and
+// minus P share an x coordinate but differ in y, which the constraint cannot
+// satisfy) and lamda is left unconstrained in the degenerate case.
+// EscalarMulFix satisfies this precondition via its
+// accumulator separation (segments never add a point to itself or to the
+// identity), a property inherited from circomlib.
+template MontgomeryAdd() {
+    signal input in1[2];
+    signal input in2[2];
+    signal output out[2];
+
+    var a = 52435875175126190479447740508185965837690552500527637822603658699938581184512;
+    var d = 19257038036680949359750312669786877991949435402254120286184196891950884077233;
+
+    var A = (2 * (a + d)) / (a - d);
+    var B = 4 / (a - d);
+
+    signal lamda;
+
+    lamda <-- (in2[1] - in1[1]) / (in2[0] - in1[0]);
+    lamda * (in2[0] - in1[0]) === (in2[1] - in1[1]);
+
+    out[0] <== B*lamda*lamda - A - in1[0] -in2[0];
+    out[1] <== lamda * (in1[0] - out[0]) - in1[1];
+}
+
+/*
+
+    x1_2 = x1*x1
+
+             3*x1_2 + 2*A*x1 + 1
+    lamda = ---------------------
+                   2*B*y1
+
+    x3 = B * lamda^2 - A - x1 -x1
+
+    y3 = lamda * ( x1 - x3 ) - y1
+
+ */
+// Precondition: in must be a non-identity point with a non-zero y
+// coordinate. The lamda division is unconstrained division by (2*B*in[1]);
+// if in[1] is zero (identity or a 2-torsion point), the constraint
+// degenerates to 0 === 0 and lamda is left unconstrained. EscalarMulFix
+// satisfies this precondition via its accumulator separation, a property
+// inherited from circomlib.
+template MontgomeryDouble() {
+    signal input in[2];
+    signal output out[2];
+
+    var a = 52435875175126190479447740508185965837690552500527637822603658699938581184512;
+    var d = 19257038036680949359750312669786877991949435402254120286184196891950884077233;
+
+    var A = (2 * (a + d)) / (a - d);
+    var B = 4 / (a - d);
+
+    signal lamda;
+    signal x1_2;
+
+    x1_2 <== in[0] * in[0];
+
+    lamda <-- (3*x1_2 + 2*A*in[0] + 1 ) / (2*B*in[1]);
+    lamda * (2*B*in[1]) === (3*x1_2 + 2*A*in[0] + 1 );
+
+    out[0] <== B*lamda*lamda - A - 2*in[0];
+    out[1] <== lamda * (in[0] - out[0]) - in[1];
+}

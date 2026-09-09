@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { ResolveResult } from "@zeekpay/shared";
+import type { ResolveCandidate, ResolveResult } from "@zeekpay/shared";
+import { displayCanonical, displayHandle } from "@/lib/handle-ui";
 import { computeRecipientDigest } from "@/lib/recipient";
 import { deriveStealthDigest } from "@/lib/stealth";
 import { computeCommitment } from "@/lib/commitment";
@@ -83,6 +84,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
   const [recipient, setRecipient] = useState(initialRecipient ?? "");
   const [resolved, setResolved] = useState<ResolveResult | null>(null);
   const [unregistered, setUnregistered] = useState<string | null>(null);
+  const [candidates, setCandidates] = useState<ResolveCandidate[] | null>(null);
   const [expiryDays, setExpiryDays] = useState<15 | 30>(30);
   const [resolving, setResolving] = useState(false);
   const [selectedToken, setSelectedToken] = useState(TOKENS[0]);
@@ -109,20 +111,41 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function handleResolve() {
+  /** `query` overrides the input box, so picking a candidate below can
+   *  re-resolve its canonical handle without waiting for a state update. */
+  async function handleResolve(query?: string) {
+    const q = (query ?? recipient).trim();
+    if (!q) return;
     setError("");
     setResolving(true);
     setResolved(null);
     setUnregistered(null);
+    setCandidates(null);
     try {
-      const res = await fetch(
-        `${RESOLVER_URL}/resolve?q=${encodeURIComponent(recipient.trim())}`
-      );
+      const res = await fetch(`${RESOLVER_URL}/resolve?q=${encodeURIComponent(q)}`);
       const result: ResolveResult = await res.json();
-      if (!result.found || !result.stellarAddress) {
-        setUnregistered(recipient.trim());
+      // 300: the name matches more than one person. Ask instead of guessing.
+      if (res.status === 300 && result.candidates?.length) {
+        setCandidates(result.candidates);
         return;
       }
+      // 404 is the only "nobody owns this handle", and so the only case where
+      // sending an invite is the right offer. Every other non-200 is a
+      // resolver problem, and treating it as unregistered would send real
+      // money into an invite the recipient never asked for.
+      if (res.status === 404) {
+        setUnregistered(q);
+        return;
+      }
+      if (res.status === 429) {
+        setError("Too many lookups from this connection. Wait a minute and try again.");
+        return;
+      }
+      if (!res.ok || !result.found || !result.stellarAddress) {
+        setError("The Bullet resolver returned an unexpected response. Try again.");
+        return;
+      }
+      setRecipient(q);
       setResolved(result);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -139,6 +162,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
   function reset() {
     setResolved(null);
     setUnregistered(null);
+    setCandidates(null);
     setStep("idle");
     setClaimLink("");
     setNotePosted(false);
@@ -348,7 +372,10 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
               {displayAmt} {selectedToken.label}
             </p>
             <p className="text-sm text-graphite">
-              to <span className="font-medium text-ink">{recipient.trim()}</span>
+              to{" "}
+              <span className="font-medium text-ink">
+                {displayCanonical(recipient.trim())}
+              </span>
               {sentAsInvite && (
                 <>
                   {" · "}refunded after {expiryDays} days if unclaimed
@@ -388,7 +415,9 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
   }
 
   const showAmountStep = !!(resolved || unregistered);
-  const recipientLabel = (resolved ? recipient : unregistered ?? "").trim();
+  const recipientLabel = displayCanonical(
+    (resolved ? recipient : unregistered ?? "").trim()
+  );
   const avatarInitial = recipientLabel.replace(/^@/, "").charAt(0).toUpperCase();
 
   return (
@@ -409,7 +438,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
             className="w-full rounded-xl border border-fog bg-white px-4 py-3 placeholder-graphite/70 focus:border-ink focus:outline-none disabled:opacity-50"
           />
           <button
-            onClick={handleResolve}
+            onClick={() => handleResolve()}
             disabled={resolving || !recipient.trim()}
             className="flex w-full items-center justify-center rounded-full bg-ink px-5 py-3 font-semibold text-paper transition-colors hover:bg-ink/85 disabled:opacity-40"
           >
@@ -419,6 +448,30 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
               "Find recipient"
             )}
           </button>
+
+          {candidates && (
+            <div className="space-y-2 rounded-xl border border-fog p-3">
+              <p className="text-sm text-graphite">
+                More than one person goes by that name. Pick who you meant.
+              </p>
+              {candidates.map((c) => (
+                <button
+                  key={c.handle}
+                  onClick={() => {
+                    setRecipient(displayCanonical(c.handle));
+                    handleResolve(c.handle);
+                  }}
+                  disabled={resolving}
+                  className="flex w-full items-center justify-between gap-3 rounded-full border border-fog bg-white px-4 py-2.5 text-sm transition-colors hover:border-graphite disabled:opacity-50"
+                >
+                  <span className="text-graphite">{c.label}</span>
+                  <span className="min-w-0 truncate font-medium">
+                    {displayHandle(c.type, c.handle)}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       ) : (
         <>
@@ -567,7 +620,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="text-lg font-bold tracking-tight">
-              {unregistered} isn&apos;t on Bullet yet
+              {displayCanonical(unregistered)} isn&apos;t on Bullet yet
             </h3>
             <p className="text-sm text-graphite">
               The funds sit in a custody wallet and land in their inbox the

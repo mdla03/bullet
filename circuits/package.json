@@ -5,12 +5,15 @@
   "description": "ZeekPay Circom circuits + snarkjs tooling.",
   "type": "module",
   "scripts": {
-    "bench": "bash scripts/run-benchmark.sh"
+    "bench": "bash scripts/run-benchmark.sh",
+    "pretest": "bash scripts/build-jubjub-tests.sh",
+    "test": "node --test test/jubjub.test.mjs"
   },
   "dependencies": {
     "snarkjs": "0.7.5"
   },
   "devDependencies": {
-    "circomlib": "2.0.5"
+    "circomlib": "2.0.5",
+    "@noble/curves": "1.9.7"
   }
 }

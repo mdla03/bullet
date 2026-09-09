@@ -3,40 +3,33 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Session } from "@supabase/supabase-js";
+import type { OAuthProviderId } from "@zeekpay/shared";
 import {
   CheckIcon,
   CopyIcon,
   ExternalLinkIcon,
-  GoogleIcon,
   LoaderIcon,
-  MailIcon,
   TrashIcon,
   WalletIcon,
-  XBrandIcon,
 } from "@/components/icons";
-import type { SVGProps } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getMe, type MeResponse } from "@/lib/api";
 import { Skeleton } from "@/components/Skeleton";
+import {
+  OAUTH_ICON,
+  displayHandle,
+  oauthHandleTypes,
+  providerIcon,
+  providerRank,
+  unsupportedHandleTypes,
+} from "@/lib/handle-ui";
 
-function providerIcon(provider: string): (p: SVGProps<SVGSVGElement>) => React.ReactElement {
-  if (provider === "twitter" || provider === "twitter_v2" || provider === "x")
-    return XBrandIcon;
-  if (provider === "google") return GoogleIcon;
-  return MailIcon;
-}
+// "Connect X" buttons: every enabled handle type proven via Supabase OAuth.
+const OAUTH_HANDLE_TYPES = oauthHandleTypes();
 
-// Google first, then X/twitter, then email, then anything else.
-const PROVIDER_RANK: Record<string, number> = {
-  google: 0,
-  x: 1,
-  twitter: 1,
-  twitter_v2: 1,
-  email: 2,
-};
-function providerRank(provider: string): number {
-  return PROVIDER_RANK[provider] ?? 99;
-}
+// Enabled handle types with no connect flow here at all: neither OAuth with
+// an icon (OAUTH_HANDLE_TYPES above) nor the hand-built add-email form.
+const UNSUPPORTED_TYPES = unsupportedHandleTypes();
 
 export function AccountView() {
   const supabase = createClient();
@@ -73,7 +66,7 @@ export function AccountView() {
     else if (session === null) router.replace("/register");
   }, [session, refreshMe, router]);
 
-  async function linkProvider(provider: "google" | "x") {
+  async function linkProvider(provider: OAuthProviderId) {
     setError("");
     setWorking("oauth");
     const { error: err } = await supabase.auth.linkIdentity({
@@ -150,20 +143,22 @@ export function AccountView() {
   const linkedWallet = me.wallet ?? null;
   const handles = me.identities ?? [];
   const linkedProviders = new Set(handles.map((h) => h.provider));
-  const missingOAuth = (
-    [
-      { key: "google" as const, label: "Google", Icon: GoogleIcon },
-      { key: "x" as const, label: "X", Icon: XBrandIcon },
-    ] as const
-  ).filter(
-    (p) =>
-      !(
-        linkedProviders.has(p.key) ||
-        (p.key === "x" &&
-          (linkedProviders.has("twitter") || linkedProviders.has("twitter_v2")))
-      )
-  );
+  // Types without a configured icon are skipped rather than shown with a
+  // wrong (mail) icon; UNSUPPORTED_TYPES below covers enabled types missing
+  // more than just an icon.
+  const missingOAuth = OAUTH_HANDLE_TYPES.filter(
+    (h) => !h.identityProviders.some((p) => linkedProviders.has(p))
+  ).flatMap((h) => {
+    const Icon = OAUTH_ICON[h.id];
+    return Icon ? [{ key: h.proof.provider, label: h.label, Icon }] : [];
+  });
   const hasEmail = linkedProviders.has("email");
+  // Enabled handle types this screen has no connect flow for at all: neither
+  // OAuth (missingOAuth above) nor the hand-built add-email form. Shown as an
+  // explicit "not supported yet" note instead of silently vanishing.
+  const unsupportedTypes = UNSUPPORTED_TYPES.filter(
+    (h) => !h.identityProviders.some((p) => linkedProviders.has(p))
+  );
 
   return (
     <div className="space-y-4">
@@ -174,13 +169,17 @@ export function AccountView() {
             const unlinkKey = `unlink:${h.provider}:${h.handle}`;
             const canUnlink = handles.length > 1;
             const Icon = providerIcon(h.provider);
+            // Stored form is namespaced ("github:alice"); the row shows the
+            // display form beside the provider icon. Unlink still sends the
+            // stored value.
+            const shown = displayHandle(h.provider, h.handle);
             return (
               <div
                 key={`${h.provider}:${h.handle}`}
                 className="flex items-center gap-3 rounded-xl border border-fog px-4 py-3 text-sm"
               >
                 <Icon className="h-4 w-4 shrink-0" />
-                <span className="min-w-0 flex-1 truncate font-medium">{h.handle}</span>
+                <span className="min-w-0 flex-1 truncate font-medium">{shown}</span>
                 {canUnlink && (() => {
                   const confirming = confirmingUnlink === unlinkKey;
                   const busy = working === unlinkKey;
@@ -200,7 +199,7 @@ export function AccountView() {
                           }, 3000);
                         }
                       }}
-                      aria-label={confirming ? `Confirm removal of ${h.handle}` : `Remove ${h.handle}`}
+                      aria-label={confirming ? `Confirm removal of ${shown}` : `Remove ${shown}`}
                       className={`flex shrink-0 items-center justify-center rounded-full border p-2 transition-all ${
                         confirming
                           ? "border-red-300 bg-red-50 px-3 text-xs font-semibold text-red-600"
@@ -222,7 +221,7 @@ export function AccountView() {
           })}
         </div>
 
-        {(missingOAuth.length > 0 || !hasEmail) && (
+        {(missingOAuth.length > 0 || !hasEmail || unsupportedTypes.length > 0) && (
           <div className="space-y-2 border-t border-fog pt-4">
             {missingOAuth.map((p) => (
               <button
@@ -238,6 +237,14 @@ export function AccountView() {
                 )}
                 Connect {p.label}
               </button>
+            ))}
+            {unsupportedTypes.map((h) => (
+              <div
+                key={h.id}
+                className="flex w-full items-center justify-center rounded-full border border-fog px-4 py-2.5 text-sm font-medium text-graphite"
+              >
+                {h.label} is not supported yet
+              </div>
             ))}
             {!hasEmail && (
               <div className="space-y-2">

@@ -7,14 +7,24 @@
 //!
 //! This is NOT the product verifier. It does not bind real proof/vk bytes, has
 //! no nullifiers, no storage, no recipient binding. See spec.md.
+//!
+//! `bench_verify_real` calls `zeekpay::verifier::verify` directly (a path
+//! dependency on the `zeekpay` crate) so the measured cost is the product
+//! code path exactly. Both the `zeekpay` dependency and `bench_verify_real`
+//! are gated behind the `real-proof` cargo feature, off by default: the
+//! default wasm build exports only the bench_* functions, not zeekpay's
+//! `#[contract]` ABI (deposit, claim, post_root, etc.). Build or test with
+//! `--features real-proof` to include the real-proof path.
 #![no_std]
 
 #[cfg(test)]
 extern crate std;
 #[cfg(test)]
 mod test;
+#[cfg(all(test, feature = "real-proof"))]
+mod claim_fixture_7in;
 
-// Minimal bump allocator — BENCHMARK ONLY, to let ark-ff link in the wasm build
+// Minimal bump allocator, BENCHMARK ONLY, to let ark-ff link in the wasm build
 // for the Poseidon-Merkle deposit-cost measurement. Never frees; not for product.
 #[cfg(all(target_arch = "wasm32", not(test)))]
 mod bench_alloc {
@@ -119,7 +129,7 @@ impl BenchContract {
 
     /// Deposit-cost benchmark for Option A (on-chain Merkle insert).
     /// Runs a faithful Poseidon(2) arithmetic workload (t=3, 8 full + 57 partial
-    /// rounds, x^5 S-box, 3x3 MDS) over BLS12-381 Fr in PURE WASM (no host fn —
+    /// rounds, x^5 S-box, 3x3 MDS) over BLS12-381 Fr in PURE WASM (no host fn,
     /// Soroban has no Poseidon host fn) for `levels` tree levels. Returns a
     /// value derived from the result to defeat dead-code elimination. Measure
     /// the real instruction cost by deploying + invoking on testnet.
@@ -180,9 +190,70 @@ impl BenchContract {
         }
 
         // Derive a u32 from the result (prevents DCE of the whole loop).
-        // Use bigint limbs directly — no Vec alloc (contract wasm has no allocator).
+        // Use bigint limbs directly: no Vec alloc (contract wasm has no allocator).
         let bi = acc.into_bigint();
         let limb0 = bi.as_ref()[0];
         (limb0 as u32) ^ ((limb0 >> 32) as u32)
+    }
+}
+
+/// Real Groth16 verify against actual proof/vk bytes (not the synthetic
+/// canceling-pairs construction `bench_verify` uses above), so the cost
+/// of a specific real proof shape can be *measured* rather than read off
+/// the synthetic scaling table. Builds a `zeekpay::verifier::VerifyingKey`
+/// and `Proof` from the incoming bytes and calls `zeekpay::verifier::verify`
+/// directly, so the measured cost is the product code path exactly.
+/// Gated behind the `real-proof` cargo feature (off by default) so the
+/// default wasm build never links `zeekpay` or exports this method. Kept in
+/// its own `#[contractimpl]` block, separate from `impl BenchContract` above,
+/// because a bare `#[cfg(feature = "real-proof")]` on a method inside a
+/// shared `#[contractimpl]` block is not guaranteed to be propagated to the
+/// generated client method by the soroban-sdk macro; cfg-ing the whole block
+/// is unambiguous. `ic.len()` must equal `pubs.len() + 1`.
+#[cfg(feature = "real-proof")]
+#[contractimpl]
+impl BenchContract {
+    pub fn bench_verify_real(
+        env: Env,
+        alpha1: soroban_sdk::BytesN<96>,
+        beta2: soroban_sdk::BytesN<192>,
+        gamma2: soroban_sdk::BytesN<192>,
+        delta2: soroban_sdk::BytesN<192>,
+        ic: Vec<soroban_sdk::BytesN<96>>,
+        a: soroban_sdk::BytesN<96>,
+        b: soroban_sdk::BytesN<192>,
+        c: soroban_sdk::BytesN<96>,
+        pubs: Vec<soroban_sdk::BytesN<32>>,
+    ) -> bool {
+        use soroban_sdk::crypto::bls12_381::{Fr, G1Affine, G2Affine};
+        use zeekpay::verifier::{verify, Proof, VerifyingKey};
+
+        let mut ic_points: Vec<G1Affine> = Vec::new(&env);
+        let mut i = 0u32;
+        while i < ic.len() {
+            ic_points.push_back(G1Affine::from_bytes(ic.get(i).unwrap()));
+            i += 1;
+        }
+        let mut fr_pubs: Vec<Fr> = Vec::new(&env);
+        let mut j = 0u32;
+        while j < pubs.len() {
+            fr_pubs.push_back(Fr::from_bytes(pubs.get(j).unwrap()));
+            j += 1;
+        }
+
+        let vk = VerifyingKey {
+            alpha1: G1Affine::from_bytes(alpha1),
+            beta2: G2Affine::from_bytes(beta2),
+            gamma2: G2Affine::from_bytes(gamma2),
+            delta2: G2Affine::from_bytes(delta2),
+            ic: ic_points,
+        };
+        let proof = Proof {
+            a: G1Affine::from_bytes(a),
+            b: G2Affine::from_bytes(b),
+            c: G1Affine::from_bytes(c),
+        };
+
+        verify(&env, &vk, &proof, &fr_pubs)
     }
 }

@@ -1,0 +1,56 @@
+// @generated: real Groth16/BLS12-381 vk+proof for the 7-public-input
+// Pedersen-shape claim circuit (circuits/build/claim_vk.json /
+// claim_proof.json / claim_public.json at HEAD), encoded in Soroban
+// bls12_381 byte layout. Public, throwaway-setup data (safe to commit). Used
+// only by the verifier-benchmark crate to measure real (not synthetic)
+// on-chain verify cost for this proof shape. Not the deployed contract
+// fixture.
+//
+// Re-pin with the shared conversion logic in
+// circuits/scripts/convert-to-soroban.mjs, via its --rs option, which writes
+// the constants below and nothing else (this comment block is preserved, and
+// no tracked contract fixture is touched):
+//
+//   node circuits/scripts/gen-test-proof.mjs
+//   node circuits/scripts/convert-to-soroban.mjs \
+//     --rs contracts/verifier/src/claim_fixture_7in.rs
+//
+// ALPHA1/BETA2/GAMMA2/DELTA2/IC (the verification key) are deterministic for
+// a given claim.zkey. PROOF_A/PROOF_B/PROOF_C and PUBS are not: a Groth16
+// proof carries randomized blinding factors, so re-running the prover never
+// reproduces the same proof bytes, and PUBS changes whenever the test input
+// changes (e.g. the Merkle path in gen-test-proof.mjs). Re-pinning is
+// therefore a deliberate act, not something to run to tidy a diff: do it when
+// the circuit or the test vector changed, and re-measure section 7.2 of
+// BENCHMARK.md afterwards, since the CPU figure there is measured against
+// exactly these bytes.
+//
+// Last re-pinned 2026-09-09, for the distinct-sibling / alternating-index
+// Merkle path in gen-test-proof.mjs.
+
+pub const ALPHA1: &str = "184000ca3138130bd981d51472fe2840d4da7003ff1e7041ff556a0bc16dc2d4fe781bc0776b71a3b6009f11b1013b6d08ab5fca45d24ac373a00a7fc619c8ad1ab13fd97b8cedc279050f0c88c2a3bfb437cf9136054f211c9180c78cb05de1";
+pub const BETA2: &str = "0a51718057b484f9b6d19f37db2f88a0a121cfd9eaac34b0aa2baee89e49253f0418bfa8593eb38166df6c6b0b0ad1070183c75eea779ffc90b1ca30ede489f7e1d969145390ccd9c526daa9c921b5ca06c323ec3ffe47fa09fd17289b3794670053b390bc6f9d58bb5776ce21f4b47e26e8da909fc08749b639dec2b7977e61b644cc06b2dcd88f5923313a0ff5c1910b228b07e78c9ada359ce1c77b5ecce7ea7c25e6cdb7a422d726ba6ae6480f7c0d4e77a221326b279f318f6b12e8c429";
+pub const GAMMA2: &str = "13e02b6052719f607dacd3a088274f65596bd0d09920b61ab5da61bbdc7f5049334cf11213945d57e5ac7d055d042b7e024aa2b2f08f0a91260805272dc51051c6e47ad4fa403b02b4510b647ae3d1770bac0326a805bbefd48056c8c121bdb80606c4a02ea734cc32acd2b02bc28b99cb3e287e85a763af267492ab572e99ab3f370d275cec1da1aaa9075ff05f79be0ce5d527727d6e118cc9cdc6da2e351aadfd9baa8cbdd3a76d429a695160d12c923ac9cc3baca289e193548608b82801";
+pub const DELTA2: &str = "03fad729ef79d8d4d77e4b6d7c3230a0c7eb86bc3ed0732410376f872c6e89af0d460ee02e317c85be666f111e47d1160e38bbd406fd00c01f78db23b54c7564020dc22d2da20044f7e2472f6f4d5861c77e68d90231ae5549a900203e255e320d7d7e696e16afb60b134d2a8f64c506028c7533339d9e08e7efca0e63cae4e09020eccf1feba4090e37b82db6e36be20a99cab7f47bf6b6ce2e080c5cbf4dd387592f8d25faa895af049aaccb1cf01405aafbe30cd12ee0fbb55c51f24759d1";
+pub const IC: &[&str] = &[
+    "045de2a58713b1779979754414ff9cfe4efa2770e22a0a73c0e36eec9655399abd5b9767524c9be9253cf1983c2b2d890b334a2bc3022f3b9850941cee4e996862816b4fd64acf40f212a928027d6b0b62911023a1a72181d6789e139586a5c1",
+    "157d64c6fabd2256df6ec9ff0f26202fc3de6520e01ba85923190bb05bf667de4211473fc2d9571272cb3291b460d6b90d454e3b96324e7dbe10952008e1588df29704cb80964e3e09d25e1416396c37f86476d4c31c05434007d03d817026b3",
+    "175c199c60c24a0157cf3eb702a9b895d685998d59fa51f5401b556ee127c68809c8acacb15151f5d51ab46565b48dc90b724a92a5341cfec7dfa8dba4e57fd58f162e8c706590cb95094352732245ed95cf4784b9e48795c80decd2ccbd93b3",
+    "13d4ad8696faf8de7bd5820f7a20165b7a072402c784a4168b23df16540c0d47a3cdc9856d3aa35bddba2f27f6c2f0d00ac51b1a8cfbdea0971d043dc5bc6090f8830ef193b1c2f9a430f975529615b90bf9aad1939d05d56ddae9bd17086fbc",
+    "1314738703caaebea430ce9e38d3c57345cbca6cef61f72f0dc96c965de6861af312fe2d1a4c1a0beb9f88bf844430680b425dfcfd44318d7b2925f064a40f22023821cb4b7667a5ad7261257701e24870c41f612189cf87b54867ca2de56f30",
+    "04b6a234dd83a36ea97cac8c608f9c248bdf201df8105bf858911f4097335f866cb01617014709a54fd78f5de8f614ff0f121867f5baa35b8178e7f2adbf229c6a3d8829a8536e6c328e7691d003e77351ae7d2449319478f9b6a052d374ce25",
+    "0abaee236eab299014ea2b16fac762046f05857a8479e3c8bae7bc72026baa10c4fe1635098bd1012884e64a9385c44a061079c4c43d73584f5d0cb6b927773807b9deb3cb18d0011b86d71458003707dff02cdbfce58451d7cefdc11dc54bb2",
+    "0591df2c2e5b89e57b0809420dc84ae0ec76de5e9cc0da898dcc5d3520bd7b43e8a7d1110d8e4824ac6694021472448001bd1e3835c931642ba3488ec343554aa2675f7d3c5e9b96388388833045d6969c2ad59310956be40e6baeb72ac9f111",
+];
+pub const PROOF_A: &str = "0a7b78d3aec6315f4919a8035cfb9d4a4a0392843ba37947607a176832380821ec30314c7b3ca5ee568c9edb220f91ca0501cab7e0164ec800f288957e7c35dbf172b024422d4cd1716df904cd75465030712526cc098c6336088cfe1518c013";
+pub const PROOF_B: &str = "0d42af689e7234ddc4ea9b47db74a9f34a5ccbadf8b71369c5990c62700ba89f64ede5c8e58a349cca3d0f5eac90f5e20eefe877e7839cb4d2f91a6039b98ab7657ed3b53e5ea3074e7be30812cd701846b3f24e3bfda761c3997715d8991f2407da91cf48261b10d3e3b9eb14245a0aab319aa90c3354c3db8adc07f0a6150f2d37ec2dbec3826aec36604dea86a339049b5292997cd9b2302c9ea6b8d0da08cc68d340c033b8e3400f9265934ae2a8bcc0903c416f5ee4cc21ddc50429bfa4";
+pub const PROOF_C: &str = "182952e77aef5b4257e63702214303b26d8589bf88d27ae0ac8a440899ea7465070a4e59d98c6aeb007d9136d0e7df57139f70660fb21d3888e913542e4410a592258465e3ab86d005cd0c5bdf1f3cba081e974225ddfffb0c00b9f591d98f25";
+pub const PUBS: &[&str] = &[
+    "1ac75b679bc3500d0269732485a714c8f387c37b56302ec69b365b153f138fd0",
+    "42ca46a3eedf453fd7084659cc006f2e5d6abb5319442eadfdd2d2e8c8117262",
+    "000000000000000000000000000000000000000000000000000000000000002a",
+    "000000000000000000000000000000000000000000000000000000000000000a",
+    "0000000000000000000000000000000000000000000000000000000000000000",
+    "3b9ac3a495418147f87f1c11bd68d2e20ccba9904de8ff8601d89e9037fbf0d2",
+    "53f61f21b6f06d01e13fb5b557f065ecfe47636b4bef28c35ed367791ed38fed",
+];

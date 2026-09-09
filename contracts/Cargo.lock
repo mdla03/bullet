@@ -1551,7 +1551,10 @@ version = "0.0.0"
 dependencies = [
  "ark-bls12-381",
  "ark-ff",
+ "hex",
  "soroban-sdk",
+ "verifier",
+ "zeekpay",
 ]
 
 [[package]]

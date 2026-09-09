@@ -14,6 +14,9 @@
 //
 // Run: node frontend/scripts/bench-browser.mjs [runs]
 
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import puppeteer from "puppeteer-core";
 
 const URL = process.env.BENCH_URL ?? "http://localhost:3000/bench";
@@ -21,6 +24,25 @@ const RUNS = Number(process.argv[2] ?? 5);
 const CHROME =
   process.env.CHROME_PATH ??
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+
+// Same claim_vk.json staged into public/circuits/bench for the page itself
+// (see the staging steps above). Read nPublic from it instead of hardcoding it.
+const VK_PATH = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../public/circuits/bench/claim_vk.json"
+);
+let nPublic;
+try {
+  nPublic = JSON.parse(fs.readFileSync(VK_PATH, "utf8")).nPublic;
+} catch (e) {
+  if (e.code !== "ENOENT") throw e;
+  console.error(`missing ${VK_PATH}. Stage the bench artifacts first:\n`);
+  console.error("  mkdir -p frontend/public/circuits/bench");
+  console.error("  cp circuits/build/claim_js/claim.wasm circuits/build/claim.zkey \\");
+  console.error("     circuits/build/claim_input.json circuits/build/claim_vk.json \\");
+  console.error("     frontend/public/circuits/bench/");
+  process.exit(1);
+}
 
 // Proving holds the main thread for seconds at a time; the default 30s
 // protocol timeout trips well before a 5-run sweep finishes.
@@ -109,8 +131,8 @@ try {
 
   // A benchmark that timed an invalid proof is worse than no benchmark.
   if (!out.verified) throw new Error("groth16.verify did not return true");
-  if (out.publicSignals !== 6) {
-    throw new Error(`expected 6 public signals, got ${out.publicSignals}`);
+  if (out.publicSignals !== nPublic) {
+    throw new Error(`expected ${nPublic} public signals, got ${out.publicSignals}`);
   }
   if (!out.runsMs.length) throw new Error("no per-run timings scraped");
 } finally {

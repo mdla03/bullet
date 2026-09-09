@@ -91,6 +91,13 @@ const nextConfig: NextConfig = {
         os: false,
       };
     }
+    // @zeekpay/shared is consumed as raw TypeScript (its package.json main is
+    // src/index.ts). It re-exports its own "./handles.js" (a .ts file) as a
+    // self-reference through its own package name rather than a relative
+    // import, so shared/package.json's `exports` map resolves it under both
+    // webpack and Turbopack; NodeNext (the backend's resolver) resolves the
+    // same self-reference the same way. No webpack-specific config needed
+    // here for it.
     // Suppress "Critical dependency" warning from web-worker (snarkjs dep).
     config.module.exprContextCritical = false;
     return config;

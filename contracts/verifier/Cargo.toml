@@ -16,6 +16,24 @@ soroban-sdk = "=22.0.7"
 # pairing backend; used directly here to measure on-chain Poseidon insert cost.
 ark-bls12-381 = { version = "0.4", default-features = false, features = ["curve"] }
 ark-ff = { version = "0.4", default-features = false }
+# Path dependency so `bench_verify_real` can call the product verify equation
+# directly instead of re-implementing it (see contracts/zeekpay/src/verifier.rs).
+# Optional, gated behind the `real-proof` feature (off by default): pulling it
+# in unconditionally would compile zeekpay's whole `#[contract]` impl into this
+# crate's wasm alongside the bench_* functions, exporting the product contract's
+# ABI (deposit, claim, post_root, ...) from a benchmark-only build.
+zeekpay = { path = "../zeekpay", optional = true }
+
+[features]
+default = []
+real-proof = ["dep:zeekpay"]
 
 [dev-dependencies]
 soroban-sdk = { version = "=22.0.7", features = ["testutils"] }
+# For decoding the real 7-input claim proof/vk hex fixture in test.rs.
+hex = "0.4"
+# Self dev-dependency with the feature enabled so `cargo test -p verifier`
+# works with no extra flags: cargo permits a dev-dependency cycle on self, and
+# feature unification then turns on `real-proof` for the test target while the
+# default (non-test) build of this crate still has it off.
+verifier = { path = ".", features = ["real-proof"] }

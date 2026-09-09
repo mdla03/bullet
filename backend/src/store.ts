@@ -81,21 +81,28 @@ export interface UserProfile {
   unreadCount: number;
 }
 
-function normalizeKey(q: string): string {
-  const t = q.trim();
-  return t.startsWith("@") ? "@" + t.slice(1).toLowerCase() : t.toLowerCase();
+/** One handles row per matched canonical candidate. handle_normalized has a
+ *  global unique index (backend/sql/handles_unique.sql), so each candidate
+ *  matches at most one row; multiple candidates can still resolve to
+ *  different users (the /resolve ambiguity case). */
+export interface LookupRow {
+  handle_normalized: string;
+  user_id: string;
 }
 
-/** Public lookup used by /resolve. Returns the user + wallet (or null). */
-export async function findByLookup(query: string): Promise<UserProfile | null> {
-  const key = normalizeKey(query);
-  const { data: h, error: e1 } = await serviceClient
+/** Multi-candidate lookup used by /resolve to try every enabled handle
+ *  type's parse() of the raw query in one query. */
+export async function findManyByLookup(candidates: string[]): Promise<LookupRow[]> {
+  if (candidates.length === 0) return [];
+  const { data, error } = await serviceClient
     .from("handles")
-    .select("user_id")
-    .eq("handle_normalized", key)
-    .maybeSingle();
-  if (e1 || !h) return null;
-  return getUser(h.user_id);
+    .select("handle_normalized, user_id")
+    .in("handle_normalized", candidates);
+  if (error || !data) {
+    if (error) console.error("[store] findManyByLookup failed:", error.message);
+    return [];
+  }
+  return data as LookupRow[];
 }
 
 /** Full user aggregate: profile + all handles + wallet (if any). */
