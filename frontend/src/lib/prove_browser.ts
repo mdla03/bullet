@@ -11,6 +11,7 @@
 // @ts-expect-error — snarkjs has no bundled types.
 import * as snarkjs from "snarkjs";
 import { poseidon } from "./poseidon";
+import { commit as pedersenCommit } from "./jubjub_commit";
 
 const RESOLVER_URL =
   process.env.NEXT_PUBLIC_RESOLVER_URL ?? "http://localhost:3001";
@@ -23,6 +24,23 @@ export interface BrowserProveResult {
   proof_c: string;   // 192-char hex (G1)
   nullifier: string; // 64-char hex (Fr)
   root: string;      // 64-char hex (Fr)
+  amountCommitmentX: string; // 64-char hex (Fr)
+  amountCommitmentY: string; // 64-char hex (Fr)
+}
+
+// Blinding is sampled uniformly on [0, 2^251), matching
+// circuits/scripts/jubjub-ref.mjs randomBlinding: 32 random bytes with the
+// top 5 bits cleared. It never leaves the tab.
+const BLINDING_BYTES = 32;
+const BLINDING_TOP_BYTE_MASK = 0b00000111; // clears the top 5 bits (256 - 251)
+
+function randomBlindingDec(): string {
+  const bytes = new Uint8Array(BLINDING_BYTES);
+  crypto.getRandomValues(bytes);
+  bytes[0] &= BLINDING_TOP_BYTE_MASK;
+  let v = 0n;
+  for (const b of bytes) v = (v << 8n) | BigInt(b);
+  return v.toString();
 }
 
 let cachedAssets: { wasm: Uint8Array; zkey: Uint8Array } | null = null;
@@ -93,6 +111,14 @@ export async function proveBrowser(
   };
 
   const nullifier = poseidon([secretDec]);
+  const blinding = randomBlindingDec();
+  // amountCommitmentX/Y are circuit *inputs*, constrained (===) against the
+  // in-circuit Pedersen commitment of (amount, blinding); they must be
+  // supplied matching that computation or witness generation fails.
+  const { x: amountCommitmentX, y: amountCommitmentY } = pedersenCommit(
+    amount,
+    blinding
+  );
 
   onStage?.("proving");
   const { proof, publicSignals } = await snarkjs.groth16.fullProve(
@@ -105,12 +131,21 @@ export async function proveBrowser(
       secret: secretDec,
       pathElements,
       pathIndices,
+      blinding,
+      amountCommitmentX,
+      amountCommitmentY,
     },
     wasm,
     zkey
   );
 
-  void publicSignals;
+  // Public signal order, per circuits/src/claim.circom:
+  // [root, nullifier, recipientDigest, amount, tokenId, amountCommitmentX, amountCommitmentY]
+  if (publicSignals.length !== 7) {
+    throw new Error(
+      `unexpected public signal count: ${publicSignals.length} (expected 7; served claim.wasm/claim.zkey may be stale)`
+    );
+  }
 
   return {
     proof_a: g1(proof.pi_a),
@@ -118,5 +153,7 @@ export async function proveBrowser(
     proof_c: g1(proof.pi_c),
     nullifier: fr(nullifier),
     root: fr(root),
+    amountCommitmentX: fr(publicSignals[5]),
+    amountCommitmentY: fr(publicSignals[6]),
   };
 }

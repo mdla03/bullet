@@ -128,7 +128,7 @@ export default function Bench() {
         </h1>
         <p className="mt-3 text-graphite">
           Times <span className="font-mono">groth16.fullProve</span> in this tab
-          against the 6-public-input claim circuit. Local only, and it does not
+          against the 7-public-input claim circuit. Local only, and it does not
           touch the artifacts the live claim flow uses.
         </p>
 

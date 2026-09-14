@@ -41,6 +41,37 @@ const TOKENS: TokenConfig[] = [
   { id: 2, label: "USDT", prefix: "$", presets: [1, 10, 50, 100], decimals: 10_000_000n },
 ];
 
+// Upper bound for a base-unit amount: the contract truncates to u64
+// (contracts/zeekpay/src/lib.rs AMOUNT_MAX_EXCLUSIVE = 1 << 64), but
+// ClaimPayload.amount (frontend/src/lib/claim_link.ts) carries the amount as
+// a JS `number` through JSON, the claim URL, and the notes table. A number
+// stops representing every integer exactly above Number.MAX_SAFE_INTEGER, so
+// that (much smaller) bound is the one that actually protects against a
+// silently rounded amount and is used here.
+const MAX_STROOPS = (1n << 64n) - 1n;
+const MAX_SAFE_STROOPS = BigInt(Number.MAX_SAFE_INTEGER);
+const AMOUNT_UPPER_BOUND = MAX_STROOPS < MAX_SAFE_STROOPS ? MAX_STROOPS : MAX_SAFE_STROOPS;
+
+/** Parse a decimal amount string into base units for `token`, validating
+ * sign, decimal precision, and the u64 / safe-integer bound above. */
+function parseAmountInput(
+  input: string,
+  token: TokenConfig
+): { stroops: bigint; error?: undefined } | { stroops?: undefined; error: string } {
+  const trimmed = input.trim();
+  if (!trimmed) return { error: "Enter an amount." };
+  const match = /^(\d+)(?:\.(\d+))?$/.exec(trimmed);
+  if (!match) return { error: "Enter a valid amount." };
+  const decimalPlaces = token.decimals.toString().length - 1;
+  const [, intPart, fracPart = ""] = match;
+  if (fracPart.length > decimalPlaces)
+    return { error: `${token.label} supports at most ${decimalPlaces} decimal places.` };
+  const stroops = BigInt(intPart) * token.decimals + BigInt(fracPart.padEnd(decimalPlaces, "0") || "0");
+  if (stroops <= 0n) return { error: "Amount must be greater than zero." };
+  if (stroops > AMOUNT_UPPER_BOUND) return { error: "That amount is too large." };
+  return { stroops };
+}
+
 type Step = "idle" | "computing" | "signing" | "submitting" | "done" | "error";
 
 const SEND_STEPS: { key: Step; label: string }[] = [
@@ -88,7 +119,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
   const [expiryDays, setExpiryDays] = useState<15 | 30>(30);
   const [resolving, setResolving] = useState(false);
   const [selectedToken, setSelectedToken] = useState(TOKENS[0]);
-  const [selectedAmount, setSelectedAmount] = useState<number | null>(null);
+  const [amountInput, setAmountInput] = useState("");
   const [step, setStep] = useState<Step>("idle");
   const [claimLink, setClaimLink] = useState("");
   const [notePosted, setNotePosted] = useState(false);
@@ -100,6 +131,9 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
 
   const busy = step === "computing" || step === "signing" || step === "submitting";
   const stepIndex = SEND_STEPS.findIndex((s) => s.key === step);
+  const parsedAmount = parseAmountInput(amountInput, selectedToken);
+  const amountStroops = parsedAmount.stroops ?? null;
+  const amountErrorMsg = amountInput.trim() ? parsedAmount.error : undefined;
 
   // Arriving from the hero send box: resolve the prefilled handle right away.
   const autoResolved = useRef(false);
@@ -173,6 +207,11 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
 
   async function handleSendInvite() {
     if (!unregistered) return;
+    if (amountStroops === null) {
+      setError(amountErrorMsg ?? "Enter a valid amount.");
+      return;
+    }
+    const amount = amountStroops;
     setError("");
     setClaimLink("");
     setTxHash("");
@@ -204,13 +243,11 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
         .join("");
       const secretBigInt = BigInt("0x" + secret);
 
-      const amountStroops = BigInt(selectedAmount!) * selectedToken.decimals;
-
       // Commitment computed locally so the claim secret never leaves the tab.
       const commitment = computeCommitment(
         secretBigInt.toString(),
         recipientDigest.toString(),
-        amountStroops.toString(),
+        amount.toString(),
         String(selectedToken.id)
       );
       const commitmentBigInt = BigInt(commitment);
@@ -219,7 +256,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
       const hash = await depositNote(
         senderAddress,
         commitmentBigInt,
-        amountStroops,
+        amount,
         async (xdr) => {
           setStep("submitting");
           return freighterSignTransaction(
@@ -234,7 +271,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
       const payload: ClaimPayload = {
         secret,
         recipientDigest: recipientDigest.toString(),
-        amount: Number(amountStroops),
+        amount: Number(amount),
         tokenId: selectedToken.id,
         contractId: CONTRACT_ID,
         network: "testnet",
@@ -246,7 +283,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
         method: "POST",
         body: JSON.stringify({
           handle: unregistered,
-          amount: Number(amountStroops),
+          amount: Number(amount),
           claimPayload: payload,
           custodyStellarAddress,
           custodySecret,
@@ -260,7 +297,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
         console.warn("invite_record failed", err);
       }
 
-      postActivity({ type: "send", amount: Number(amountStroops), tokenId: selectedToken.id, txHash: hash, handle: unregistered });
+      postActivity({ type: "send", amount: Number(amount), tokenId: selectedToken.id, txHash: hash, handle: unregistered });
       window.dispatchEvent(new Event("bullet:send-complete"));
       setSentAsInvite(true);
       setStep("done");
@@ -272,6 +309,11 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
 
   async function handleSend() {
     if (!resolved?.stellarAddress) return;
+    if (amountStroops === null) {
+      setError(amountErrorMsg ?? "Enter a valid amount.");
+      return;
+    }
+    const amount = amountStroops;
     setError("");
     setClaimLink("");
     setTxHash("");
@@ -296,13 +338,11 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
         .join("");
       const secretBigInt = BigInt("0x" + secret);
 
-      const amountStroops = BigInt(selectedAmount!) * selectedToken.decimals;
-
       // 4. Compute commitment locally so the claim secret never leaves the tab.
       const commitment = computeCommitment(
         secretBigInt.toString(),
         recipientDigestDec,
-        amountStroops.toString(),
+        amount.toString(),
         String(selectedToken.id)
       );
       const commitmentBigInt = BigInt(commitment);
@@ -312,7 +352,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
       const hash = await depositNote(
         senderAddress,
         commitmentBigInt,
-        amountStroops,
+        amount,
         async (xdr) => {
           setStep("submitting");
           return freighterSignTransaction(
@@ -328,7 +368,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
       const payload: ClaimPayload = {
         secret,
         recipientDigest: recipientDigestDec,
-        amount: Number(amountStroops),
+        amount: Number(amount),
         tokenId: selectedToken.id,
         contractId: CONTRACT_ID,
         network: "testnet",
@@ -347,7 +387,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
           setNotePosted(false);
         }
       }
-      postActivity({ type: "send", amount: Number(amountStroops), tokenId: selectedToken.id, txHash: hash, handle: recipient.trim() });
+      postActivity({ type: "send", amount: Number(amount), tokenId: selectedToken.id, txHash: hash, handle: recipient.trim() });
       window.dispatchEvent(new Event("bullet:send-complete"));
       setStep("done");
     } catch (e) {
@@ -356,7 +396,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
     }
   }
 
-  const displayAmt = selectedAmount != null ? `${selectedToken.prefix}${selectedAmount}` : "";
+  const displayAmt = amountInput.trim() ? `${selectedToken.prefix}${amountInput.trim()}` : "";
 
   // ---- Success state ----
   if (step === "done") {
@@ -505,7 +545,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
                 key={t.id}
                 onClick={() => {
                   setSelectedToken(t);
-                  setSelectedAmount(null);
+                  setAmountInput("");
                 }}
                 disabled={busy}
                 className={`relative z-10 flex-1 rounded-full px-4 py-2 text-sm font-medium transition-colors duration-200 disabled:opacity-50 ${
@@ -519,14 +559,34 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
             ))}
           </div>
 
+          <div className="space-y-1.5">
+            <div className="relative">
+              <input
+                type="text"
+                inputMode="decimal"
+                placeholder="0.00"
+                value={amountInput}
+                onChange={(e) => setAmountInput(e.target.value)}
+                disabled={busy}
+                className="w-full rounded-xl border border-fog bg-white px-4 py-3 pr-16 text-lg font-bold tracking-tight placeholder-graphite/70 focus:border-ink focus:outline-none disabled:opacity-50"
+              />
+              <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-sm font-medium text-graphite">
+                {selectedToken.label}
+              </span>
+            </div>
+            {amountErrorMsg && (
+              <p className="text-sm text-amber">{amountErrorMsg}</p>
+            )}
+          </div>
+
           <div className="grid grid-cols-4 gap-2">
             {selectedToken.presets.map((d) => (
               <button
                 key={d}
-                onClick={() => setSelectedAmount(d)}
+                onClick={() => setAmountInput(String(d))}
                 disabled={busy}
                 className={`rounded-xl border px-2 py-4 text-lg font-bold transition-all duration-200 ease-out active:scale-95 disabled:opacity-50 ${
-                  selectedAmount === d
+                  amountInput.trim() === String(d)
                     ? "border-ink bg-ink text-paper shadow-md shadow-ink/10"
                     : "border-fog text-graphite hover:border-graphite"
                 }`}
@@ -592,11 +652,11 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
                   handleSend();
                 }
               }}
-              disabled={selectedAmount === null}
+              disabled={amountStroops === null}
               className="flex w-full items-center justify-center rounded-full bg-ink px-5 py-3 font-semibold text-paper transition-colors hover:bg-ink/85 disabled:opacity-40"
             >
-              {selectedAmount === null
-                ? "Choose an amount"
+              {amountStroops === null
+                ? "Enter an amount"
                 : `Send ${displayAmt} ${selectedToken.label} ${unregistered ? "as invite" : "silently"}`}
             </button>
           )}

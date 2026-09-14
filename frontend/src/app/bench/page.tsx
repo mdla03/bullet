@@ -11,11 +11,10 @@
 //      circuits/build/claim_input.json circuits/build/claim_vk.json \
 //      frontend/public/circuits/bench/
 //
-// These live under /circuits/bench/ on purpose. The production prover
-// (src/lib/prove_browser.ts) reads /circuits/claim.wasm and /circuits/claim.zkey,
-// which are still the 5-input build the deployed contract expects. Overwriting
-// those would make every live claim fail verification, since verifier::verify
-// rejects any vk whose IC length does not match the public-input count.
+// These live under /circuits/bench/ on purpose, kept separate from the
+// production prover's own copy (src/lib/prove_browser.ts reads
+// /circuits/claim.wasm and /circuits/claim.zkey directly) so a bench run
+// never depends on, or risks disturbing, the artifacts a live claim uses.
 
 import { notFound } from "next/navigation";
 import Bench from "./bench-client";

@@ -10,6 +10,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@noble/curves": "1.9.7",
     "@stellar/freighter-api": "^6.0.1",
     "@stellar/stellar-base": "^15.0.0",
     "@stellar/stellar-sdk": "^16.0.1",

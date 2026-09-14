@@ -39,6 +39,10 @@ function hexToBuffer(hex: string): Buffer {
  * Claim an invite note and forward tokens to the user's real wallet.
  * `amount` is the raw stroop value (e.g. 100_000_000n for 10 USDC).
  * `tokenId` identifies the token (0 = USDC, 1 = XLM).
+ * `amountCommitmentX`/`amountCommitmentY` are the 64-char hex (32-byte BE) Fr
+ * coordinates of the Pedersen amount commitment (publicSignals[5]/[6] from
+ * the claim circuit), concatenated BE(X) || BE(Y) into the contract's
+ * 64-byte `amount_commitment` argument.
  */
 export async function claimInvite(
   custodyStellarSecret: string,
@@ -50,7 +54,9 @@ export async function claimInvite(
   nullifier: string,
   recipientDigest: string,
   amount: bigint,
-  tokenId: number = 0
+  tokenId: number = 0,
+  amountCommitmentX: string,
+  amountCommitmentY: string
 ): Promise<string> {
   const rpc = new StellarSdk.rpc.Server(RPC_URL);
   const custody = StellarSdk.Keypair.fromSecret(custodyStellarSecret);
@@ -70,7 +76,10 @@ export async function claimInvite(
     xdr.ScVal.scvBytes(hexToBuffer(recipientDigest)),
     StellarSdk.nativeToScVal(custodyAddr, { type: "address" }),
     StellarSdk.nativeToScVal(amount, { type: "i128" }),
-    StellarSdk.nativeToScVal(tokenId, { type: "u32" })
+    StellarSdk.nativeToScVal(tokenId, { type: "u32" }),
+    xdr.ScVal.scvBytes(
+      Buffer.concat([hexToBuffer(amountCommitmentX), hexToBuffer(amountCommitmentY)])
+    )
   );
   const acctA = await rpc.getAccount(custodyAddr);
   const txA = new StellarSdk.TransactionBuilder(acctA, {
