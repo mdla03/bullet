@@ -1,8 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ResolveCandidate, ResolveResult } from "@zeekpay/shared";
-import { displayCanonical, displayHandle } from "@/lib/handle-ui";
+import {
+  handleTypeForCanonical,
+  type HandleTypeId,
+  type ResolveCandidate,
+  type ResolveResult,
+} from "@zeekpay/shared";
+import { displayCanonical, displayHandle, OAUTH_ICON } from "@/lib/handle-ui";
 import { computeRecipientDigest } from "@/lib/recipient";
 import { deriveStealthDigest } from "@/lib/stealth";
 import { computeCommitment } from "@/lib/commitment";
@@ -117,6 +122,10 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
   const [resolved, setResolved] = useState<ResolveResult | null>(null);
   const [unregistered, setUnregistered] = useState<string | null>(null);
   const [candidates, setCandidates] = useState<ResolveCandidate[] | null>(null);
+  // The handle type of the resolved recipient, for the picker/header icon.
+  // Set from the picked candidate; /resolve's 200 response carries no type,
+  // so a direct (non-ambiguous) query falls back to handleTypeForCanonical.
+  const [pickedType, setPickedType] = useState<string | null>(null);
   const [expiryDays, setExpiryDays] = useState<15 | 30>(30);
   const [resolving, setResolving] = useState(false);
   const [selectedToken, setSelectedToken] = useState(TOKENS[0]);
@@ -150,8 +159,10 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
   }, []);
 
   /** `query` overrides the input box, so picking a candidate below can
-   *  re-resolve its canonical handle without waiting for a state update. */
-  async function handleResolve(query?: string) {
+   *  re-resolve its canonical handle without waiting for a state update.
+   *  `type` is that candidate's handle type, carried through since the
+   *  eventual /resolve response won't repeat it. */
+  async function handleResolve(query?: string, type?: string) {
     const q = (query ?? recipient).trim();
     if (!q) return;
     setError("");
@@ -159,6 +170,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
     setResolved(null);
     setUnregistered(null);
     setCandidates(null);
+    setPickedType(type ?? null);
     try {
       const res = await fetch(`${RESOLVER_URL}/resolve?q=${encodeURIComponent(q)}`);
       const result: ResolveResult = await res.json();
@@ -201,6 +213,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
     setResolved(null);
     setUnregistered(null);
     setCandidates(null);
+    setPickedType(null);
     setStep("idle");
     setClaimLink("");
     setNotePosted(false);
@@ -459,10 +472,15 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
   }
 
   const showAmountStep = !!(resolved || unregistered);
-  const recipientLabel = displayCanonical(
-    (resolved ? recipient : unregistered ?? "").trim()
-  );
+  const recipientCanonical = (resolved ? recipient : unregistered ?? "").trim();
+  const recipientLabel = displayCanonical(recipientCanonical);
   const avatarInitial = recipientLabel.replace(/^@/, "").charAt(0).toUpperCase();
+  // ResolveResult carries no handle type, so prefer the type from whichever
+  // candidate was picked and fall back to reading it off the canonical form.
+  const recipientTypeId = pickedType ?? handleTypeForCanonical(recipientCanonical)?.id;
+  const RecipientIcon = recipientTypeId
+    ? OAUTH_ICON[recipientTypeId as HandleTypeId]
+    : undefined;
 
   return (
     <div className="space-y-4">
@@ -498,22 +516,28 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
               <p className="text-sm text-graphite">
                 More than one person goes by that name. Pick who you meant.
               </p>
-              {candidates.map((c) => (
-                <button
-                  key={c.handle}
-                  onClick={() => {
-                    setRecipient(displayCanonical(c.handle));
-                    handleResolve(c.handle);
-                  }}
-                  disabled={resolving}
-                  className="flex w-full items-center justify-between gap-3 rounded-full border border-fog bg-white px-4 py-2.5 text-sm transition-colors hover:border-graphite disabled:opacity-50"
-                >
-                  <span className="text-graphite">{c.label}</span>
-                  <span className="min-w-0 truncate font-medium">
-                    {displayHandle(c.type, c.handle)}
-                  </span>
-                </button>
-              ))}
+              {candidates.map((c) => {
+                const CandidateIcon = OAUTH_ICON[c.type as HandleTypeId];
+                return (
+                  <button
+                    key={c.handle}
+                    onClick={() => {
+                      setRecipient(displayCanonical(c.handle));
+                      handleResolve(c.handle, c.type);
+                    }}
+                    disabled={resolving}
+                    className="flex w-full items-center gap-3 rounded-full border border-fog bg-white px-4 py-2.5 text-sm transition-colors hover:border-graphite disabled:opacity-50"
+                  >
+                    {CandidateIcon && (
+                      <CandidateIcon className="h-4 w-4 shrink-0 text-ink" />
+                    )}
+                    <span className="min-w-0 flex-1 truncate text-left font-medium">
+                      {displayHandle(c.type, c.handle)}
+                    </span>
+                    <span className="shrink-0 text-graphite">{c.label}</span>
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>
@@ -523,6 +547,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-paper text-sm font-bold">
               {avatarInitial}
             </div>
+            {RecipientIcon && <RecipientIcon className="h-4 w-4 shrink-0 text-ink" />}
             <p className="min-w-0 flex-1 truncate text-sm font-medium">
               {recipientLabel}
             </p>
