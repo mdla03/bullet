@@ -1,13 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  handleTypeForCanonical,
-  type HandleTypeId,
-  type ResolveCandidate,
-  type ResolveResult,
-} from "@zeekpay/shared";
-import { displayCanonical, displayHandle, OAUTH_ICON } from "@/lib/handle-ui";
+import type { HandleTypeId, ResolveCandidate, ResolveResult } from "@zeekpay/shared";
+import { displayCanonical, OAUTH_ICON } from "@/lib/handle-ui";
 import { computeRecipientDigest } from "@/lib/recipient";
 import { deriveStealthDigest } from "@/lib/stealth";
 import { computeCommitment } from "@/lib/commitment";
@@ -21,6 +16,12 @@ import {
   ExternalLinkIcon,
   LoaderIcon,
 } from "@/components/icons";
+import { CandidateRow, RecipientRow } from "@/components/RecipientRow";
+
+/** Shown under the recipient row once /resolve 404s: plain, factual, no
+ *  promise of more anonymity or speed than the invite flow actually gives. */
+const INVITE_COPY =
+  "This person hasn't joined Bullet yet. They'll get a claim link to redeem the funds.";
 
 const RESOLVER_URL =
   process.env.NEXT_PUBLIC_RESOLVER_URL ?? "http://localhost:3001";
@@ -121,11 +122,14 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
   const [recipient, setRecipient] = useState(initialRecipient ?? "");
   const [resolved, setResolved] = useState<ResolveResult | null>(null);
   const [unregistered, setUnregistered] = useState<string | null>(null);
+  // type/avatarUrl/profileUrl from a 404's githubFallback (backend/src/resolver.ts);
+  // undefined fields for every other unregistered handle type.
+  const [unregisteredInfo, setUnregisteredInfo] = useState<{
+    type?: string;
+    avatarUrl?: string | null;
+    profileUrl?: string | null;
+  } | null>(null);
   const [candidates, setCandidates] = useState<ResolveCandidate[] | null>(null);
-  // The handle type of the resolved recipient, for the picker/header icon.
-  // Set from the picked candidate; /resolve's 200 response carries no type,
-  // so a direct (non-ambiguous) query falls back to handleTypeForCanonical.
-  const [pickedType, setPickedType] = useState<string | null>(null);
   const [expiryDays, setExpiryDays] = useState<15 | 30>(30);
   const [resolving, setResolving] = useState(false);
   const [selectedToken, setSelectedToken] = useState(TOKENS[0]);
@@ -159,18 +163,19 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
   }, []);
 
   /** `query` overrides the input box, so picking a candidate below can
-   *  re-resolve its canonical handle without waiting for a state update.
-   *  `type` is that candidate's handle type, carried through since the
-   *  eventual /resolve response won't repeat it. */
-  async function handleResolve(query?: string, type?: string) {
+   *  re-resolve its canonical handle without waiting for a state update. The
+   *  candidate's own type/avatarUrl/profileUrl are already on the row that
+   *  was clicked; this re-resolves the canonical handle, whose 200 response
+   *  carries the same fields for the RecipientRow header. */
+  async function handleResolve(query?: string) {
     const q = (query ?? recipient).trim();
     if (!q) return;
     setError("");
     setResolving(true);
     setResolved(null);
     setUnregistered(null);
+    setUnregisteredInfo(null);
     setCandidates(null);
-    setPickedType(type ?? null);
     try {
       const res = await fetch(`${RESOLVER_URL}/resolve?q=${encodeURIComponent(q)}`);
       const result: ResolveResult = await res.json();
@@ -185,6 +190,11 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
       // money into an invite the recipient never asked for.
       if (res.status === 404) {
         setUnregistered(q);
+        setUnregisteredInfo({
+          type: result.type,
+          avatarUrl: result.avatarUrl,
+          profileUrl: result.profileUrl,
+        });
         return;
       }
       if (res.status === 429) {
@@ -212,8 +222,8 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
   function reset() {
     setResolved(null);
     setUnregistered(null);
+    setUnregisteredInfo(null);
     setCandidates(null);
-    setPickedType(null);
     setStep("idle");
     setClaimLink("");
     setNotePosted(false);
@@ -474,13 +484,15 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
   const showAmountStep = !!(resolved || unregistered);
   const recipientCanonical = (resolved ? recipient : unregistered ?? "").trim();
   const recipientLabel = displayCanonical(recipientCanonical);
-  const avatarInitial = recipientLabel.replace(/^@/, "").charAt(0).toUpperCase();
-  // ResolveResult carries no handle type, so prefer the type from whichever
-  // candidate was picked and fall back to reading it off the canonical form.
-  const recipientTypeId = pickedType ?? handleTypeForCanonical(recipientCanonical)?.id;
-  const RecipientIcon = recipientTypeId
-    ? OAUTH_ICON[recipientTypeId as HandleTypeId]
-    : undefined;
+  // Unregistered GitHub logins get a real public avatar + profile (see
+  // resolver.ts's githubFallback); every other unregistered type has neither,
+  // so that state stays text-only rather than showing a fake placeholder face.
+  const unregisteredGithub =
+    unregistered && unregisteredInfo?.type === "github" ? unregisteredInfo : null;
+  const UnregisteredIcon =
+    unregistered && !unregisteredGithub && unregisteredInfo?.type
+      ? OAUTH_ICON[unregisteredInfo.type as HandleTypeId]
+      : undefined;
 
   return (
     <div className="space-y-4">
@@ -516,49 +528,65 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
               <p className="text-sm text-graphite">
                 More than one person goes by that name. Pick who you meant.
               </p>
-              {candidates.map((c) => {
-                const CandidateIcon = OAUTH_ICON[c.type as HandleTypeId];
-                return (
-                  <button
-                    key={c.handle}
-                    onClick={() => {
-                      setRecipient(displayCanonical(c.handle));
-                      handleResolve(c.handle, c.type);
-                    }}
-                    disabled={resolving}
-                    className="flex w-full items-center gap-3 rounded-full border border-fog bg-white px-4 py-2.5 text-sm transition-colors hover:border-graphite disabled:opacity-50"
-                  >
-                    {CandidateIcon && (
-                      <CandidateIcon className="h-4 w-4 shrink-0 text-ink" />
-                    )}
-                    <span className="min-w-0 flex-1 truncate text-left font-medium">
-                      {displayHandle(c.type, c.handle)}
-                    </span>
-                    <span className="shrink-0 text-graphite">{c.label}</span>
-                  </button>
-                );
-              })}
+              {candidates.map((c) => (
+                <CandidateRow
+                  key={c.handle}
+                  candidate={c}
+                  disabled={resolving}
+                  onSelect={() => {
+                    setRecipient(displayCanonical(c.handle));
+                    handleResolve(c.handle);
+                  }}
+                />
+              ))}
             </div>
           )}
         </div>
       ) : (
         <>
-          <div className="flex items-center gap-3 rounded-xl border border-fog px-3 py-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-paper text-sm font-bold">
-              {avatarInitial}
+          {resolved ? (
+            <RecipientRow
+              name={recipientLabel.replace(/^@/, "")}
+              type={resolved.type}
+              handle={recipientLabel}
+              avatarUrl={resolved.avatarUrl}
+              profileUrl={resolved.profileUrl}
+              onChange={reset}
+              changeDisabled={busy}
+            />
+          ) : unregisteredGithub ? (
+            <div className="space-y-2">
+              <RecipientRow
+                name={recipientLabel.replace(/^@/, "")}
+                type={unregisteredGithub.type}
+                handle={recipientLabel}
+                avatarUrl={unregisteredGithub.avatarUrl}
+                profileUrl={unregisteredGithub.profileUrl}
+                onChange={reset}
+                changeDisabled={busy}
+              />
+              <p className="px-1 text-xs text-graphite">{INVITE_COPY}</p>
             </div>
-            {RecipientIcon && <RecipientIcon className="h-4 w-4 shrink-0 text-ink" />}
-            <p className="min-w-0 flex-1 truncate text-sm font-medium">
-              {recipientLabel}
-            </p>
-            <button
-              onClick={reset}
-              disabled={busy}
-              className="shrink-0 rounded-full border border-fog px-3 py-1.5 text-xs font-medium text-graphite transition-colors hover:border-graphite hover:text-ink disabled:opacity-50"
-            >
-              Change
-            </button>
-          </div>
+          ) : (
+            <div className="space-y-2">
+              <div className="flex items-center gap-3 rounded-xl border border-fog px-3 py-3">
+                {UnregisteredIcon && (
+                  <UnregisteredIcon className="h-4 w-4 shrink-0 text-ink" />
+                )}
+                <p className="min-w-0 flex-1 truncate text-sm font-medium text-ink">
+                  {recipientLabel}
+                </p>
+                <button
+                  onClick={reset}
+                  disabled={busy}
+                  className="shrink-0 rounded-full border border-fog px-3 py-1.5 text-xs font-medium text-graphite transition-colors hover:border-graphite hover:text-ink disabled:opacity-50"
+                >
+                  Change
+                </button>
+              </div>
+              <p className="px-1 text-xs text-graphite">{INVITE_COPY}</p>
+            </div>
+          )}
 
           <div className="relative flex rounded-full border border-fog p-1">
             <div

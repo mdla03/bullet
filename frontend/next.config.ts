@@ -41,11 +41,23 @@ const scriptSrc = [
   isDev ? "'unsafe-eval'" : null,
 ].filter(Boolean);
 
+// Provider avatar photos shown on the send screen (RecipientRow, D3 handle
+// avatars): github.com is the unregistered-GitHub fallback redirect
+// (resolver.ts's githubFallback), which lands on avatars.githubusercontent.com;
+// lh3.googleusercontent.com and pbs.twimg.com are where Google and X serve the
+// photo a registered user's own identity_data carries (backend/sql/handles_avatar.sql).
+const avatarImgSrc = [
+  "https://github.com",
+  "https://avatars.githubusercontent.com",
+  "https://lh3.googleusercontent.com",
+  "https://pbs.twimg.com",
+];
+
 const csp = [
   `default-src 'self'`,
   `script-src ${scriptSrc.join(" ")}`,
   `style-src 'self' 'unsafe-inline'`,
-  `img-src 'self' data: blob:`,
+  `img-src 'self' data: blob: ${avatarImgSrc.join(" ")}`,
   `font-src 'self' data:`,
   `connect-src ${connectSrc.join(" ")}`,
   `worker-src 'self' blob:`,
