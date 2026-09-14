@@ -137,6 +137,74 @@ unit-testable in the native test environment, because a bogus wasm hash traps
 inside `update_current_contract_wasm` whether or not the gate is present. See
 the note above `upgrade_before_init_fails` in `contracts/zeekpay/src/test.rs`.
 
+## 2026-09-14: 7-input claim key
+
+The claim circuit moved from 5 public inputs to 7 (Pedersen amount
+commitment, one curve point split across two field elements). Contract-side
+change is described in `pipeline/circom-circuit/changes.md`, 2026-09-14
+entry. This supersedes the "5-input claim key, 6 IC entries" note in Phase
+4's Verifying keys subsection above: the claim key is now 7-input, 8 IC
+entries. The join-split key is unchanged at 8-input, 9 IC entries.
+
+**Pre-flight, checked 2026-09-14:**
+
+- `stellar --version` was not found on this machine. Install it before
+  running any command below that invokes the CLI directly; `scripts/set_vk.mjs`
+  itself only needs the `@stellar/stellar-sdk` npm package, not the CLI.
+- `stellar keys address zeekpay-bench` could not be checked for the same
+  reason. Confirm it resolves to the admin key in `.env`
+  (`ZEEKPAY_ADMIN_KEY`) before running any command that signs and sends.
+- `circuits/build/groth16_soroban.json` was still the stale 5-input
+  conversion (6 IC entries) before this change; regenerated below.
+- `circuits/build/joinsplit_soroban.json` is already correct at 9 IC entries
+  and needs no regeneration.
+- A `set_vk --dry-run` simulation against the contract id currently in
+  `.env` (`ZEEKPAY_CONTRACT_ID`) found that contract has no `set_pool_vk`
+  function at all, meaning it predates the pool/upgrade migration in Phases
+  1-6 above. That migration (fresh deploy, not an upgrade) has to run before
+  either `set_vk` command below is meaningful. Re-run the dry run against
+  whatever contract id Phase 4 produces before trusting these commands
+  against it blindly.
+
+**Commands, in order, from the repo root:**
+
+```sh
+# 1. Regenerate the claim key JSON (fixture is already pinned, JSON only)
+node circuits/scripts/convert-to-soroban.mjs --out circuits/build/groth16_soroban.json
+# expect: ic: 8 pubs: 7
+
+# 2. Build the wasm
+cd contracts && stellar contract build && cd ..
+
+# 3. Deploy: this contract has no `upgrade` yet, so it is a fresh deploy,
+#    not Phase 7's upgrade path. Follow Phases 3-4 above in full (upload,
+#    deploy, initialize, add_token, post_root) using the freshly built wasm.
+#    A later deploy that only rotates this key, against a contract that
+#    already has `upgrade`, uses Phase 7 instead of this step.
+
+# 4. Set the claim key (8 IC entries, derived from the JSON, checked against
+#    the contract's expectation)
+node scripts/set_vk.mjs
+
+# 5. Set the pool key (unchanged, 9 IC entries)
+node scripts/set_vk.mjs pool
+
+# 6. Smoke-test: a real deposit-to-claim cycle through the app (Phase 6),
+#    using a proof generated against the current claim.zkey. Confirm the
+#    claim event carries (nullifier, amount_commitment) per changes.md.
+```
+
+Add `--dry-run` to either `set_vk.mjs` command to simulate only (no sign, no
+send) and inspect the resource footprint and any error first.
+
+**Failing closed.** Until step 4 runs, the deployed contract's stored claim
+key still has 6 IC entries while `derive_public_inputs` on the new wasm
+pushes 7 `Fr`. `verifier::verify` checks `vk.ic.len() != pubs.len() + 1`
+before any pairing math, so every claim against the new wasm returns
+`InvalidProof` until `set_vk` lands. That is a real outage window between
+step 3 and step 4, not a misconfiguration risk: it fails closed rather than
+accepting a mismatched proof.
+
 ## Before mainnet, none of which is done
 
 - **External audit.** SOW out-of-scope item 4. The balance constraint and the
