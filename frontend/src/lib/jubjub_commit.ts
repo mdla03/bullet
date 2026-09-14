@@ -27,15 +27,15 @@ const Hp = jubjub.Point.fromAffine(H);
 Gp.assertValidity();
 Hp.assertValidity();
 
+/** Number of bits the blinding factor is sampled from (see prove_browser.ts). */
+export const BLINDING_BITS = 251n;
+
+// noble's Point.multiply rejects a scalar of 0 (it requires 1 <= scalar <
+// curve order), so that case is handled explicitly with the identity rather
+// than falling back to the non-constant-time multiplyUnsafe.
 function mul(k: bigint, base: typeof Gp): typeof Gp {
-  let acc = jubjub.Point.ZERO;
-  let b = base;
-  while (k > 0n) {
-    if (k & 1n) acc = acc.add(b);
-    b = b.double();
-    k >>= 1n;
-  }
-  return acc;
+  if (k === 0n) return jubjub.Point.ZERO;
+  return base.multiply(k);
 }
 
 /** Pedersen commitment amount*G + blinding*H, as decimal-string coordinates. */

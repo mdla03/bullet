@@ -58,16 +58,34 @@ const fnName = mode === "pool" ? "set_pool_vk" : "set_vk";
 // is public inputs + 1, checked by verifier::verify). Claim is 7 public
 // inputs -> 8 IC entries as of the 2026-09-14 Pedersen-commitment change
 // (pipeline/circom-circuit/changes.md); join-split is unchanged at 8 -> 9.
-const expectedIc = mode === "pool" ? 9 : 8;
+// Used only as a fallback when the converted JSON predates convert-to-soroban.mjs
+// writing nPublic.
+const HARDCODED_EXPECTED_IC = mode === "pool" ? 9 : 8;
 
 const vkPath = path.join(__dirname, `../circuits/build/${vkFile}`);
 const vk = JSON.parse(fs.readFileSync(vkPath, "utf8"));
+
+// Prefer the IC count derived from the converted JSON's own nPublic (written
+// by convert-to-soroban.mjs) over the hardcoded value above, so this guard
+// tracks the circuit shape automatically instead of needing a manual bump.
+let expectedIc;
+let expectedIcSource;
+if (typeof vk.nPublic === "number") {
+  expectedIc = vk.nPublic + 1;
+  expectedIcSource = "nPublic";
+} else {
+  console.warn(
+    `${vkFile} has no nPublic field (stale conversion); falling back to the hardcoded expected IC count ${HARDCODED_EXPECTED_IC}.`
+  );
+  expectedIc = HARDCODED_EXPECTED_IC;
+  expectedIcSource = "hardcoded fallback";
+}
 
 // Cheap guard against pointing this at the wrong file, or a stale conversion:
 // the IC count in the converted JSON must match what the contract expects.
 if (vk.ic.length !== expectedIc) {
   console.error(
-    `${vkFile} has ${vk.ic.length} IC entries, expected ${expectedIc} for ${fnName}.`
+    `${vkFile} has ${vk.ic.length} IC entries, expected ${expectedIc} for ${fnName} (source: ${expectedIcSource}).`
   );
   console.error("Refusing to set a key that does not match the circuit shape.");
   process.exit(1);
@@ -102,7 +120,7 @@ console.log("Contract:", CONTRACT_ID);
 console.log("Admin:   ", admin.publicKey());
 console.log("Function:", fnName);
 console.log("VK file: ", vkFile);
-console.log("IC count:", vk.ic.length);
+console.log("IC count:", vk.ic.length, `(expected ${expectedIc}, source: ${expectedIcSource})`);
 if (dryRun) console.log("Mode:     dry-run (simulate only, will not sign or send)");
 
 const account = await rpc.getAccount(admin.publicKey());

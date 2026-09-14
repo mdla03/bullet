@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ResolveCandidate, ResolveResult } from "@zeekpay/shared";
 import { displayCanonical, displayHandle } from "@/lib/handle-ui";
 import { computeRecipientDigest } from "@/lib/recipient";
@@ -50,6 +50,7 @@ const TOKENS: TokenConfig[] = [
 // silently rounded amount and is used here.
 const MAX_STROOPS = (1n << 64n) - 1n;
 const MAX_SAFE_STROOPS = BigInt(Number.MAX_SAFE_INTEGER);
+// Smaller of the two bounds; MAX_STROOPS is AMOUNT_MAX_EXCLUSIVE - 1 from contracts/zeekpay/src/lib.rs.
 const AMOUNT_UPPER_BOUND = MAX_STROOPS < MAX_SAFE_STROOPS ? MAX_STROOPS : MAX_SAFE_STROOPS;
 
 /** Parse a decimal amount string into base units for `token`, validating
@@ -131,7 +132,10 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
 
   const busy = step === "computing" || step === "signing" || step === "submitting";
   const stepIndex = SEND_STEPS.findIndex((s) => s.key === step);
-  const parsedAmount = parseAmountInput(amountInput, selectedToken);
+  const parsedAmount = useMemo(
+    () => parseAmountInput(amountInput, selectedToken),
+    [amountInput, selectedToken]
+  );
   const amountStroops = parsedAmount.stroops ?? null;
   const amountErrorMsg = amountInput.trim() ? parsedAmount.error : undefined;
 

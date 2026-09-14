@@ -756,6 +756,8 @@ impl ZeekPay {
 #[cfg(test)]
 mod test_support {
     use super::*;
+    use crate::joinsplit_fixture as jsx;
+
     #[contracttype]
     pub enum TestKey {
         SkipVerify,
@@ -768,5 +770,37 @@ mod test_support {
             .instance()
             .get(&TestKey::SkipVerify)
             .unwrap_or(false)
+    }
+
+    // ---- fixture decoding helpers, shared by test.rs and test_pool_d2.rs ----
+
+    pub fn hex32(env: &Env, h: &str) -> BytesN<32> {
+        let v = hex::decode(h).unwrap();
+        let a: [u8; 32] = v.try_into().unwrap();
+        BytesN::from_array(env, &a)
+    }
+    pub fn hex96(env: &Env, h: &str) -> BytesN<96> {
+        let v = hex::decode(h).unwrap();
+        let a: [u8; 96] = v.try_into().unwrap();
+        BytesN::from_array(env, &a)
+    }
+    pub fn hex192(env: &Env, h: &str) -> BytesN<192> {
+        let v = hex::decode(h).unwrap();
+        let a: [u8; 192] = v.try_into().unwrap();
+        BytesN::from_array(env, &a)
+    }
+
+    pub fn joinsplit_vkdata(env: &Env) -> VkData {
+        let mut ic: Vec<BytesN<96>> = Vec::new(env);
+        for h in jsx::IC {
+            ic.push_back(hex96(env, h));
+        }
+        VkData {
+            alpha1: hex96(env, jsx::ALPHA1),
+            beta2: hex192(env, jsx::BETA2),
+            gamma2: hex192(env, jsx::GAMMA2),
+            delta2: hex192(env, jsx::DELTA2),
+            ic,
+        }
     }
 }

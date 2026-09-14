@@ -14,6 +14,7 @@
 // window that an attacker can exploit.
 
 import * as StellarSdk from "@stellar/stellar-sdk";
+import { buildClaimOperation } from "./claim_encode";
 
 const RPC_URL =
   process.env.NEXT_PUBLIC_SOROBAN_RPC_URL ??
@@ -25,10 +26,6 @@ const USDT_SAC = process.env.NEXT_PUBLIC_USDT_SAC_ID ?? "";
 const TOKEN_SAC: Record<number, string> = { 0: USDC_SAC, 1: XLM_SAC, 2: USDT_SAC };
 const NETWORK_PASSPHRASE =
   process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ?? StellarSdk.Networks.TESTNET;
-
-function hexToBuffer(hex: string): Buffer {
-  return Buffer.from(hex, "hex");
-}
 
 /**
  * Claim an invite: contract.claim(recipient=custody) + token.transfer(custody
@@ -63,24 +60,21 @@ export async function claimInvite(
   const custodyAddr = custody.publicKey();
 
   const contract = new StellarSdk.Contract(CONTRACT_ID);
-  const { xdr } = StellarSdk;
 
   // TX A: contract.claim, USDC lands in the custody wallet.
-  const claimOp = contract.call(
-    "claim",
-    xdr.ScVal.scvBytes(hexToBuffer(proofA)),
-    xdr.ScVal.scvBytes(hexToBuffer(proofB)),
-    xdr.ScVal.scvBytes(hexToBuffer(proofC)),
-    xdr.ScVal.scvBytes(hexToBuffer(root)),
-    xdr.ScVal.scvBytes(hexToBuffer(nullifier)),
-    xdr.ScVal.scvBytes(hexToBuffer(recipientDigest)),
-    StellarSdk.nativeToScVal(custodyAddr, { type: "address" }),
-    StellarSdk.nativeToScVal(amount, { type: "i128" }),
-    StellarSdk.nativeToScVal(tokenId, { type: "u32" }),
-    xdr.ScVal.scvBytes(
-      Buffer.concat([hexToBuffer(amountCommitmentX), hexToBuffer(amountCommitmentY)])
-    )
-  );
+  const claimOp = buildClaimOperation(contract, {
+    proofA,
+    proofB,
+    proofC,
+    root,
+    nullifier,
+    recipientDigest,
+    recipient: custodyAddr,
+    amount,
+    tokenId,
+    amountCommitmentX,
+    amountCommitmentY,
+  });
   const acctA = await rpc.getAccount(custodyAddr);
   const txA = new StellarSdk.TransactionBuilder(acctA, {
     fee: "2000000",

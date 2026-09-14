@@ -20,9 +20,8 @@
 //! verification, never by insufficient balance.
 //!
 //! This file is new and does not touch lib.rs, test.rs, or
-//! groth16_fixture.rs, which another change has in flight. The two or three
-//! helpers below are therefore copied from test.rs rather than shared with
-//! it.
+//! groth16_fixture.rs, which another change has in flight. The fixture
+//! decoding helpers below are shared with test.rs via `crate::test_support`.
 
 #![cfg(test)]
 
@@ -30,39 +29,8 @@ use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{token, Address, BytesN, Env, Vec};
 
 use crate::joinsplit_fixture as jsx;
-use crate::{ProofBytes, VkData, ZeekPay, ZeekPayClient};
-
-// ---- copied from test.rs (fixture decoding helpers) ----
-
-fn hex32(env: &Env, h: &str) -> BytesN<32> {
-    let v = hex::decode(h).unwrap();
-    let a: [u8; 32] = v.try_into().unwrap();
-    BytesN::from_array(env, &a)
-}
-fn hex96(env: &Env, h: &str) -> BytesN<96> {
-    let v = hex::decode(h).unwrap();
-    let a: [u8; 96] = v.try_into().unwrap();
-    BytesN::from_array(env, &a)
-}
-fn hex192(env: &Env, h: &str) -> BytesN<192> {
-    let v = hex::decode(h).unwrap();
-    let a: [u8; 192] = v.try_into().unwrap();
-    BytesN::from_array(env, &a)
-}
-
-fn joinsplit_vkdata(env: &Env) -> VkData {
-    let mut ic: Vec<BytesN<96>> = Vec::new(env);
-    for h in jsx::IC {
-        ic.push_back(hex96(env, h));
-    }
-    VkData {
-        alpha1: hex96(env, jsx::ALPHA1),
-        beta2: hex192(env, jsx::BETA2),
-        gamma2: hex192(env, jsx::GAMMA2),
-        delta2: hex192(env, jsx::DELTA2),
-        ic,
-    }
-}
+use crate::test_support::*;
+use crate::{ProofBytes, ZeekPay, ZeekPayClient};
 
 // ---- shared pool setup ----
 
