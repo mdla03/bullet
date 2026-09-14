@@ -1,3 +1,9 @@
+-- SUPERSEDED: the current public.handle_new_identity() function lives in
+-- handles_avatar.sql from that revision on (it adds avatar_url). This file's
+-- CREATE OR REPLACE is kept for its history and for the GitHub namespace data
+-- migration below, which still needs to run once; do not apply this file's
+-- function body after handles_avatar.sql has been applied.
+--
 -- Adds GitHub to the trigger that turns a linked Supabase identity into a
 -- handles row, and namespaces the GitHub canonical form.
 --

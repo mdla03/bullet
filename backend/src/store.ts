@@ -88,6 +88,7 @@ export interface UserProfile {
 export interface LookupRow {
   handle_normalized: string;
   user_id: string;
+  avatar_url: string | null;
 }
 
 /** Multi-candidate lookup used by /resolve to try every enabled handle
@@ -96,7 +97,7 @@ export async function findManyByLookup(candidates: string[]): Promise<LookupRow[
   if (candidates.length === 0) return [];
   const { data, error } = await serviceClient
     .from("handles")
-    .select("handle_normalized, user_id")
+    .select("handle_normalized, user_id, avatar_url")
     .in("handle_normalized", candidates);
   if (error || !data) {
     if (error) console.error("[store] findManyByLookup failed:", error.message);

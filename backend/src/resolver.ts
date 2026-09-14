@@ -2,7 +2,7 @@ import { fileURLToPath } from "node:url";
 import express, { type Request, type Response, type NextFunction } from "express";
 import cors from "cors";
 import type { ResolveResult } from "@zeekpay/shared";
-import { enabledHandleTypes, handleTypeForCanonical } from "@zeekpay/shared";
+import { enabledHandleTypes, getHandleType, handleTypeForCanonical } from "@zeekpay/shared";
 import * as store from "./store.js";
 import * as leaves from "./leaves.js";
 import * as tree from "./tree.js";
@@ -123,8 +123,34 @@ app.get("/health", (_req: Request, res: Response) => {
 // (offer to send an invite) apart from the 300 below ("several people might,
 // pick one"). Both bodies carry found:false, so a client that only reads the
 // body still behaves as it did.
-function resolveNotFound(res: Response): void {
-  res.status(404).json({ found: false } satisfies ResolveResult);
+//
+// `fallback` carries the GitHub-only exception: a login nobody has registered
+// still has a real face and profile at github.com, so the invite screen can
+// show both even though there's no row in handles to read them from.
+function resolveNotFound(
+  res: Response,
+  fallback?: { type: "github"; avatarUrl: string; profileUrl: string | null }
+): void {
+  res.status(404).json({ found: false, ...fallback } satisfies ResolveResult);
+}
+
+/** GitHub's avatar redirect (no API call, no auth) plus its profile page, for
+ *  a query that parsed as a github candidate whether or not that login is
+ *  registered. Only github gets this: it's the only type here whose avatar
+ *  and profile page are derivable from the handle alone with no lookup. */
+function githubFallback(
+  q: string
+): { type: "github"; avatarUrl: string; profileUrl: string | null } | undefined {
+  const github = getHandleType("github");
+  if (!github) return undefined;
+  const canonical = github.parse(q);
+  if (!canonical) return undefined;
+  const login = github.format(canonical);
+  return {
+    type: "github",
+    avatarUrl: `https://github.com/${login}.png`,
+    profileUrl: github.profileUrl(canonical),
+  };
 }
 
 // Rate-limited per IP on the same terms as /auth/lookup: /resolve is public
@@ -155,8 +181,10 @@ app.get("/resolve", rateLimit(20, 60 * 1000), async (req: Request, res: Response
   const distinctUserIds = [...new Set(rows.map((r) => r.user_id))];
 
   let userId: string | undefined;
+  let matchedRow: store.LookupRow | undefined;
   if (distinctUserIds.length === 1) {
     userId = distinctUserIds[0];
+    matchedRow = rows.find((r) => r.user_id === userId);
   } else if (distinctUserIds.length > 1) {
     // Different candidates belong to different people (e.g. an X "@alice"
     // and a github "github:alice"). If the caller already typed the exact
@@ -173,37 +201,45 @@ app.get("/resolve", rateLimit(20, 60 * 1000), async (req: Request, res: Response
     const exact = rows.find((r) => r.handle_normalized === qCanonical);
     if (exact) {
       userId = exact.user_id;
+      matchedRow = exact;
     } else {
       res.status(300).json({
         found: false,
-        // Label + canonical per row, so the client renders "GitHub alice"
-        // without re-deriving a handle type from a namespaced string.
+        // Label + canonical + avatar/profile per row, so the client renders
+        // "GitHub alice" with a real face and a link to verify, without
+        // re-deriving a handle type from a namespaced string.
         candidates: rows.map((r) => {
           const t = handleTypeForCanonical(r.handle_normalized);
           return {
             type: t?.id ?? "unknown",
             label: t?.label ?? "Handle",
             handle: r.handle_normalized,
+            avatarUrl: r.avatar_url ?? null,
+            profileUrl: t?.profileUrl(r.handle_normalized) ?? null,
           };
         }),
       } satisfies ResolveResult);
       return;
     }
   }
-  if (!userId) {
-    return void resolveNotFound(res);
+  if (!userId || !matchedRow) {
+    return void resolveNotFound(res, githubFallback(q));
   }
 
   const user = await store.getUser(userId);
   if (!user || !user.wallet) {
-    return void resolveNotFound(res);
+    return void resolveNotFound(res, githubFallback(q));
   }
+  const matchedType = handleTypeForCanonical(matchedRow.handle_normalized);
   res.json({
     found: true,
     stellarAddress: user.wallet.stellar_address,
     zeekPayPubKey: user.wallet.bullet_pubkey,
     contractAddress: CONTRACT_ADDRESS,
     usdcSac: USDC_SAC,
+    type: matchedType?.id,
+    avatarUrl: matchedRow.avatar_url ?? null,
+    profileUrl: matchedType?.profileUrl(matchedRow.handle_normalized) ?? null,
   } satisfies ResolveResult);
 });
 

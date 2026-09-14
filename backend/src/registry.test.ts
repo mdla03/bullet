@@ -205,3 +205,43 @@ describe("handle registry: disabled bare-name types are namespaced", () => {
     assert.equal(handleTypeForCanonical("telegram:alice_99")?.id, "telegram");
   });
 });
+
+describe("handle registry: profileUrl", () => {
+  it("github: bare login and namespaced canonical give the same profile URL", () => {
+    const github = getHandleType("github")!;
+    const bare = github.parse("torvalds")!;
+    const namespaced = github.parse("github:torvalds")!;
+    assert.equal(bare, namespaced);
+    assert.equal(github.profileUrl(bare), "https://github.com/torvalds");
+    assert.equal(github.profileUrl(namespaced), "https://github.com/torvalds");
+  });
+
+  it("x: profile URL strips the leading @", () => {
+    const x = getHandleType("x")!;
+    const canonical = x.parse("@muskaroo")!;
+    assert.equal(canonical, "@muskaroo");
+    assert.equal(x.profileUrl(canonical), "https://x.com/muskaroo");
+  });
+
+  it("telegram: bare name and namespaced canonical give the same t.me URL", () => {
+    const telegram = getHandleType("telegram")!;
+    const bare = telegram.parse("alice_99")!;
+    const namespaced = telegram.parse("telegram:alice_99")!;
+    assert.equal(bare, namespaced);
+    assert.equal(telegram.profileUrl(bare), "https://t.me/alice_99");
+    assert.equal(telegram.profileUrl(namespaced), "https://t.me/alice_99");
+  });
+
+  it("discord has no profile URL", () => {
+    const discord = getHandleType("discord")!;
+    assert.equal(discord.profileUrl(discord.parse("alice")!), null);
+  });
+
+  it("google and email have no profile URL", () => {
+    const google = getHandleType("google")!;
+    const email = getHandleType("email")!;
+    const addr = "alice@example.com";
+    assert.equal(google.profileUrl(google.parse(addr)!), null);
+    assert.equal(email.profileUrl(email.parse(addr)!), null);
+  });
+});
