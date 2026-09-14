@@ -106,7 +106,10 @@ function parseGithub(input: string): string | null {
 
 function parseDiscord(input: string): string | null {
   const body = unnamespace(input, "discord", true).toLowerCase();
-  if (!/^[a-z0-9._]{2,32}$/.test(body)) return null;
+  // Discord's current (post-discriminator) username rule: 2-32 chars,
+  // lowercase letters, digits, underscore, period, and no two periods in a
+  // row. Mirrored by the SQL trigger guard in backend/sql/handles_discord.sql.
+  if (!/^(?!.*\.\.)[a-z0-9._]{2,32}$/.test(body)) return null;
   return namespace("discord", body);
 }
 
@@ -166,7 +169,7 @@ export const HANDLE_TYPES: readonly HandleType[] = [
   {
     id: "discord",
     label: "Discord",
-    enabled: false,
+    enabled: true,
     proof: { type: "supabase-oauth", provider: "discord" },
     identityProviders: ["discord"],
     parse: parseDiscord,
@@ -177,7 +180,7 @@ export const HANDLE_TYPES: readonly HandleType[] = [
   {
     id: "telegram",
     label: "Telegram",
-    enabled: false,
+    enabled: true,
     proof: { type: "telegram-widget" },
     identityProviders: ["telegram"],
     parse: parseTelegram,

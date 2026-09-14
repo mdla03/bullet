@@ -219,6 +219,51 @@ export async function insertNote(row: {
   return !error;
 }
 
+// ── telegram handles ──────────────────────────────────────────────────────────
+
+/** Write the handles row for a verified Telegram login (see telegram.ts).
+ *
+ *  Every other handle type gets its row from public.handle_new_identity(), the
+ *  trigger on auth.identities. Telegram has no Supabase identity to trigger on,
+ *  so this is the trigger's body by hand, and it must keep the same two rules
+ *  or the two writers disagree about who owns a handle:
+ *
+ *    1. Newest proven control wins. Telegram usernames get released and
+ *       re-registered; whoever just proved control of this one takes the row.
+ *       Scoped to OTHER users so re-linking your own handle is not a
+ *       delete-then-insert of your own row.
+ *    2. Upsert on (provider, subject), the unique constraint the trigger's
+ *       ON CONFLICT targets, so a username change updates the existing row for
+ *       that Telegram id instead of adding a second one. */
+export async function upsertTelegramHandle(
+  userId: string,
+  h: { subject: string; handle: string; avatarUrl: string | null }
+): Promise<boolean> {
+  const { error: evictErr } = await serviceClient
+    .from("handles")
+    .delete()
+    .eq("handle_normalized", h.handle)
+    .neq("user_id", userId);
+  if (evictErr) {
+    console.error("[store] upsertTelegramHandle evict failed:", evictErr.message);
+    return false;
+  }
+
+  const { error } = await serviceClient.from("handles").upsert(
+    {
+      user_id: userId,
+      provider: "telegram",
+      subject: h.subject,
+      handle: h.handle,
+      handle_normalized: h.handle,
+      avatar_url: h.avatarUrl,
+    },
+    { onConflict: "provider,subject" }
+  );
+  if (error) console.error("[store] upsertTelegramHandle failed:", error.message);
+  return !error;
+}
+
 // ── activity ──────────────────────────────────────────────────────────────────
 
 export interface Activity {

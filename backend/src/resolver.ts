@@ -9,6 +9,7 @@ import * as tree from "./tree.js";
 import * as invite from "./invite.js";
 import * as email from "./email.js";
 import * as indexer from "./indexer.js";
+import { telegramRouter } from "./telegram.js";
 import { requireAuth, serviceClient } from "./supabase.js";
 import { verifyLinkWalletSig } from "./verify.js";
 import * as StellarSdk from "@stellar/stellar-sdk";
@@ -314,6 +315,10 @@ app.post("/wallet/link", requireAuth, async (req: Request, res: Response) => {
   invite.deliverInvitesFor(userId, zeekPayPubKey).catch(() => {});
   res.json({ ok: true, wallet: result.wallet });
 });
+
+// ── /telegram/link: Telegram Login Widget proof (telegram.ts) ─────────────────
+
+app.use(telegramRouter(rateLimit(10, 10 * 60 * 1000)));
 
 // ── /invite: send-to-unregistered flow ────────────────────────────────────────
 

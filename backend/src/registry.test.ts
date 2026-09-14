@@ -17,6 +17,8 @@ const SAMPLE_INPUT: Record<string, string> = {
   x: "@Alice",
   email: "Alice@Example.com",
   github: "@Torvalds",
+  discord: "Alice.B_2",
+  telegram: "@Alice_Bot_99",
 };
 
 describe("handle registry: parse/format round trip", () => {
@@ -43,10 +45,9 @@ describe("handle registry: parse/format round trip", () => {
     });
   }
 
-  it("disabled types (discord, telegram) are not in the enabled list", () => {
+  it("all three SOW handle types are enabled", () => {
     const ids = enabledHandleTypes().map((h) => h.id);
-    assert.ok(!ids.includes("discord"));
-    assert.ok(!ids.includes("telegram"));
+    for (const id of ["github", "discord", "telegram"] as const) assert.ok(ids.includes(id), id);
   });
 });
 
@@ -163,21 +164,16 @@ describe("handle registry: github canonical form", () => {
   });
 });
 
-// Disabled, but parsed here anyway: the namespace rule is what keeps them from
-// colliding with github the day either is turned on, and a rule nothing tests
-// is a rule that quietly rots.
-describe("handle registry: disabled bare-name types are namespaced", () => {
+// discord is enabled now; its own namespace/charset tests moved to the
+// "discord canonical form" block below, mirroring github's. telegram stays
+// disabled but is parsed here anyway: the namespace rule is what keeps it
+// from colliding with github/discord the day it's turned on too, and a rule
+// nothing tests is a rule that quietly rots. The round-trip and
+// handleTypeForCanonical checks below cover discord and telegram together
+// since both hold regardless of a type's enabled flag.
+describe("handle registry: bare-name type namespacing", () => {
   const discord = getHandleType("discord")!;
   const telegram = getHandleType("telegram")!;
-
-  it("discord: parse namespaces and lowercases", () => {
-    assert.equal(discord.parse("Alice"), "discord:alice");
-    assert.equal(discord.parse("@alice.b_c"), "discord:alice.b_c");
-    assert.equal(discord.parse("discord:Alice"), "discord:alice");
-    assert.equal(discord.parse("a"), null, "one character is below the minimum");
-    assert.equal(discord.parse("a".repeat(33)), null);
-    assert.equal(discord.format("discord:alice"), "alice");
-  });
 
   it("telegram: parse namespaces and lowercases", () => {
     assert.equal(telegram.parse("Alice_99"), "telegram:alice_99");
@@ -188,7 +184,7 @@ describe("handle registry: disabled bare-name types are namespaced", () => {
     assert.equal(telegram.format("telegram:alice_99"), "@alice_99");
   });
 
-  it("both round-trip through format like the enabled types do", () => {
+  it("both round-trip through format", () => {
     for (const handleType of [discord, telegram]) {
       const canonical = handleType.parse("alice_99")!;
       assert.ok(canonical);
@@ -196,13 +192,57 @@ describe("handle registry: disabled bare-name types are namespaced", () => {
     }
   });
 
-  it("handleTypeForCanonical still maps a disabled type's stored canonical to its type", () => {
-    // A row written while discord/telegram were enabled (or restored from a
-    // backup) must not become unlabelable just because the type is now
-    // disabled: enabledHandleTypes() gates parsing new input, not looking up
-    // what a canonical string already is.
+  it("handleTypeForCanonical maps a stored canonical to its type whether or not the type is currently enabled", () => {
+    // A row written while discord was disabled (or restored from a backup)
+    // must not become unlabelable now that it's on, and the same must hold
+    // for telegram if it stays off: enabledHandleTypes() gates parsing new
+    // input, not looking up what a canonical string already is.
     assert.equal(handleTypeForCanonical("discord:alice")?.id, "discord");
     assert.equal(handleTypeForCanonical("telegram:alice_99")?.id, "telegram");
+  });
+});
+
+describe("handle registry: discord canonical form", () => {
+  const discord = getHandleType("discord")!;
+
+  it("namespaces and lowercases the username", () => {
+    assert.equal(discord.parse("Alice"), "discord:alice");
+    assert.equal(discord.parse("@Alice.B_2"), "discord:alice.b_2");
+    assert.equal(discord.parse("discord:Alice"), "discord:alice");
+  });
+
+  it("accepts its own canonical form back (idempotent)", () => {
+    assert.equal(discord.parse("discord:alice"), "discord:alice");
+    assert.equal(discord.parse("Discord:Alice"), "discord:alice");
+  });
+
+  it("displays the bare username, no @ and no namespace", () => {
+    assert.equal(discord.format("discord:alice"), "alice");
+  });
+
+  it("rejects usernames Discord itself would reject", () => {
+    assert.equal(discord.parse("a"), null, "one character is below the minimum");
+    assert.equal(discord.parse("a".repeat(33)), null, "33 characters is above the maximum");
+    assert.equal(discord.parse("has space"), null);
+    assert.equal(discord.parse("a..b"), null, "consecutive periods are not allowed");
+    assert.equal(discord.parse("a-b"), null, "hyphen is not in Discord's username charset");
+    // The namespace is not a way in: the body still has to be a real username.
+    assert.equal(discord.parse("discord:a..b"), null);
+  });
+
+  it("matches the charset the SQL trigger guards on", () => {
+    // backend/sql/handles_discord.sql refuses anything this regex rejects. The
+    // two must agree or the trigger writes rows the registry cannot parse.
+    const sqlGuard = /^discord:(?!.*\.\.)[a-z0-9._]{2,32}$/;
+    for (const name of ["alice", "a1", "a.b_c", "a".repeat(32)]) {
+      const canonical = discord.parse(name);
+      assert.ok(canonical, `registry rejected ${name}`);
+      assert.match(canonical!, sqlGuard);
+    }
+    for (const name of ["a", "a..b", "a-b", "a".repeat(33)]) {
+      assert.equal(discord.parse(name), null, `registry accepted ${name}`);
+      assert.doesNotMatch(`discord:${name.toLowerCase()}`, sqlGuard);
+    }
   });
 });
 

@@ -12,6 +12,7 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { apiFetch, getMe, lookupEmailProviders, type MeResponse } from "@/lib/api";
 import { Skeleton } from "@/components/Skeleton";
+import { TelegramLogin } from "@/components/TelegramLogin";
 import { enabledHandleTypes, type OAuthProviderId } from "@zeekpay/shared";
 import {
   OAUTH_ICON,
@@ -48,7 +49,16 @@ const PROVIDERS: {
 // Shown as an explicit "not supported yet" note instead of silently
 // vanishing, so flipping a type's `enabled` flag on before its UI flow is
 // built is noticeable rather than a quiet no-op.
-const UNSUPPORTED_TYPES = unsupportedHandleTypes();
+//
+// Telegram is the one type in there that now HAS a flow: it is proven by
+// Telegram's own Login Widget rather than by Supabase, so it renders
+// TelegramLogin below instead of the note. Everything else keeps the note.
+const TELEGRAM_TYPES = unsupportedHandleTypes().filter(
+  (h) => h.proof.type === "telegram-widget"
+);
+const UNSUPPORTED_TYPES = unsupportedHandleTypes().filter(
+  (h) => h.proof.type !== "telegram-widget"
+);
 
 // Raw auth.identities.provider values that mean "this account signs in through
 // OAuth", taken from the registry rather than a hardcoded list, so a type
@@ -691,6 +701,12 @@ export function RegisterFlow({
                 );
               })}
           </div>
+          {/* Telegram proves ownership through its own Login Widget, not
+              Supabase, so it can only be added once there is a session to
+              attach it to: here, not on the sign-in step above. */}
+          {TELEGRAM_TYPES.some(
+            (t) => !t.identityProviders.some((p) => handles.some((h) => h.provider === p))
+          ) && <TelegramLogin onLinked={refreshMe} />}
           <Link
             href="/inbox"
             className="flex w-full items-center justify-center rounded-full bg-ink px-5 py-3 text-center font-semibold text-paper transition-colors hover:bg-ink/85"

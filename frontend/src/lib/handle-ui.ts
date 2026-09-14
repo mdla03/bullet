@@ -8,7 +8,7 @@ import {
   type HandleTypeId,
   type OAuthProviderId,
 } from "@zeekpay/shared";
-import { GithubIcon, GoogleIcon, MailIcon, XBrandIcon } from "@/components/icons";
+import { GithubIcon, TelegramIcon, GoogleIcon, MailIcon, XBrandIcon } from "@/components/icons";
 
 /** The OAuth-backed variant of a handle proof. Its `provider` is the registry's
  *  own `OAuthProviderId`, every member of which is also a Supabase `Provider`,
@@ -69,6 +69,7 @@ export const OAUTH_ICON: Partial<
   google: GoogleIcon,
   x: XBrandIcon,
   github: GithubIcon,
+  telegram: TelegramIcon,
 };
 
 // Enabled handle types with no working sign-in/connect flow: neither OAuth

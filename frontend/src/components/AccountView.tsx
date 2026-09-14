@@ -15,6 +15,7 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { getMe, type MeResponse } from "@/lib/api";
 import { Skeleton } from "@/components/Skeleton";
+import { TelegramLogin } from "@/components/TelegramLogin";
 import {
   OAUTH_ICON,
   displayHandle,
@@ -29,7 +30,17 @@ const OAUTH_HANDLE_TYPES = oauthHandleTypes();
 
 // Enabled handle types with no connect flow here at all: neither OAuth with
 // an icon (OAUTH_HANDLE_TYPES above) nor the hand-built add-email form.
-const UNSUPPORTED_TYPES = unsupportedHandleTypes();
+//
+// Telegram is the exception in that list: it is proven by Telegram's own Login
+// Widget rather than by Supabase, so it gets TelegramLogin below instead of
+// the "not supported yet" note. Split by proof type rather than by id so a
+// second widget-proven type would follow the same branch.
+const TELEGRAM_TYPES = unsupportedHandleTypes().filter(
+  (h) => h.proof.type === "telegram-widget"
+);
+const UNSUPPORTED_TYPES = unsupportedHandleTypes().filter(
+  (h) => h.proof.type !== "telegram-widget"
+);
 
 export function AccountView() {
   const supabase = createClient();
@@ -159,6 +170,9 @@ export function AccountView() {
   const unsupportedTypes = UNSUPPORTED_TYPES.filter(
     (h) => !h.identityProviders.some((p) => linkedProviders.has(p))
   );
+  const showTelegram = TELEGRAM_TYPES.some(
+    (h) => !h.identityProviders.some((p) => linkedProviders.has(p))
+  );
 
   return (
     <div className="space-y-4">
@@ -221,7 +235,7 @@ export function AccountView() {
           })}
         </div>
 
-        {(missingOAuth.length > 0 || !hasEmail || unsupportedTypes.length > 0) && (
+        {(missingOAuth.length > 0 || !hasEmail || unsupportedTypes.length > 0 || showTelegram) && (
           <div className="space-y-2 border-t border-fog pt-4">
             {missingOAuth.map((p) => (
               <button
@@ -238,6 +252,7 @@ export function AccountView() {
                 Connect {p.label}
               </button>
             ))}
+            {showTelegram && <TelegramLogin onLinked={refreshMe} />}
             {unsupportedTypes.map((h) => (
               <div
                 key={h.id}

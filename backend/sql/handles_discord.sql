@@ -1,53 +1,62 @@
--- SUPERSEDED: the current public.handle_new_identity() function lives in
--- handles_discord.sql from that revision on (it adds the discord branch); do
--- not apply this file's function body after handles_discord.sql has been
--- applied.
+-- Adds Discord to the trigger that turns a linked Supabase identity into a
+-- handles row, namespaced like github (see handles_github.sql for why bare-
+-- name types need a namespace).
 --
--- Adds an avatar photo to public.handles, so the resolver can hand the
--- sender a face for a recipient (and for each ambiguity candidate) instead of
--- just a bare handle string.
---
--- APPLY ORDER: handles_schema.sql, then handles_github.sql, then
--- handles_unique.sql, then THIS FILE last. This file's CREATE OR REPLACE
--- supersedes handles_github.sql's function; do not re-apply that file's
--- function body after this one, or avatar_url stops being written again.
+-- APPLY ORDER: handles_schema.sql, handles_github.sql, handles_unique.sql,
+-- handles_avatar.sql, then THIS FILE last. This file's CREATE OR REPLACE
+-- supersedes handles_avatar.sql's function; do not re-apply that file's
+-- function body after this one, or the discord branch disappears again.
+-- handles_avatar.sql carries a one-line pointer back to this file.
 --
 -- WHAT THIS CHANGES:
---   1. public.handles gains an avatar_url column.
---   2. public.handle_new_identity() is replaced with a version identical to
---      the one in handles_github.sql except it also reads an avatar URL out
---      of identity_data and writes it, both on first insert and on the
---      on-conflict update (so a re-sign-in refreshes a changed photo, and
---      clears one the provider stops sending).
---   3. A one-time backfill fills avatar_url for handles rows created before
---      this revision, from the same auth.identities data the trigger would
---      have used if it had run at insert time.
+--   public.handle_new_identity() gains an `elsif new.provider = 'discord'`
+--   branch, identical in shape to the existing github branch: it derives
+--   v_handle as 'discord:' || lower(username), then a charset guard mirroring
+--   parseDiscord in shared/src/handles.ts rejects (raise warning, return)
+--   anything the registry could not parse back. Nothing else in the function
+--   changes: the avatar handling, the newest-wins eviction, the upsert and
+--   the unique_violation swallow are all unchanged from handles_avatar.sql.
 --
--- WHY BOTH avatar_url AND picture. Supabase populates identity_data's
--- avatar_url key for google and github. X's OAuth 2.0 identity_data instead
--- carries the photo under picture (some providers use that key name instead
--- of avatar_url); coalesce(avatar_url, picture) below covers both without
--- needing a per-provider branch.
+-- FIELD SOURCE (what identity_data carries for a Discord identity):
+-- Supabase's docs page (https://supabase.com/docs/guides/auth/social-login/
+-- auth-discord, fetched via search_docs 2026-09-14) covers app setup and the
+-- signInWithOAuth() call but does not enumerate identity_data's keys per
+-- provider; the generic "Identities" doc page only documents the
+-- provider_id/user_id/identity_data envelope, not field names inside it. No
+-- documented source exists for the concrete field name, so this is GoTrue
+-- source knowledge (supabase/auth provider_discord.go), not a live-verified
+-- fact the way handles_github.sql's branch was (see that file's "PROVEN END
+-- TO END" note from a real GitHub sign-in). Treat this branch the same way
+-- until a real Discord sign-in confirms it end to end:
 --
--- PRIVACY NOTE: /resolve is a public, unauthenticated endpoint (rate-limited,
--- not access-controlled) that anyone can query with a guessed or discovered
--- handle. Publishing avatar_url through it means the avatar is served to
--- anyone who resolves the handle, not just the sender who already knows the
--- recipient. Only the https:// URL the provider already serves publicly is
--- stored (the same photo shown on the person's GitHub/Google/X profile), and
--- the https:// check keeps anything else (a data: URI, a provider-internal
--- path, a null) out of a column the resolver serves unauthenticated.
+--   GoTrue's Discord provider calls Discord's /users/@me, which returns
+--   (among others) `id`, `username`, `global_name`, `avatar`, `email`,
+--   `verified`. It maps `username` (the single, lowercase-friendly handle
+--   Discord kept when it dropped discriminators in 2023) onto the identity's
+--   Name claim, i.e. identity_data->>'name'; there is no separate
+--   `user_name` key for this provider the way there is for github and x
+--   (those set both). `global_name` is the free-text display name shown in
+--   the Discord client (can contain spaces, mixed case, any Unicode, is not
+--   unique) and lands under identity_data->'custom_claims'->>'global_name';
+--   it is deliberately NOT used here for the same reason a display name is
+--   never used as a handle: it cannot satisfy the charset guard and it does
+--   not uniquely identify the account.
 --
--- ── the table ─────────────────────────────────────────────────────────────────
-alter table public.handles add column if not exists avatar_url text;
-
+--   The branch below coalesces name and user_name (checking user_name first,
+--   matching the github/x branches' coalesce order) so it keeps working if a
+--   future GoTrue revision starts also setting user_name for Discord; today
+--   only name is expected to be populated.
+--
+-- WHEN THIS GETS LIVE-VERIFIED: re-run the same query handles_github.sql
+-- used, swapping provider = 'discord', and record the resulting row here,
+-- the way that file records its first real GitHub sign-in.
+--
 -- ── the trigger function ─────────────────────────────────────────────────────
 --
--- Identical to the function in handles_github.sql except for the avatar
--- handling: v_avatar's declaration, assignment, the https:// guard, and its
--- appearance in the insert column list and the on-conflict update. Every
--- other branch, guard and comment is unchanged from that file; see it for the
--- history of the non-avatar logic.
+-- Identical to the function in handles_avatar.sql except for the discord
+-- branch in the if/elsif chain and its charset guard below the github one.
+-- Every other branch, guard and comment is unchanged from that file; see it
+-- (and handles_github.sql) for the history of the rest of this function.
 create or replace function public.handle_new_identity()
 returns trigger
 language plpgsql
@@ -70,6 +79,12 @@ begin
     -- Namespaced so a bare login cannot collide with another provider's.
     v_handle := 'github:' || lower(coalesce(new.identity_data->>'user_name',
                                             new.identity_data->>'preferred_username'));
+  elsif new.provider = 'discord' then
+    -- See this file's header FIELD SOURCE note. Namespaced for the same
+    -- collision reason as github: a bare "alice" from Discord must not read
+    -- as the same handle as a bare "alice" from GitHub.
+    v_handle := 'discord:' || lower(coalesce(new.identity_data->>'user_name',
+                                             new.identity_data->>'name'));
   else
     return new;
   end if;
@@ -88,6 +103,17 @@ begin
   if new.provider = 'github'
      and v_handle !~ '^github:[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$' then
     raise warning 'handle_new_identity: github identity % has an unparseable login %',
+      new.provider_id, v_handle;
+    return new;
+  end if;
+
+  -- Charset guard, mirroring parseDiscord in shared/src/handles.ts: 2-32
+  -- chars, lowercase letters/digits/underscore/period, no consecutive
+  -- periods. Postgres's regex engine supports the negative lookahead this
+  -- needs (ARE mode, the default).
+  if new.provider = 'discord'
+     and v_handle !~ '^discord:(?!.*\.\.)[a-z0-9._]{2,32}$' then
+    raise warning 'handle_new_identity: discord identity % has an unparseable username %',
       new.provider_id, v_handle;
     return new;
   end if;
@@ -147,19 +173,3 @@ exception when unique_violation then
   return new;
 end;
 $function$;
-
--- ── one-time backfill ────────────────────────────────────────────────────────
--- Fills avatar_url for rows written before this revision (the trigger above
--- only sets it on the next sign-in). Idempotent: `and h.avatar_url is null`
--- makes a second run a no-op, and only https URLs are ever written.
-update public.handles h
-   set avatar_url = sub.url
-  from (
-    select i.provider, i.provider_id,
-           coalesce(i.identity_data->>'avatar_url', i.identity_data->>'picture') as url
-      from auth.identities i
-  ) sub
- where h.provider = sub.provider
-   and h.subject = sub.provider_id
-   and sub.url like 'https://%'
-   and h.avatar_url is null;
