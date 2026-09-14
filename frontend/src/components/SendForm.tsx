@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { HandleTypeId, ResolveCandidate, ResolveResult } from "@zeekpay/shared";
-import { displayCanonical, OAUTH_ICON } from "@/lib/handle-ui";
+import type { ResolveCandidate, ResolveResult } from "@zeekpay/shared";
+import { displayCanonical } from "@/lib/handle-ui";
 import { computeRecipientDigest } from "@/lib/recipient";
 import { deriveStealthDigest } from "@/lib/stealth";
 import { computeCommitment } from "@/lib/commitment";
@@ -487,12 +487,11 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
   // Unregistered GitHub logins get a real public avatar + profile (see
   // resolver.ts's githubFallback); every other unregistered type has neither,
   // so that state stays text-only rather than showing a fake placeholder face.
+  // githubFallback is the only source of unregisteredInfo.type, so it is
+  // always either "github" (handled below) or absent; no other type ever
+  // reaches this state.
   const unregisteredGithub =
     unregistered && unregisteredInfo?.type === "github" ? unregisteredInfo : null;
-  const UnregisteredIcon =
-    unregistered && !unregisteredGithub && unregisteredInfo?.type
-      ? OAUTH_ICON[unregisteredInfo.type as HandleTypeId]
-      : undefined;
 
   return (
     <div className="space-y-4">
@@ -570,9 +569,6 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
           ) : (
             <div className="space-y-2">
               <div className="flex items-center gap-3 rounded-xl border border-fog px-3 py-3">
-                {UnregisteredIcon && (
-                  <UnregisteredIcon className="h-4 w-4 shrink-0 text-ink" />
-                )}
                 <p className="min-w-0 flex-1 truncate text-sm font-medium text-ink">
                   {recipientLabel}
                 </p>
