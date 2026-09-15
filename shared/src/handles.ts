@@ -169,7 +169,7 @@ export const HANDLE_TYPES: readonly HandleType[] = [
   {
     id: "discord",
     label: "Discord",
-    enabled: true,
+    enabled: false,
     proof: { type: "supabase-oauth", provider: "discord" },
     identityProviders: ["discord"],
     parse: parseDiscord,
@@ -180,7 +180,7 @@ export const HANDLE_TYPES: readonly HandleType[] = [
   {
     id: "telegram",
     label: "Telegram",
-    enabled: true,
+    enabled: false,
     proof: { type: "telegram-widget" },
     identityProviders: ["telegram"],
     parse: parseTelegram,

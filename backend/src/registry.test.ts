@@ -45,9 +45,11 @@ describe("handle registry: parse/format round trip", () => {
     });
   }
 
-  it("all three SOW handle types are enabled", () => {
+  it("github is enabled; discord and telegram stay off until their providers are configured", () => {
     const ids = enabledHandleTypes().map((h) => h.id);
-    for (const id of ["github", "discord", "telegram"] as const) assert.ok(ids.includes(id), id);
+    assert.ok(ids.includes("github"));
+    assert.ok(!ids.includes("discord"));
+    assert.ok(!ids.includes("telegram"));
   });
 });
 
