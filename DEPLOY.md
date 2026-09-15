@@ -310,7 +310,15 @@ Both fixture nullifiers read `is_nullifier_used = true` after the accepted
 call, and read `false` in between the rejected call and the accepted one, so
 the rejected call wrote no state.
 
-**Config updated**
+**Config updated, on the deployer's machine only**
+
+Both files below are gitignored, so this records what was changed locally by
+whoever ran this deploy. A clone elsewhere still points at the old contract
+until someone repeats these edits there, and the `zeekpay-bench` identity is
+in that machine's CLI keystore, not in the repo. Another machine's
+`zeekpay-bench` is a different keypair with the same name: the admin of this
+contract is specifically `GCTGLSNOSCHDYXEJ73FQMFW6W4EZQMC2MZWEZR66K24KF6MMW3QAGAMK`,
+so check the address before assuming a local identity is the right one.
 
 - `.env`: `ZEEKPAY_CONTRACT_ID`, `NEXT_PUBLIC_CONTRACT_ID`, and
   `ZEEKPAY_ADMIN_KEY`, which is now the `zeekpay-bench` secret.
@@ -338,11 +346,24 @@ the rejected call wrote no state.
   has not posted a root covering the two note commitments this deploy emitted
   at tree indices 0 and 1, so those outputs are not yet spendable.
 
-**CLI note.** The built-in `testnet` network alias in stellar CLI 28.0.0 fails
-on this machine with "rpc-url is used but network passphrase is missing", and
-`stellar network add testnet` fails the same way. Every command above was run
-with explicit `--rpc-url https://soroban-testnet.stellar.org` and
-`--network-passphrase "Test SDF Network ; September 2015"` instead. The
+**CLI note, resolved.** The built-in `testnet` network alias failed with
+"rpc-url is used but network passphrase is missing", and `stellar network add
+testnet` failed the same way, so every command above was run with explicit
+`--rpc-url https://soroban-testnet.stellar.org` and `--network-passphrase
+"Test SDF Network ; September 2015"` instead.
+
+That workaround is no longer needed. The cause was not the CLI version and not
+the machine: the stellar CLI auto-loads `.env` from the working directory, and
+the `SOROBAN_RPC_URL` key that used to live there was read as an `--rpc-url`
+with no matching passphrase, so the alias broke for every command run inside
+the repo. Reproduced identically on CLI 27.0.0 and 28.0.0; an empty `.env`, a
+renamed key, or running from outside the repo all work. Adding
+`NETWORK_PASSPHRASE` or `STELLAR_NETWORK_PASSPHRASE` to `.env` does **not**
+fix it; exporting `STELLAR_NETWORK_PASSPHRASE` in the shell does.
+
+The key is now `BULLET_RPC_URL` (see `.env.example`), so `--network testnet`
+works from the repo root. If the error comes back, look for a `SOROBAN_RPC_URL`
+key that has crept back into `.env`. The
 `wasm32v1-none` rustup target was also missing and had to be installed before
 `stellar contract build` would link.
 

@@ -10,6 +10,12 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import * as snarkjs from "snarkjs";
 import { commit, randomBlinding } from "../../circuits/scripts/jubjub-ref.mjs";
+// The production browser path's own commitment, imported as TypeScript (Node
+// strips the types; no build step). Checked here rather than trusted, because
+// it is a second implementation of the same curve arithmetic with its own
+// pasted H constant, and it is the one that builds the constrained input on
+// the funds path.
+import { commit as nobleCommit } from "../src/lib/jubjub_commit.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..", "..");
@@ -24,20 +30,26 @@ function pedersenCommit(amount, blinding) {
   return { x: c.x.toString(), y: c.y.toString() };
 }
 
-// Self-check against the pinned sample also asserted in
-// circuits/scripts/jubjub-ref.mjs's own self-check and in
-// frontend/src/lib/jubjub_commit.ts's noble-based commit: commit(37, 12345)
-// must equal this fixed point, or the shared reference has drifted.
+// Both implementations of the commitment must agree with the pinned sample:
+// the reference in circuits/scripts/jubjub-ref.mjs (which the circuit's own
+// vectors come from) and the noble-based one in
+// frontend/src/lib/jubjub_commit.ts (which the browser actually runs). They
+// carry separate copies of the H constant, so checking only one leaves the
+// other free to drift. commit(37, 12345) must equal this fixed point.
 {
-  const sample = pedersenCommit(37n, 12345n);
   const expected = {
     x: "45698945774435739926801948253091155734572283544145897043617877029042215456708",
     y: "9314562124973391845024092063267342551607489952627410574825363956335655348463",
   };
-  if (sample.x !== expected.x || sample.y !== expected.y) {
-    throw new Error(
-      `pedersenCommit self-check failed: got (${sample.x}, ${sample.y}), expected (${expected.x}, ${expected.y})`
-    );
+  for (const [name, got] of [
+    ["jubjub-ref.mjs", pedersenCommit(37n, 12345n)],
+    ["jubjub_commit.ts", nobleCommit(37n, 12345n)],
+  ]) {
+    if (got.x !== expected.x || got.y !== expected.y) {
+      throw new Error(
+        `${name} pedersen self-check failed: got (${got.x}, ${got.y}), expected (${expected.x}, ${expected.y})`
+      );
+    }
   }
 }
 

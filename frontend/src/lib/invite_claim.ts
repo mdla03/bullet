@@ -51,7 +51,7 @@ export async function claimInvite(
   nullifier: string,
   recipientDigest: string,
   amount: bigint,
-  tokenId: number = 0,
+  tokenId: number,
   amountCommitmentX: string,
   amountCommitmentY: string
 ): Promise<string> {

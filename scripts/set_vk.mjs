@@ -31,7 +31,12 @@ fs.readFileSync(envPath, "utf8").split("\n").forEach((line) => {
   if (m && !process.env[m[1]]) process.env[m[1]] = m[2].trim();
 });
 
-const RPC_URL = process.env.SOROBAN_RPC_URL ?? "https://soroban-testnet.stellar.org";
+// See the note in backend/src/indexer.ts: a SOROBAN_RPC_URL key in .env breaks
+// the stellar CLI's testnet alias, so the canonical name is BULLET_RPC_URL.
+const RPC_URL =
+  process.env.BULLET_RPC_URL ??
+  process.env.SOROBAN_RPC_URL ??
+  "https://soroban-testnet.stellar.org";
 const CONTRACT_ID = process.env.ZEEKPAY_CONTRACT_ID;
 const ADMIN_SECRET = process.env.ZEEKPAY_ADMIN_KEY;
 const NETWORK_PASSPHRASE = process.env.NETWORK_PASSPHRASE ?? StellarSdk.Networks.TESTNET;

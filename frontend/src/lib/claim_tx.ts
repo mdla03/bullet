@@ -30,7 +30,7 @@ export async function claimNote(
   recipientDigest: string,
   amount: bigint,
   signTx: (xdr: string) => Promise<string>,
-  tokenId: number = 0,
+  tokenId: number,
   amountCommitmentX: string,
   amountCommitmentY: string
 ): Promise<string> {
