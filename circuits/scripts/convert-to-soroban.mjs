@@ -99,6 +99,7 @@ const g2 = (p) => be(p[0][1], 48) + be(p[0][0], 48) + be(p[1][1], 48) + be(p[1][
 const fr = (d) => be(d, 32);
 
 const out = {
+  nPublic: vk.nPublic,
   alpha1: g1(vk.vk_alpha_1),
   beta2: g2(vk.vk_beta_2),
   gamma2: g2(vk.vk_gamma_2),

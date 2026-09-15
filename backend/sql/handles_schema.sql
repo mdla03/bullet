@@ -2,13 +2,14 @@
 -- handle -> user mapping. Written only by the handle_new_identity trigger
 -- (see handles_github.sql); read by the resolver and the register/account UI.
 --
--- APPLY ORDER for the three handles files, on a fresh project or an existing
--- one:
+-- APPLY ORDER for the handles files, on a fresh project or an existing one:
 --   1. handles_schema.sql   (this file: table, constraints, indexes, RLS, trigger)
 --   2. handles_github.sql   (the trigger function, plus the GitHub namespace
 --                            data migration, which must run before step 3)
 --   3. handles_unique.sql   (the unique index on handle_normalized; runs
 --                            CONCURRENTLY, so submit it on its own)
+--   4. handles_avatar.sql   (adds avatar_url and supersedes step 2's trigger
+--                            function; see that file's header)
 --
 -- On a FRESH project, run this file once more after step 2. The trigger block
 -- at the bottom needs public.handle_new_identity() to exist, and step 2 is what
@@ -64,8 +65,13 @@ create table if not exists public.handles (
   subject           text not null,   -- auth.identities.provider_id
   handle            text not null,   -- display form ("@alice", "alice@x.com")
   handle_normalized text not null,   -- canonical form the resolver keys on
-  linked_at         timestamptz not null default now()
+  linked_at         timestamptz not null default now(),
+  avatar_url        text            -- provider profile photo, https only; see handles_avatar.sql
 );
+
+-- On the existing project the CREATE TABLE above is a no-op (the table
+-- already exists), so the column has to be added separately. Idempotent.
+alter table public.handles add column if not exists avatar_url text;
 
 -- handles_github.sql's `on conflict (provider, subject) do update` REQUIRES
 -- this. Without it the trigger raises instead of upserting, and re-linking an

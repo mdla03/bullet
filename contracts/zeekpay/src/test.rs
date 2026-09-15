@@ -55,9 +55,11 @@ fn real_proof_verifies() {
     let env = Env::default();
     env.cost_estimate().budget().reset_unlimited();
     let (vk, proof, pubs) = fixture(&env);
+    assert_eq!(fx::PUBS.len(), 7, "claim circuit has 7 public inputs");
+    assert_eq!(fx::IC.len(), 8, "IC must be pubs + 1");
     assert!(
         verify(&env, &vk, &proof, &pubs),
-        "real snarkjs proof must verify true — if false, the byte encoding (likely G2 c1/c0 order) is wrong"
+        "real snarkjs proof must verify true. If false, the byte encoding (likely G2 c1/c0 order) is wrong"
     );
 }
 
@@ -65,10 +67,17 @@ fn real_proof_verifies() {
 fn tampered_public_input_fails() {
     let env = Env::default();
     env.cost_estimate().budget().reset_unlimited();
-    let (vk, proof, _pubs) = fixture(&env);
-    // Replace the public input with a different value -> proof must NOT verify.
+    let (vk, proof, pubs) = fixture(&env);
+    // Keep the length right and change one value, so the failure is the
+    // pairing rejecting a tampered input rather than the length guard firing.
     let mut bad: Vec<Fr> = Vec::new(&env);
     bad.push_back(fr(&env, &"01".repeat(32)));
+    let mut i = 1u32;
+    while i < pubs.len() {
+        bad.push_back(pubs.get(i).unwrap());
+        i += 1;
+    }
+    assert_eq!(bad.len(), pubs.len());
     assert!(
         !verify(&env, &vk, &proof, &bad),
         "tampered public input must fail verification"
@@ -141,6 +150,13 @@ fn b32(env: &Env, byte: u8) -> BytesN<32> {
     BytesN::from_array(env, &[byte; 32])
 }
 
+/// Placeholder Pedersen amount commitment (BE(X) || BE(Y)) for the tests that
+/// run with the verify bypass on, where its value cannot matter. The
+/// real-proof tests below pass the fixture's actual commitment instead.
+fn b64(env: &Env, byte: u8) -> BytesN<64> {
+    BytesN::from_array(env, &[byte; 64])
+}
+
 #[test]
 fn happy_path_deposit_then_claim() {
     let s = setup();
@@ -162,7 +178,7 @@ fn happy_path_deposit_then_claim() {
     let pb = BytesN::from_array(&s.env, &[0u8; 192]);
     let pc = BytesN::from_array(&s.env, &[0u8; 96]);
     s.client
-        .claim(&pa, &pb, &pc, &root, &nullifier, &b32(&s.env, 0x33), &recipient, &TEN_USDC, &0);
+        .claim(&pa, &pb, &pc, &root, &nullifier, &b32(&s.env, 0x33), &recipient, &TEN_USDC, &0, &b64(&s.env, 0x00));
 
     assert_eq!(s.token.balance(&recipient), 100_000_000); // 10 USDC
     assert_eq!(s.token.balance(&s.id), 0);
@@ -188,11 +204,11 @@ fn double_spend_rejected() {
     let pc = BytesN::from_array(&s.env, &[0u8; 96]);
 
     s.client
-        .claim(&pa, &pb, &pc, &root, &nullifier, &b32(&s.env, 0x33), &recipient, &TEN_USDC, &0);
+        .claim(&pa, &pb, &pc, &root, &nullifier, &b32(&s.env, 0x33), &recipient, &TEN_USDC, &0, &b64(&s.env, 0x00));
     // same nullifier again -> NullifierUsed
     let err = s
         .client
-        .try_claim(&pa, &pb, &pc, &root, &nullifier, &b32(&s.env, 0x33), &recipient, &TEN_USDC, &0)
+        .try_claim(&pa, &pb, &pc, &root, &nullifier, &b32(&s.env, 0x33), &recipient, &TEN_USDC, &0, &b64(&s.env, 0x00))
         .err()
         .unwrap()
         .unwrap();
@@ -219,7 +235,7 @@ fn non_canonical_nullifier_rejected() {
 
     let err = s
         .client
-        .try_claim(&pa, &pb, &pc, &root, &b32(&s.env, 0xff), &b32(&s.env, 0x33), &recipient, &TEN_USDC, &0)
+        .try_claim(&pa, &pb, &pc, &root, &b32(&s.env, 0xff), &b32(&s.env, 0x33), &recipient, &TEN_USDC, &0, &b64(&s.env, 0x00))
         .err()
         .unwrap()
         .unwrap();
@@ -245,7 +261,7 @@ fn non_canonical_recipient_digest_rejected() {
 
     let err = s
         .client
-        .try_claim(&pa, &pb, &pc, &root, &b32(&s.env, 0x22), &b32(&s.env, 0xff), &recipient, &TEN_USDC, &0)
+        .try_claim(&pa, &pb, &pc, &root, &b32(&s.env, 0x22), &b32(&s.env, 0xff), &recipient, &TEN_USDC, &0, &b64(&s.env, 0x00))
         .err()
         .unwrap()
         .unwrap();
@@ -273,6 +289,7 @@ fn unknown_root_rejected() {
             &recipient,
             &TEN_USDC,
             &0,
+            &b64(&s.env, 0x00),
         )
         .err()
         .unwrap()
@@ -317,6 +334,7 @@ fn claim_before_init_fails() {
             &recipient,
             &TEN_USDC,
             &0,
+            &b64(&env, 0x00),
         )
         .err()
         .unwrap()
@@ -358,7 +376,7 @@ fn claim_bumps_nullifier_and_root_ttl() {
     let pb = BytesN::from_array(&s.env, &[0u8; 192]);
     let pc = BytesN::from_array(&s.env, &[0u8; 96]);
     s.client
-        .claim(&pa, &pb, &pc, &root, &nullifier, &b32(&s.env, 0x33), &recipient, &TEN_USDC, &0);
+        .claim(&pa, &pb, &pc, &root, &nullifier, &b32(&s.env, 0x33), &recipient, &TEN_USDC, &0, &b64(&s.env, 0x00));
 
     // A reaped nullifier = double-spend, so its TTL must be bumped hard on write.
     // get_ttl is remaining-ledgers, so it is at most the value extend_ttl set.
@@ -423,6 +441,7 @@ fn claim_amount_at_or_above_2_64_rejected() {
 
     let _ = s.client.try_claim(
         &pa, &pb, &pc, &root, &null, &b32(&s.env, 0x33), &recipient, &INFLATED, &0,
+        &b64(&s.env, 0x00),
     );
 
     // The drain must not have happened.
@@ -433,12 +452,14 @@ fn claim_amount_at_or_above_2_64_rejected() {
     // Exactly 2^64 is out of range too, not only values above it.
     let _ = s.client.try_claim(
         &pa, &pb, &pc, &root, &null, &b32(&s.env, 0x33), &recipient, &(1i128 << 64), &0,
+        &b64(&s.env, 0x00),
     );
     assert_eq!(s.token.balance(&recipient), 0);
 
     // u64::MAX still pays: the bound is exclusive, matching Num2Bits(64).
     s.client.claim(
         &pa, &pb, &pc, &root, &null, &b32(&s.env, 0x33), &recipient, &(u64::MAX as i128), &0,
+        &b64(&s.env, 0x00),
     );
     assert_eq!(s.token.balance(&recipient), u64::MAX as i128);
 }
@@ -705,37 +726,8 @@ fn pool_unknown_root_rejected() {
 // ---------------------------------------------------------------------------
 
 use crate::joinsplit_fixture as jsx;
+use crate::test_support::*;
 use crate::VkData;
-
-fn hex32(env: &Env, h: &str) -> BytesN<32> {
-    let v = hex::decode(h).unwrap();
-    let a: [u8; 32] = v.try_into().unwrap();
-    BytesN::from_array(env, &a)
-}
-fn hex96(env: &Env, h: &str) -> BytesN<96> {
-    let v = hex::decode(h).unwrap();
-    let a: [u8; 96] = v.try_into().unwrap();
-    BytesN::from_array(env, &a)
-}
-fn hex192(env: &Env, h: &str) -> BytesN<192> {
-    let v = hex::decode(h).unwrap();
-    let a: [u8; 192] = v.try_into().unwrap();
-    BytesN::from_array(env, &a)
-}
-
-fn joinsplit_vkdata(env: &Env) -> VkData {
-    let mut ic: soroban_sdk::Vec<BytesN<96>> = soroban_sdk::Vec::new(env);
-    for h in jsx::IC {
-        ic.push_back(hex96(env, h));
-    }
-    VkData {
-        alpha1: hex96(env, jsx::ALPHA1),
-        beta2: hex192(env, jsx::BETA2),
-        gamma2: hex192(env, jsx::GAMMA2),
-        delta2: hex192(env, jsx::DELTA2),
-        ic,
-    }
-}
 
 /// Low level: the proof verifies against the verifier directly. If this fails,
 /// the byte encoding is wrong (most likely G2 c1/c0 order), not the circuit.
@@ -913,4 +905,241 @@ fn upgrade_is_not_blocked_by_pause() {
         Ok(e) => panic!("expected a host trap past the pause check, got {:?}", e),
         Err(_) => {} // host error: we got past the guard, as intended
     }
+}
+
+// ---------------------------------------------------------------------------
+// Claim against the REAL 7-public-input Pedersen proof, verify bypass OFF.
+//
+// groth16_fixture.rs is generated from circuits/build/claim_{vk,proof,public}
+// .json by circuits/scripts/convert-to-soroban.mjs. Its public-input order is
+//   [root, nullifier, recipientDigest, amount, tokenId, cmtX, cmtY]
+// and these tests are what pin `derive_public_inputs` to it: with the bypass
+// off, a wrong order or a wrong length stops the money moving.
+//
+// The pool is over-funded on purpose. A rejection has to be the verifier's
+// doing, not an empty balance, or the tests below would pass with the guard
+// removed.
+// ---------------------------------------------------------------------------
+
+/// PUBS[3], the fixture's claim amount, in stroops.
+const FIXTURE_AMOUNT: i128 = 10;
+/// Far more than FIXTURE_AMOUNT, so a bad claim could drain if it got through.
+const POOL_FUNDING: i128 = 1_000;
+
+/// Entry 5 of circuits/build/claim_public_tampered_commitment.json: the
+/// fixture's commitment X with its low byte incremented by one.
+const TAMPERED_CMT_X: &str = "3b9ac3a495418147f87f1c11bd68d2e20ccba9904de8ff8601d89e9037fbf0d3";
+/// Entry 6 of circuits/build/claim_public_tampered_commitment_cy.json: the
+/// fixture's commitment Y with its low byte incremented by one.
+const TAMPERED_CMT_Y: &str = "53f61f21b6f06d01e13fb5b557f065ecfe47636b4bef28c35ed367791ed38fee";
+
+fn hex64(env: &Env, x: &str, y: &str) -> BytesN<64> {
+    let mut v = hex::decode(x).unwrap();
+    v.extend(hex::decode(y).unwrap());
+    let a: [u8; 64] = v.try_into().unwrap();
+    BytesN::from_array(env, &a)
+}
+
+fn claim_vkdata(env: &Env) -> VkData {
+    let mut ic: soroban_sdk::Vec<BytesN<96>> = soroban_sdk::Vec::new(env);
+    for h in fx::IC {
+        ic.push_back(hex96(env, h));
+    }
+    VkData {
+        alpha1: hex96(env, fx::ALPHA1),
+        beta2: hex192(env, fx::BETA2),
+        gamma2: hex192(env, fx::GAMMA2),
+        delta2: hex192(env, fx::DELTA2),
+        ic,
+    }
+}
+
+struct RealClaim {
+    env: Env,
+    client: ZeekPayClient<'static>,
+    id: Address,
+    tok: token::Client<'static>,
+    recipient: Address,
+    pa: BytesN<96>,
+    pb: BytesN<192>,
+    pc: BytesN<96>,
+    root: BytesN<32>,
+    nullifier: BytesN<32>,
+    digest: BytesN<32>,
+    commitment: BytesN<64>,
+}
+
+fn real_claim_setup() -> RealClaim {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.cost_estimate().budget().reset_unlimited();
+
+    let admin = Address::generate(&env);
+    let sac = env.register_stellar_asset_contract_v2(admin.clone());
+    let id = env.register(ZeekPay, ());
+    let client = ZeekPayClient::new(&env, &id);
+    client.initialize(&admin, &sac.address());
+    client.set_vk(&claim_vkdata(&env));
+    // Deliberately NOT setting the verify bypass.
+
+    // The fixture's amount and tokenId, spelled out so a fixture re-pin that
+    // changes them fails here rather than silently claiming the wrong value.
+    assert_eq!(
+        fx::PUBS[3],
+        "000000000000000000000000000000000000000000000000000000000000000a",
+        "fixture amount is no longer FIXTURE_AMOUNT"
+    );
+    assert_eq!(fx::PUBS[4], &"00".repeat(32), "fixture tokenId is no longer 0");
+
+    let root = hex32(&env, fx::PUBS[0]);
+    client.post_root(&root);
+
+    token::StellarAssetClient::new(&env, &sac.address()).mint(&id, &POOL_FUNDING);
+
+    RealClaim {
+        recipient: Address::generate(&env),
+        pa: hex96(&env, fx::PROOF_A),
+        pb: hex192(&env, fx::PROOF_B),
+        pc: hex96(&env, fx::PROOF_C),
+        nullifier: hex32(&env, fx::PUBS[1]),
+        digest: hex32(&env, fx::PUBS[2]),
+        commitment: hex64(&env, fx::PUBS[5], fx::PUBS[6]),
+        root,
+        tok: token::Client::new(&env, &sac.address()),
+        client,
+        id,
+        env,
+    }
+}
+
+impl RealClaim {
+    /// Claim with the fixture's arguments and the given commitment. Panics if
+    /// the contract rejects it.
+    fn claim_with(&self, commitment: &BytesN<64>) {
+        self.client.claim(
+            &self.pa,
+            &self.pb,
+            &self.pc,
+            &self.root,
+            &self.nullifier,
+            &self.digest,
+            &self.recipient,
+            &FIXTURE_AMOUNT,
+            &0,
+            commitment,
+        );
+    }
+
+    /// Same call, expected to be rejected. Returns the contract error.
+    fn claim_err(&self, commitment: &BytesN<64>) -> Error {
+        self.client
+            .try_claim(
+                &self.pa,
+                &self.pb,
+                &self.pc,
+                &self.root,
+                &self.nullifier,
+                &self.digest,
+                &self.recipient,
+                &FIXTURE_AMOUNT,
+                &0,
+                commitment,
+            )
+            .err()
+            .unwrap()
+            .unwrap()
+    }
+
+    /// Nothing moved and the nullifier is still spendable.
+    fn assert_no_payout(&self) {
+        assert_eq!(self.tok.balance(&self.recipient), 0, "recipient was paid");
+        assert_eq!(self.tok.balance(&self.id), POOL_FUNDING, "pool was drained");
+        assert!(!self.client.is_nullifier_used(&self.nullifier));
+    }
+}
+
+/// Happy path: the real 7-input proof claims, and the money actually moves.
+#[test]
+fn real_proof_claims_and_pays_recipient() {
+    let s = real_claim_setup();
+    assert_eq!(s.tok.balance(&s.id), POOL_FUNDING);
+
+    s.claim_with(&s.commitment);
+
+    assert_eq!(
+        s.tok.balance(&s.recipient),
+        FIXTURE_AMOUNT,
+        "recipient balance did not rise by the claimed amount"
+    );
+    assert_eq!(
+        s.tok.balance(&s.id),
+        POOL_FUNDING - FIXTURE_AMOUNT,
+        "pool balance did not fall by the claimed amount"
+    );
+    assert!(s.client.is_nullifier_used(&s.nullifier));
+}
+
+/// Commitment X off by one (circuits/build/claim_public_tampered_commitment
+/// .json). The proof no longer satisfies the 6th public input, so nothing pays.
+#[test]
+fn tampered_commitment_x_pays_nothing() {
+    let s = real_claim_setup();
+    let bad = hex64(&s.env, TAMPERED_CMT_X, fx::PUBS[6]);
+    assert_ne!(TAMPERED_CMT_X, fx::PUBS[5], "tampered X equals the real X");
+
+    let err = s.claim_err(&bad);
+    assert_eq!(err, Error::InvalidProof);
+    s.assert_no_payout();
+}
+
+/// Same for commitment Y (circuits/build/claim_public_tampered_commitment_cy
+/// .json), which pins the 7th public input rather than only the 6th.
+#[test]
+fn tampered_commitment_y_pays_nothing() {
+    let s = real_claim_setup();
+    let bad = hex64(&s.env, fx::PUBS[5], TAMPERED_CMT_Y);
+    assert_ne!(TAMPERED_CMT_Y, fx::PUBS[6], "tampered Y equals the real Y");
+
+    let err = s.claim_err(&bad);
+    assert_eq!(err, Error::InvalidProof);
+    s.assert_no_payout();
+}
+
+/// Six public inputs against a seven-input vk must be rejected, both at the
+/// verifier and through `claim`. This is the guard that made the old 5-input
+/// fixture safe to leave stale, so it has to keep holding now that the shapes
+/// finally agree.
+#[test]
+fn wrong_public_input_count_pays_nothing() {
+    let s = real_claim_setup();
+
+    // Verifier level: drop the last public input.
+    let (vk, proof, pubs) = fixture(&s.env);
+    let mut six: Vec<Fr> = Vec::new(&s.env);
+    let mut i = 0u32;
+    while i < 6 {
+        six.push_back(pubs.get(i).unwrap());
+        i += 1;
+    }
+    assert_eq!(six.len(), 6);
+    assert!(
+        !verify(&s.env, &vk, &proof, &six),
+        "6 public inputs must not verify against a 7-input vk"
+    );
+
+    // Contract level: install a vk of the 6-input shape (IC truncated to 7
+    // entries) while `claim` still builds 7 Fr. Same mismatch, reached through
+    // the real entry point, with a funded pool behind it.
+    let mut ic: soroban_sdk::Vec<BytesN<96>> = soroban_sdk::Vec::new(&s.env);
+    for h in &fx::IC[..7] {
+        ic.push_back(hex96(&s.env, h));
+    }
+    assert_eq!(ic.len(), 7);
+    let mut short = claim_vkdata(&s.env);
+    short.ic = ic;
+    s.client.set_vk(&short);
+
+    let err = s.claim_err(&s.commitment);
+    assert_eq!(err, Error::InvalidProof);
+    s.assert_no_payout();
 }

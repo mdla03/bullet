@@ -1,4 +1,5 @@
 import * as StellarSdk from "@stellar/stellar-sdk";
+import { buildClaimOperation } from "./claim_encode";
 
 const RPC_URL =
   process.env.NEXT_PUBLIC_SOROBAN_RPC_URL ?? "https://soroban-testnet.stellar.org";
@@ -6,16 +7,17 @@ const CONTRACT_ID = process.env.NEXT_PUBLIC_CONTRACT_ID ?? "";
 const NETWORK_PASSPHRASE =
   process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ?? StellarSdk.Networks.TESTNET;
 
-function hexToBuffer(hex: string): Buffer {
-  return Buffer.from(hex, "hex");
-}
-
 /**
  * Build, sign (via Freighter callback), submit, and poll the Soroban
- * claim(proof_a, proof_b, proof_c, root, nullifier, recipient_digest, recipient, amount, token_id) tx.
+ * claim(proof_a, proof_b, proof_c, root, nullifier, recipient_digest, recipient,
+ *       amount, token_id, amount_commitment) tx.
  * `amount` is the raw stroop value (e.g. 100_000_000n for 10 USDC).
  * `recipientDigest` is the 64-char hex (32-byte BE) passed explicitly to the contract.
  * `tokenId` identifies the token (0 = USDC, 1 = XLM).
+ * `amountCommitmentX`/`amountCommitmentY` are the 64-char hex (32-byte BE) Fr
+ * coordinates of the Pedersen amount commitment (publicSignals[5]/[6] from the
+ * claim circuit); they are concatenated BE(X) || BE(Y) into the contract's
+ * 64-byte `amount_commitment` argument.
  * Returns the transaction hash on SUCCESS.
  */
 export async function claimNote(
@@ -28,34 +30,26 @@ export async function claimNote(
   recipientDigest: string,
   amount: bigint,
   signTx: (xdr: string) => Promise<string>,
-  tokenId: number = 0
+  tokenId: number,
+  amountCommitmentX: string,
+  amountCommitmentY: string
 ): Promise<string> {
   const rpc = new StellarSdk.rpc.Server(RPC_URL);
   const contract = new StellarSdk.Contract(CONTRACT_ID);
-  const { xdr } = StellarSdk;
 
-  const proofAVal = xdr.ScVal.scvBytes(hexToBuffer(proofA));
-  const proofBVal = xdr.ScVal.scvBytes(hexToBuffer(proofB));
-  const proofCVal = xdr.ScVal.scvBytes(hexToBuffer(proofC));
-  const rootVal = xdr.ScVal.scvBytes(hexToBuffer(root));
-  const nullifierVal = xdr.ScVal.scvBytes(hexToBuffer(nullifier));
-  const recipientDigestVal = xdr.ScVal.scvBytes(hexToBuffer(recipientDigest));
-  const recipientVal = StellarSdk.nativeToScVal(connectedAddress, { type: "address" });
-  const amountVal = StellarSdk.nativeToScVal(amount, { type: "i128" });
-  const tokenIdVal = StellarSdk.nativeToScVal(tokenId, { type: "u32" });
-
-  const operation = contract.call(
-    "claim",
-    proofAVal,
-    proofBVal,
-    proofCVal,
-    rootVal,
-    nullifierVal,
-    recipientDigestVal,
-    recipientVal,
-    amountVal,
-    tokenIdVal
-  );
+  const operation = buildClaimOperation(contract, {
+    proofA,
+    proofB,
+    proofC,
+    root,
+    nullifier,
+    recipientDigest,
+    recipient: connectedAddress,
+    amount,
+    tokenId,
+    amountCommitmentX,
+    amountCommitmentY,
+  });
 
   const account = await rpc.getAccount(connectedAddress);
   const tx = new StellarSdk.TransactionBuilder(account, {

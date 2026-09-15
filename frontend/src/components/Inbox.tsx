@@ -271,7 +271,15 @@ export function Inbox() {
 
     try {
       set({ state: "proving" });
-      const { proof_a, proof_b, proof_c, nullifier, root } = await proveBrowser(
+      const {
+        proof_a,
+        proof_b,
+        proof_c,
+        nullifier,
+        root,
+        amountCommitmentX,
+        amountCommitmentY,
+      } = await proveBrowser(
         BigInt("0x" + p.secret).toString(),
         p.recipientDigest,
         String(p.amount),
@@ -295,7 +303,9 @@ export function Inbox() {
           nullifier,
           rdHexInv,
           BigInt(p.amount),
-          p.tokenId ?? 0
+          p.tokenId ?? 0,
+          amountCommitmentX,
+          amountCommitmentY
         );
       } else {
         const { freighterSignTransaction } = await import("@/lib/freighter");
@@ -317,7 +327,9 @@ export function Inbox() {
               process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ?? "Test SDF Network ; September 2015"
             );
           },
-          p.tokenId ?? 0
+          p.tokenId ?? 0,
+          amountCommitmentX,
+          amountCommitmentY
         );
       }
 

@@ -4,6 +4,14 @@
 
 const TIMEOUT_MS = 15_000;
 
+/** Freighter errors are sometimes a string, sometimes an { message } object. Normalize to text. */
+function freighterErrorText(err: unknown): string {
+  if (err && typeof err === "object" && "message" in err && typeof (err as { message?: unknown }).message === "string") {
+    return (err as { message: string }).message;
+  }
+  return String(err);
+}
+
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return Promise.race([
     promise,
@@ -16,7 +24,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 export async function freighterRequestAccess(): Promise<{ address: string }> {
   const { requestAccess } = await import("@stellar/freighter-api");
   const res = await withTimeout(requestAccess(), TIMEOUT_MS, "Freighter connect");
-  if ("error" in res && res.error) throw new Error(`Freighter: ${res.error}`);
+  if ("error" in res && res.error) throw new Error(`Freighter: ${freighterErrorText(res.error)}`);
   return { address: res.address };
 }
 
@@ -43,7 +51,7 @@ export async function freighterSignTransaction(
     TIMEOUT_MS,
     "Freighter signing"
   );
-  if ("error" in res) throw new Error(`Freighter: ${res.error}`);
+  if ("error" in res) throw new Error(`Freighter: ${freighterErrorText(res.error)}`);
   return res.signedTxXdr;
 }
 
@@ -58,6 +66,6 @@ export async function freighterSignMessage(
     "Freighter signing"
   );
   if (res.error || !res.signedMessage)
-    throw new Error(`Freighter: ${res.error?.message ?? "signature rejected"}`);
+    throw new Error(`Freighter: ${res.error ? freighterErrorText(res.error) : "signature rejected"}`);
   return res.signedMessage as string | Buffer;
 }

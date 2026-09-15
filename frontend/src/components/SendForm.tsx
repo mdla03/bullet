@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ResolveCandidate, ResolveResult } from "@zeekpay/shared";
-import { displayCanonical, displayHandle } from "@/lib/handle-ui";
+import { displayCanonical } from "@/lib/handle-ui";
 import { computeRecipientDigest } from "@/lib/recipient";
 import { deriveStealthDigest } from "@/lib/stealth";
 import { computeCommitment } from "@/lib/commitment";
@@ -16,6 +16,12 @@ import {
   ExternalLinkIcon,
   LoaderIcon,
 } from "@/components/icons";
+import { CandidateRow, RecipientRow } from "@/components/RecipientRow";
+
+/** Shown under the recipient row once /resolve 404s: plain, factual, no
+ *  promise of more anonymity or speed than the invite flow actually gives. */
+const INVITE_COPY =
+  "This person hasn't joined Bullet yet. They'll get a claim link to redeem the funds.";
 
 const RESOLVER_URL =
   process.env.NEXT_PUBLIC_RESOLVER_URL ?? "http://localhost:3001";
@@ -40,6 +46,38 @@ const TOKENS: TokenConfig[] = [
   { id: 1, label: "XLM",  prefix: "",  presets: [10, 50, 100, 500], decimals: 10_000_000n },
   { id: 2, label: "USDT", prefix: "$", presets: [1, 10, 50, 100], decimals: 10_000_000n },
 ];
+
+// Upper bound for a base-unit amount: the contract truncates to u64
+// (contracts/zeekpay/src/lib.rs AMOUNT_MAX_EXCLUSIVE = 1 << 64), but
+// ClaimPayload.amount (frontend/src/lib/claim_link.ts) carries the amount as
+// a JS `number` through JSON, the claim URL, and the notes table. A number
+// stops representing every integer exactly above Number.MAX_SAFE_INTEGER, so
+// that (much smaller) bound is the one that actually protects against a
+// silently rounded amount and is used here.
+const MAX_STROOPS = (1n << 64n) - 1n;
+const MAX_SAFE_STROOPS = BigInt(Number.MAX_SAFE_INTEGER);
+// Smaller of the two bounds; MAX_STROOPS is AMOUNT_MAX_EXCLUSIVE - 1 from contracts/zeekpay/src/lib.rs.
+const AMOUNT_UPPER_BOUND = MAX_STROOPS < MAX_SAFE_STROOPS ? MAX_STROOPS : MAX_SAFE_STROOPS;
+
+/** Parse a decimal amount string into base units for `token`, validating
+ * sign, decimal precision, and the u64 / safe-integer bound above. */
+function parseAmountInput(
+  input: string,
+  token: TokenConfig
+): { stroops: bigint; error?: undefined } | { stroops?: undefined; error: string } {
+  const trimmed = input.trim();
+  if (!trimmed) return { error: "Enter an amount." };
+  const match = /^(\d+)(?:\.(\d+))?$/.exec(trimmed);
+  if (!match) return { error: "Enter a valid amount." };
+  const decimalPlaces = token.decimals.toString().length - 1;
+  const [, intPart, fracPart = ""] = match;
+  if (fracPart.length > decimalPlaces)
+    return { error: `${token.label} supports at most ${decimalPlaces} decimal places.` };
+  const stroops = BigInt(intPart) * token.decimals + BigInt(fracPart.padEnd(decimalPlaces, "0") || "0");
+  if (stroops <= 0n) return { error: "Amount must be greater than zero." };
+  if (stroops > AMOUNT_UPPER_BOUND) return { error: "That amount is too large." };
+  return { stroops };
+}
 
 type Step = "idle" | "computing" | "signing" | "submitting" | "done" | "error";
 
@@ -84,11 +122,18 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
   const [recipient, setRecipient] = useState(initialRecipient ?? "");
   const [resolved, setResolved] = useState<ResolveResult | null>(null);
   const [unregistered, setUnregistered] = useState<string | null>(null);
+  // type/avatarUrl/profileUrl from a 404's githubFallback (backend/src/resolver.ts);
+  // undefined fields for every other unregistered handle type.
+  const [unregisteredInfo, setUnregisteredInfo] = useState<{
+    type?: string;
+    avatarUrl?: string | null;
+    profileUrl?: string | null;
+  } | null>(null);
   const [candidates, setCandidates] = useState<ResolveCandidate[] | null>(null);
   const [expiryDays, setExpiryDays] = useState<15 | 30>(30);
   const [resolving, setResolving] = useState(false);
   const [selectedToken, setSelectedToken] = useState(TOKENS[0]);
-  const [selectedAmount, setSelectedAmount] = useState<number | null>(null);
+  const [amountInput, setAmountInput] = useState("");
   const [step, setStep] = useState<Step>("idle");
   const [claimLink, setClaimLink] = useState("");
   const [notePosted, setNotePosted] = useState(false);
@@ -100,6 +145,12 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
 
   const busy = step === "computing" || step === "signing" || step === "submitting";
   const stepIndex = SEND_STEPS.findIndex((s) => s.key === step);
+  const parsedAmount = useMemo(
+    () => parseAmountInput(amountInput, selectedToken),
+    [amountInput, selectedToken]
+  );
+  const amountStroops = parsedAmount.stroops ?? null;
+  const amountErrorMsg = amountInput.trim() ? parsedAmount.error : undefined;
 
   // Arriving from the hero send box: resolve the prefilled handle right away.
   const autoResolved = useRef(false);
@@ -112,7 +163,10 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
   }, []);
 
   /** `query` overrides the input box, so picking a candidate below can
-   *  re-resolve its canonical handle without waiting for a state update. */
+   *  re-resolve its canonical handle without waiting for a state update. The
+   *  candidate's own type/avatarUrl/profileUrl are already on the row that
+   *  was clicked; this re-resolves the canonical handle, whose 200 response
+   *  carries the same fields for the RecipientRow header. */
   async function handleResolve(query?: string) {
     const q = (query ?? recipient).trim();
     if (!q) return;
@@ -120,6 +174,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
     setResolving(true);
     setResolved(null);
     setUnregistered(null);
+    setUnregisteredInfo(null);
     setCandidates(null);
     try {
       const res = await fetch(`${RESOLVER_URL}/resolve?q=${encodeURIComponent(q)}`);
@@ -135,6 +190,11 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
       // money into an invite the recipient never asked for.
       if (res.status === 404) {
         setUnregistered(q);
+        setUnregisteredInfo({
+          type: result.type,
+          avatarUrl: result.avatarUrl,
+          profileUrl: result.profileUrl,
+        });
         return;
       }
       if (res.status === 429) {
@@ -162,6 +222,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
   function reset() {
     setResolved(null);
     setUnregistered(null);
+    setUnregisteredInfo(null);
     setCandidates(null);
     setStep("idle");
     setClaimLink("");
@@ -173,6 +234,11 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
 
   async function handleSendInvite() {
     if (!unregistered) return;
+    if (amountStroops === null) {
+      setError(amountErrorMsg ?? "Enter a valid amount.");
+      return;
+    }
+    const amount = amountStroops;
     setError("");
     setClaimLink("");
     setTxHash("");
@@ -204,13 +270,11 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
         .join("");
       const secretBigInt = BigInt("0x" + secret);
 
-      const amountStroops = BigInt(selectedAmount!) * selectedToken.decimals;
-
       // Commitment computed locally so the claim secret never leaves the tab.
       const commitment = computeCommitment(
         secretBigInt.toString(),
         recipientDigest.toString(),
-        amountStroops.toString(),
+        amount.toString(),
         String(selectedToken.id)
       );
       const commitmentBigInt = BigInt(commitment);
@@ -219,7 +283,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
       const hash = await depositNote(
         senderAddress,
         commitmentBigInt,
-        amountStroops,
+        amount,
         async (xdr) => {
           setStep("submitting");
           return freighterSignTransaction(
@@ -234,7 +298,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
       const payload: ClaimPayload = {
         secret,
         recipientDigest: recipientDigest.toString(),
-        amount: Number(amountStroops),
+        amount: Number(amount),
         tokenId: selectedToken.id,
         contractId: CONTRACT_ID,
         network: "testnet",
@@ -246,7 +310,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
         method: "POST",
         body: JSON.stringify({
           handle: unregistered,
-          amount: Number(amountStroops),
+          amount: Number(amount),
           claimPayload: payload,
           custodyStellarAddress,
           custodySecret,
@@ -260,7 +324,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
         console.warn("invite_record failed", err);
       }
 
-      postActivity({ type: "send", amount: Number(amountStroops), tokenId: selectedToken.id, txHash: hash, handle: unregistered });
+      postActivity({ type: "send", amount: Number(amount), tokenId: selectedToken.id, txHash: hash, handle: unregistered });
       window.dispatchEvent(new Event("bullet:send-complete"));
       setSentAsInvite(true);
       setStep("done");
@@ -272,6 +336,11 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
 
   async function handleSend() {
     if (!resolved?.stellarAddress) return;
+    if (amountStroops === null) {
+      setError(amountErrorMsg ?? "Enter a valid amount.");
+      return;
+    }
+    const amount = amountStroops;
     setError("");
     setClaimLink("");
     setTxHash("");
@@ -296,13 +365,11 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
         .join("");
       const secretBigInt = BigInt("0x" + secret);
 
-      const amountStroops = BigInt(selectedAmount!) * selectedToken.decimals;
-
       // 4. Compute commitment locally so the claim secret never leaves the tab.
       const commitment = computeCommitment(
         secretBigInt.toString(),
         recipientDigestDec,
-        amountStroops.toString(),
+        amount.toString(),
         String(selectedToken.id)
       );
       const commitmentBigInt = BigInt(commitment);
@@ -312,7 +379,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
       const hash = await depositNote(
         senderAddress,
         commitmentBigInt,
-        amountStroops,
+        amount,
         async (xdr) => {
           setStep("submitting");
           return freighterSignTransaction(
@@ -328,7 +395,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
       const payload: ClaimPayload = {
         secret,
         recipientDigest: recipientDigestDec,
-        amount: Number(amountStroops),
+        amount: Number(amount),
         tokenId: selectedToken.id,
         contractId: CONTRACT_ID,
         network: "testnet",
@@ -347,7 +414,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
           setNotePosted(false);
         }
       }
-      postActivity({ type: "send", amount: Number(amountStroops), tokenId: selectedToken.id, txHash: hash, handle: recipient.trim() });
+      postActivity({ type: "send", amount: Number(amount), tokenId: selectedToken.id, txHash: hash, handle: recipient.trim() });
       window.dispatchEvent(new Event("bullet:send-complete"));
       setStep("done");
     } catch (e) {
@@ -356,7 +423,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
     }
   }
 
-  const displayAmt = selectedAmount != null ? `${selectedToken.prefix}${selectedAmount}` : "";
+  const displayAmt = amountInput.trim() ? `${selectedToken.prefix}${amountInput.trim()}` : "";
 
   // ---- Success state ----
   if (step === "done") {
@@ -415,10 +482,16 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
   }
 
   const showAmountStep = !!(resolved || unregistered);
-  const recipientLabel = displayCanonical(
-    (resolved ? recipient : unregistered ?? "").trim()
-  );
-  const avatarInitial = recipientLabel.replace(/^@/, "").charAt(0).toUpperCase();
+  const recipientCanonical = (resolved ? recipient : unregistered ?? "").trim();
+  const recipientLabel = displayCanonical(recipientCanonical);
+  // Unregistered GitHub logins get a real public avatar + profile (see
+  // resolver.ts's githubFallback); every other unregistered type has neither,
+  // so that state stays text-only rather than showing a fake placeholder face.
+  // githubFallback is the only source of unregisteredInfo.type, so it is
+  // always either "github" (handled below) or absent; no other type ever
+  // reaches this state.
+  const unregisteredGithub =
+    unregistered && unregisteredInfo?.type === "github" ? unregisteredInfo : null;
 
   return (
     <div className="space-y-4">
@@ -455,41 +528,61 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
                 More than one person goes by that name. Pick who you meant.
               </p>
               {candidates.map((c) => (
-                <button
+                <CandidateRow
                   key={c.handle}
-                  onClick={() => {
+                  candidate={c}
+                  disabled={resolving}
+                  onSelect={() => {
                     setRecipient(displayCanonical(c.handle));
                     handleResolve(c.handle);
                   }}
-                  disabled={resolving}
-                  className="flex w-full items-center justify-between gap-3 rounded-full border border-fog bg-white px-4 py-2.5 text-sm transition-colors hover:border-graphite disabled:opacity-50"
-                >
-                  <span className="text-graphite">{c.label}</span>
-                  <span className="min-w-0 truncate font-medium">
-                    {displayHandle(c.type, c.handle)}
-                  </span>
-                </button>
+                />
               ))}
             </div>
           )}
         </div>
       ) : (
         <>
-          <div className="flex items-center gap-3 rounded-xl border border-fog px-3 py-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-paper text-sm font-bold">
-              {avatarInitial}
+          {resolved ? (
+            <RecipientRow
+              name={recipientLabel.replace(/^@/, "")}
+              type={resolved.type}
+              handle={recipientLabel}
+              avatarUrl={resolved.avatarUrl}
+              profileUrl={resolved.profileUrl}
+              onChange={reset}
+              changeDisabled={busy}
+            />
+          ) : unregisteredGithub ? (
+            <div className="space-y-2">
+              <RecipientRow
+                name={recipientLabel.replace(/^@/, "")}
+                type={unregisteredGithub.type}
+                handle={recipientLabel}
+                avatarUrl={unregisteredGithub.avatarUrl}
+                profileUrl={unregisteredGithub.profileUrl}
+                onChange={reset}
+                changeDisabled={busy}
+              />
+              <p className="px-1 text-xs text-graphite">{INVITE_COPY}</p>
             </div>
-            <p className="min-w-0 flex-1 truncate text-sm font-medium">
-              {recipientLabel}
-            </p>
-            <button
-              onClick={reset}
-              disabled={busy}
-              className="shrink-0 rounded-full border border-fog px-3 py-1.5 text-xs font-medium text-graphite transition-colors hover:border-graphite hover:text-ink disabled:opacity-50"
-            >
-              Change
-            </button>
-          </div>
+          ) : (
+            <div className="space-y-2">
+              <div className="flex items-center gap-3 rounded-xl border border-fog px-3 py-3">
+                <p className="min-w-0 flex-1 truncate text-sm font-medium text-ink">
+                  {recipientLabel}
+                </p>
+                <button
+                  onClick={reset}
+                  disabled={busy}
+                  className="shrink-0 rounded-full border border-fog px-3 py-1.5 text-xs font-medium text-graphite transition-colors hover:border-graphite hover:text-ink disabled:opacity-50"
+                >
+                  Change
+                </button>
+              </div>
+              <p className="px-1 text-xs text-graphite">{INVITE_COPY}</p>
+            </div>
+          )}
 
           <div className="relative flex rounded-full border border-fog p-1">
             <div
@@ -505,7 +598,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
                 key={t.id}
                 onClick={() => {
                   setSelectedToken(t);
-                  setSelectedAmount(null);
+                  setAmountInput("");
                 }}
                 disabled={busy}
                 className={`relative z-10 flex-1 rounded-full px-4 py-2 text-sm font-medium transition-colors duration-200 disabled:opacity-50 ${
@@ -519,14 +612,34 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
             ))}
           </div>
 
+          <div className="space-y-1.5">
+            <div className="relative">
+              <input
+                type="text"
+                inputMode="decimal"
+                placeholder="0.00"
+                value={amountInput}
+                onChange={(e) => setAmountInput(e.target.value)}
+                disabled={busy}
+                className="w-full rounded-xl border border-fog bg-white px-4 py-3 pr-16 text-lg font-bold tracking-tight placeholder-graphite/70 focus:border-ink focus:outline-none disabled:opacity-50"
+              />
+              <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-sm font-medium text-graphite">
+                {selectedToken.label}
+              </span>
+            </div>
+            {amountErrorMsg && (
+              <p className="text-sm text-amber">{amountErrorMsg}</p>
+            )}
+          </div>
+
           <div className="grid grid-cols-4 gap-2">
             {selectedToken.presets.map((d) => (
               <button
                 key={d}
-                onClick={() => setSelectedAmount(d)}
+                onClick={() => setAmountInput(String(d))}
                 disabled={busy}
                 className={`rounded-xl border px-2 py-4 text-lg font-bold transition-all duration-200 ease-out active:scale-95 disabled:opacity-50 ${
-                  selectedAmount === d
+                  amountInput.trim() === String(d)
                     ? "border-ink bg-ink text-paper shadow-md shadow-ink/10"
                     : "border-fog text-graphite hover:border-graphite"
                 }`}
@@ -592,11 +705,11 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
                   handleSend();
                 }
               }}
-              disabled={selectedAmount === null}
+              disabled={amountStroops === null}
               className="flex w-full items-center justify-center rounded-full bg-ink px-5 py-3 font-semibold text-paper transition-colors hover:bg-ink/85 disabled:opacity-40"
             >
-              {selectedAmount === null
-                ? "Choose an amount"
+              {amountStroops === null
+                ? "Enter an amount"
                 : `Send ${displayAmt} ${selectedToken.label} ${unregistered ? "as invite" : "silently"}`}
             </button>
           )}

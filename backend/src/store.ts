@@ -88,6 +88,7 @@ export interface UserProfile {
 export interface LookupRow {
   handle_normalized: string;
   user_id: string;
+  avatar_url: string | null;
 }
 
 /** Multi-candidate lookup used by /resolve to try every enabled handle
@@ -96,7 +97,7 @@ export async function findManyByLookup(candidates: string[]): Promise<LookupRow[
   if (candidates.length === 0) return [];
   const { data, error } = await serviceClient
     .from("handles")
-    .select("handle_normalized, user_id")
+    .select("handle_normalized, user_id, avatar_url")
     .in("handle_normalized", candidates);
   if (error || !data) {
     if (error) console.error("[store] findManyByLookup failed:", error.message);
@@ -216,6 +217,38 @@ export async function insertNote(row: {
 }): Promise<boolean> {
   const { error } = await serviceClient.from("notes").insert(row);
   return !error;
+}
+
+// ── telegram handles ──────────────────────────────────────────────────────────
+
+/** Write the handles row for a verified Telegram login (see telegram.ts).
+ *
+ *  Every other handle type gets its row from public.handle_new_identity(), the
+ *  trigger on auth.identities. Telegram has no Supabase identity to trigger on,
+ *  so the trigger's body is reproduced as public.link_telegram_handle()
+ *  (backend/sql/handles_telegram.sql) and called here.
+ *
+ *  It is a database function rather than a delete followed by an upsert from
+ *  here because those are two PostgREST round trips with nothing holding them
+ *  together: two people proving control of the same released username could
+ *  interleave them, and the trigger's rules only hold inside one statement.
+ *  Returns false if the function lost that race, so the caller can surface a
+ *  retryable error instead of reporting a link that did not happen. */
+export async function upsertTelegramHandle(
+  userId: string,
+  h: { subject: string; handle: string; avatarUrl: string | null }
+): Promise<boolean> {
+  const { data, error } = await serviceClient.rpc("link_telegram_handle", {
+    p_user_id: userId,
+    p_subject: h.subject,
+    p_handle: h.handle,
+    p_avatar: h.avatarUrl,
+  });
+  if (error) {
+    console.error("[store] upsertTelegramHandle failed:", error.message);
+    return false;
+  }
+  return data === true;
 }
 
 // ── activity ──────────────────────────────────────────────────────────────────

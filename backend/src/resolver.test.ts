@@ -4,7 +4,7 @@
 // Run: node --import tsx/esm --experimental-test-module-mocks --test src/resolver.test.ts
 import { describe, it, before, after, mock } from "node:test";
 import assert from "node:assert/strict";
-import type { ResolveCandidate } from "@zeekpay/shared";
+import type { ResolveCandidate, ResolveResult } from "@zeekpay/shared";
 
 process.env.ZEEKPAY_CONTRACT_ID = "CTEST_CONTRACT";
 process.env.USDC_SAC_ID = "CTEST_USDC";
@@ -28,21 +28,21 @@ const DUAL_USER = { id: "usr_dual_dana", stellarAddress: "GDUAL00000000000000000
 const ALL_FAKE_USERS = [GH_USER, X_USER, EMAIL_USER, AMBIG_X_USER, AMBIG_GH_USER, DUAL_USER];
 
 const FAKE_HANDLES = [
-  { handle_normalized: "github:torvalds", user_id: GH_USER.id },
-  { handle_normalized: "@muskaroo", user_id: X_USER.id },
-  { handle_normalized: "bob@example.com", user_id: EMAIL_USER.id },
+  { handle_normalized: "github:torvalds", user_id: GH_USER.id, avatar_url: "https://avatars.githubusercontent.com/u/1" },
+  { handle_normalized: "@muskaroo", user_id: X_USER.id, avatar_url: null },
+  { handle_normalized: "bob@example.com", user_id: EMAIL_USER.id, avatar_url: null },
   // Deliberately ambiguous: the same bare name "alice" is claimed by an X
   // user and, separately, a github user.
-  { handle_normalized: "@alice", user_id: AMBIG_X_USER.id },
-  { handle_normalized: "github:alice", user_id: AMBIG_GH_USER.id },
+  { handle_normalized: "@alice", user_id: AMBIG_X_USER.id, avatar_url: null },
+  { handle_normalized: "github:alice", user_id: AMBIG_GH_USER.id, avatar_url: "https://avatars.githubusercontent.com/u/2" },
   // Two rows, same handle_normalized: the unique index on handle_normalized
   // (backend/sql/handles_schema.sql) forbids this in production, and the
   // trigger never inserts a second row that would collide with it (see the
   // delete's user-scope comment in handles_github.sql). This fixture only
   // pins the defensive distinctUserIds.length === 1 branch below, which
   // stays correct if that invariant is ever violated some other way.
-  { handle_normalized: "dana@example.com", user_id: DUAL_USER.id },
-  { handle_normalized: "dana@example.com", user_id: DUAL_USER.id },
+  { handle_normalized: "dana@example.com", user_id: DUAL_USER.id, avatar_url: null },
+  { handle_normalized: "dana@example.com", user_id: DUAL_USER.id, avatar_url: null },
 ];
 
 // store.js exports more than /resolve needs. Anything not stubbed below gets
@@ -195,8 +195,14 @@ describe("GET /resolve", () => {
   it("resolves a bare github login (no @, no namespace)", async () => {
     const r = await req("GET", "/resolve?q=torvalds");
     assert.equal(r.status, 200);
-    assert.equal((r.body as { found: boolean }).found, true);
-    assert.equal((r.body as { stellarAddress: string }).stellarAddress, GH_USER.stellarAddress);
+    const body = r.body as ResolveResult;
+    assert.equal(body.found, true);
+    assert.equal(body.stellarAddress, GH_USER.stellarAddress);
+    // Carries the registry metadata and the stored row's avatar/profile, so
+    // the send form can show a real face and a link the sender can verify.
+    assert.equal(body.type, "github");
+    assert.equal(body.avatarUrl, "https://avatars.githubusercontent.com/u/1");
+    assert.equal(body.profileUrl, "https://github.com/torvalds");
   });
 
   it("resolves an @-prefixed github login", async () => {
@@ -228,13 +234,20 @@ describe("GET /resolve", () => {
     assert.equal(r.status, 300);
     const body = r.body as { found: boolean; candidates?: ResolveCandidate[] };
     assert.equal(body.found, false);
-    // Label + canonical per candidate, so the client can prompt with "GitHub
-    // alice" rather than the raw namespaced string.
+    // Label + canonical + avatar/profile per candidate, so the client can
+    // prompt with "GitHub alice", a real face, and a verify link, rather than
+    // the raw namespaced string.
     assert.deepEqual(
       [...(body.candidates ?? [])].sort((a, b) => a.handle.localeCompare(b.handle)),
       [
-        { type: "x", label: "X", handle: "@alice" },
-        { type: "github", label: "GitHub", handle: "github:alice" },
+        { type: "x", label: "X", handle: "@alice", avatarUrl: null, profileUrl: "https://x.com/alice" },
+        {
+          type: "github",
+          label: "GitHub",
+          handle: "github:alice",
+          avatarUrl: "https://avatars.githubusercontent.com/u/2",
+          profileUrl: "https://github.com/alice",
+        },
       ]
     );
   });
@@ -242,7 +255,26 @@ describe("GET /resolve", () => {
   it("resolves an unregistered handle to 404, not 200", async () => {
     // The sender's "send an invite instead" branch keys off this status, so a
     // not-found must not look like the 300 above, which also has found:false.
+    // GitHub is the exception: nobody owns this login here, but the query
+    // still parsed as a github candidate, so the invite screen still gets
+    // GitHub's public avatar redirect and the profile link.
     const r = await req("GET", "/resolve?q=" + encodeURIComponent("github:nobodyhere"));
+    assert.equal(r.status, 404);
+    assert.deepEqual(r.body, {
+      found: false,
+      type: "github",
+      avatarUrl: "https://github.com/nobodyhere.png",
+      profileUrl: "https://github.com/nobodyhere",
+    });
+  });
+
+  it("resolves an unregistered X handle to a plain 404 (no fallback avatar)", async () => {
+    // Only github derives an avatar/profile from the handle alone with no
+    // lookup; X has no such public, keyless redirect, so an unregistered X
+    // handle gets the plain not-found body. The underscore makes this string
+    // parse as X but not as github (github's charset has no underscore), so
+    // the github fallback genuinely never triggers here.
+    const r = await req("GET", "/resolve?q=" + encodeURIComponent("@no_body_here"));
     assert.equal(r.status, 404);
     assert.deepEqual(r.body, { found: false });
   });

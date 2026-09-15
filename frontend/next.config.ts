@@ -34,20 +34,40 @@ const connectSrc = [
 // 'wasm-unsafe-eval'. Dev additionally needs 'unsafe-eval' for HMR. Next.js
 // injects inline bootstrap scripts and inline styles, so without a
 // nonce+middleware setup 'unsafe-inline' is required for scripts and styles.
+//
+// telegram.org serves the Login Widget script (TelegramLogin.tsx); the widget
+// signs the user in through an oauth.telegram.org frame. Both hosts are
+// Telegram's own and are the only third-party scripts/frames the app loads.
+const telegramSrc = ["https://telegram.org", "https://oauth.telegram.org"];
+
 const scriptSrc = [
   "'self'",
   "'unsafe-inline'",
   "'wasm-unsafe-eval'",
+  ...telegramSrc,
   isDev ? "'unsafe-eval'" : null,
 ].filter(Boolean);
+
+// Provider avatar photos shown on the send screen (RecipientRow, D3 handle
+// avatars): github.com is the unregistered-GitHub fallback redirect
+// (resolver.ts's githubFallback), which lands on avatars.githubusercontent.com;
+// lh3.googleusercontent.com and pbs.twimg.com are where Google and X serve the
+// photo a registered user's own identity_data carries (backend/sql/handles_avatar.sql).
+const avatarImgSrc = [
+  "https://github.com",
+  "https://avatars.githubusercontent.com",
+  "https://lh3.googleusercontent.com",
+  "https://pbs.twimg.com",
+];
 
 const csp = [
   `default-src 'self'`,
   `script-src ${scriptSrc.join(" ")}`,
   `style-src 'self' 'unsafe-inline'`,
-  `img-src 'self' data: blob:`,
+  `img-src 'self' data: blob: ${avatarImgSrc.join(" ")}`,
   `font-src 'self' data:`,
   `connect-src ${connectSrc.join(" ")}`,
+  `frame-src 'self' ${telegramSrc.join(" ")}`,
   `worker-src 'self' blob:`,
   `frame-ancestors 'none'`,
   `base-uri 'self'`,

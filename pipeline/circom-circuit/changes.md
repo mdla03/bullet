@@ -182,3 +182,111 @@ coordinated change:
 
 Until step 1-4 land together, leave `groth16_fixture.rs` as-is rather than
 partially regenerating it.
+
+---
+
+## 2026-09-14: the coordinated 7-input change, contract side
+
+The D1 -> D2 handoff above is now half done. Steps 1 and 2 have landed; steps
+3 and 4 have not. What changed, and what is still owed:
+
+### What the contract now expects
+
+`Contract::claim` binds SEVEN public inputs, in `claim.circom`'s locked order:
+
+```
+[root, nullifier, recipientDigest, amount, tokenId,
+ amountCommitmentX, amountCommitmentY]
+```
+
+`derive_public_inputs` pushes all seven. The two commitment coordinates are
+appended last, never inserted between the five that came before.
+
+The circuit drifted past the 6-input Poseidon `amountCommitment` this file's
+addendum describes: it is now a real Jubjub Pedersen commitment, one curve
+point, so it costs two field elements rather than one.
+
+### The new `claim` parameter
+
+`claim` gained one argument, `amount_commitment: BytesN<64>`, holding
+`BE(X) || BE(Y)`. It is ONE 64-byte argument rather than two 32-byte ones
+because the SDK caps a contract function at 10 parameters including `env`, and
+`claim` was already at the cap. `derive_public_inputs` splits the 64 bytes back
+into two `Fr`. The layout matches the X||Y concatenation the verifier already
+uses for a G1 point, so nothing new had to be invented.
+
+Callers must append the argument. The old 9-argument call no longer compiles
+and, on-chain, no longer matches the entry point.
+
+`AMOUNT_MAX_EXCLUSIVE` and every other guard (canonical field elements, known
+root, nullifier replay, pause, token registry) are unchanged. `amount` is still
+a plaintext public input: the contract needs it in the clear for the SAC
+transfer, so the commitment binds the amount, it does not hide it. Do not let
+downstream copy say otherwise.
+
+The `claim` event now carries `(nullifier, amount_commitment)`. It still carries
+no note commitment, no amount and no token. The Pedersen commitment is blinded
+and claimer-generated, is not the deposit's Merkle leaf, and is already visible
+as a call argument, so emitting it links nothing that the transaction did not
+already reveal.
+
+### Which fixture
+
+`contracts/zeekpay/src/groth16_fixture.rs` was regenerated from
+`circuits/build/claim_{vk,proof,public}.json` at HEAD with
+
+```
+node circuits/scripts/convert-to-soroban.mjs --rs contracts/zeekpay/src/groth16_fixture.rs
+```
+
+`--rs` was used instead of the bare `FORCE_FIXTURE=1` invocation because the
+bare one also rewrites `circuits/build/groth16_soroban.json`, which this change
+deliberately left alone (see below). The constants are byte-for-byte identical
+to `contracts/verifier/src/claim_fixture_7in.rs`, the benchmark fixture pinned
+from the same proof, which is the cross-check that the conversion is right. IC
+now has 8 entries, PUBS has 7.
+
+### Still owed: `set_vk` and the frontend
+
+- **The deployed contract still has the OLD verifying key.** Nothing here
+  touched on-chain state. Until `set_vk` runs with the 7-input key, every claim
+  against the deployed contract fails: the stored 6-entry IC cannot match the 7
+  `Fr` the new code pushes, and `verifier::verify` rejects the length mismatch
+  before any pairing math. It fails closed, not open.
+- **`circuits/build/groth16_soroban.json` is still the 5-input conversion**, so
+  `scripts/set_vk.mjs` would install the wrong key if run today. Regenerate it
+  first, from the repo root:
+  `FORCE_FIXTURE=1 node circuits/scripts/convert-to-soroban.mjs`
+  (that rewrites the Rust fixture too, to the same bytes it already has).
+- **`scripts/set_vk.mjs` still hard-codes 6 expected IC entries** for the claim
+  key and aborts on anything else. It needs 8. Its header comment also still
+  says the claim circuit has 5 public inputs. Both are outside this change's
+  file scope and have to move with step 3.
+- **The frontend still builds the 9-argument call** and does not supply
+  `blinding` to the prover. That is step 4 of the handoff above and is owned
+  elsewhere.
+- Proofs made against the old `claim.zkey` stop verifying the moment `set_vk`
+  lands. That is the rotation warning in `build-claim.sh`, and it is real.
+
+### Tests
+
+`contracts/zeekpay/src/test.rs` went from 26 to 30 tests. `real_proof_verifies`
+now asserts the 7/8 shape explicitly, and `tampered_public_input_fails` was
+corrected: it used to pass a single-element vector, so it was tripping the
+length guard rather than testing tampering at all. New, all with the verify
+bypass OFF and the pool over-funded so a rejection is the verifier's doing and
+not an empty balance:
+
+- `real_proof_claims_and_pays_recipient`: the real 7-input proof claims, the
+  recipient balance rises by the amount, the pool falls by it.
+- `tampered_commitment_x_pays_nothing` /
+  `tampered_commitment_y_pays_nothing`: the committed vectors
+  `circuits/build/claim_public_tampered_commitment.json` and
+  `..._commitment_cy.json`, balances unchanged, nullifier still unspent.
+- `wrong_public_input_count_pays_nothing`: six inputs against the seven-input
+  vk at the verifier, and a six-input-shaped vk through `claim`, balances
+  unchanged.
+
+Each was mutation-checked: flipping the verify result in `claim` breaks the
+happy path, feeding the untampered coordinates breaks both tamper tests, and
+removing the IC/pubs length guard in `verifier::verify` breaks the count test.

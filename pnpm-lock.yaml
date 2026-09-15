@@ -72,6 +72,9 @@ importers:
 
   frontend:
     dependencies:
+      '@noble/curves':
+        specifier: 1.9.7
+        version: 1.9.7
       '@stellar/freighter-api':
         specifier: ^6.0.1
         version: 6.0.1

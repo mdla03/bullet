@@ -5,7 +5,8 @@
 //!   Option-B trust seam — documented in README honest-limits).
 //! claim: verify a Groth16 proof (real, BLS12-381 host fns) that the caller owns
 //!   a note in the tree under a known root, with {root, nullifier, recipient,
-//!   amount, tokenId} bound as public inputs; reject replayed nullifiers; pay
+//!   amount, tokenId, amountCommitmentX, amountCommitmentY} bound as public
+//!   inputs (7, matching claim.circom); reject replayed nullifiers; pay
 //!   the recipient in the correct token.
 //!
 //! SECURITY-SENSITIVE: nullifier replay = double-spend; recipient+amount+tokenId
@@ -25,6 +26,8 @@ mod groth16_fixture;
 mod joinsplit_fixture;
 #[cfg(test)]
 mod test;
+#[cfg(test)]
+mod test_pool_d2;
 
 use soroban_sdk::crypto::bls12_381::{Fr, G1Affine, G2Affine};
 use soroban_sdk::{
@@ -314,7 +317,17 @@ impl ZeekPay {
     /// NOT re-derive it from `recipient`. The caller (claimer) supplies it and
     /// the proof must commit to it — a wrong digest simply fails verification.
     ///
-    /// Emits Claim (NO commitment -> no link to a deposit, NO amount, NO token).
+    /// `amount_commitment` is the Pedersen amount commitment point, the last
+    /// two public inputs of `claim.circom`, as BE(X) || BE(Y). One `BytesN<64>`
+    /// rather than two `BytesN<32>` because the SDK caps a contract function at
+    /// 10 parameters including `env`, and this one was already at the cap. The
+    /// layout is the same X||Y concatenation the verifier already uses for a G1
+    /// point, and `derive_public_inputs` splits it back into the two `Fr`.
+    ///
+    /// Emits Claim (NO note commitment -> no link to a deposit, NO amount, NO
+    /// token). The Pedersen amount commitment IS emitted: it is a blinded
+    /// commitment the claimer generates, not the deposit's Merkle leaf, so it
+    /// links to nothing on-chain, and it is already visible as a call argument.
     pub fn claim(
         env: Env,
         proof_a: BytesN<96>,
@@ -326,6 +339,7 @@ impl ZeekPay {
         recipient: Address,
         amount: i128,
         token_id: u32,
+        amount_commitment: BytesN<64>,
     ) -> Result<(), Error> {
         Self::require_initialized(&env)?;
         if Self::is_paused(&env) {
@@ -365,7 +379,15 @@ impl ZeekPay {
                 c: G1Affine::from_bytes(proof_c),
             };
             let vk = Self::load_vk(&env)?;
-            let pubs = Self::derive_public_inputs(&env, &root, &nullifier, &recipient_digest, amount, token_id);
+            let pubs = Self::derive_public_inputs(
+                &env,
+                &root,
+                &nullifier,
+                &recipient_digest,
+                amount,
+                token_id,
+                &amount_commitment,
+            );
             if !verifier::verify(&env, &vk, &proof, &pubs) {
                 return Err(Error::InvalidProof);
             }
@@ -394,7 +416,7 @@ impl ZeekPay {
         );
         env.events().publish(
             (soroban_sdk::symbol_short!("claim"),),
-            (nullifier,),
+            (nullifier, amount_commitment),
         );
         Ok(())
     }
@@ -625,7 +647,15 @@ impl ZeekPay {
 
     /// Public inputs the proof must commit to, in this exact order. The
     /// circom-circuit feature MUST match this encoding:
-    ///   [ Fr(root), Fr(nullifier), Fr(recipient_digest), Fr(amount), Fr(tokenId) ]
+    ///   [ Fr(root), Fr(nullifier), Fr(recipient_digest), Fr(amount), Fr(tokenId),
+    ///     Fr(amount_commitment[..32]), Fr(amount_commitment[32..]) ]
+    ///
+    /// The two commitment coordinates are the affine point
+    /// `amount*G + blinding*H` on Jubjub, appended last and never inserted
+    /// between the five that came before. `amount` stays a plaintext public
+    /// input: the contract needs it in the clear to drive the SAC transfer, so
+    /// this commitment does not hide the amount, it only binds the prover to a
+    /// commitment of it. See the scope note in circuits/src/claim.circom.
     ///
     /// `recipient_digest` is now caller-supplied (stealth derivation): the sender
     /// computes it via ECDH so each payment has a unique digest even to the same
@@ -641,6 +671,7 @@ impl ZeekPay {
         recipient_digest: &BytesN<32>,
         amount: i128,
         token_id: u32,
+        amount_commitment: &BytesN<64>,
     ) -> Vec<Fr> {
         let mut v: Vec<Fr> = Vec::new(env);
         v.push_back(Fr::from_bytes(root.clone()));
@@ -648,6 +679,15 @@ impl ZeekPay {
         v.push_back(Fr::from_bytes(recipient_digest.clone()));
         v.push_back(Fr::from_u256(soroban_sdk::U256::from_parts(env, 0, 0, 0, amount as u64)));
         v.push_back(Fr::from_u256(soroban_sdk::U256::from_parts(env, 0, 0, 0, token_id as u64)));
+        // Split BE(X) || BE(Y) back into the two field elements the circuit
+        // declares as separate public signals.
+        let c = amount_commitment.to_array();
+        let mut x = [0u8; 32];
+        x.copy_from_slice(&c[..32]);
+        let mut y = [0u8; 32];
+        y.copy_from_slice(&c[32..]);
+        v.push_back(Fr::from_bytes(BytesN::from_array(env, &x)));
+        v.push_back(Fr::from_bytes(BytesN::from_array(env, &y)));
         v
     }
 
@@ -716,6 +756,8 @@ impl ZeekPay {
 #[cfg(test)]
 mod test_support {
     use super::*;
+    use crate::joinsplit_fixture as jsx;
+
     #[contracttype]
     pub enum TestKey {
         SkipVerify,
@@ -728,5 +770,37 @@ mod test_support {
             .instance()
             .get(&TestKey::SkipVerify)
             .unwrap_or(false)
+    }
+
+    // ---- fixture decoding helpers, shared by test.rs and test_pool_d2.rs ----
+
+    pub fn hex32(env: &Env, h: &str) -> BytesN<32> {
+        let v = hex::decode(h).unwrap();
+        let a: [u8; 32] = v.try_into().unwrap();
+        BytesN::from_array(env, &a)
+    }
+    pub fn hex96(env: &Env, h: &str) -> BytesN<96> {
+        let v = hex::decode(h).unwrap();
+        let a: [u8; 96] = v.try_into().unwrap();
+        BytesN::from_array(env, &a)
+    }
+    pub fn hex192(env: &Env, h: &str) -> BytesN<192> {
+        let v = hex::decode(h).unwrap();
+        let a: [u8; 192] = v.try_into().unwrap();
+        BytesN::from_array(env, &a)
+    }
+
+    pub fn joinsplit_vkdata(env: &Env) -> VkData {
+        let mut ic: Vec<BytesN<96>> = Vec::new(env);
+        for h in jsx::IC {
+            ic.push_back(hex96(env, h));
+        }
+        VkData {
+            alpha1: hex96(env, jsx::ALPHA1),
+            beta2: hex192(env, jsx::BETA2),
+            gamma2: hex192(env, jsx::GAMMA2),
+            delta2: hex192(env, jsx::DELTA2),
+            ic,
+        }
     }
 }

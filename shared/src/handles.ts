@@ -58,6 +58,10 @@ export interface HandleType {
    *  renders the type's icon and label beside the value, so "github:torvalds"
    *  shows as "torvalds". */
   format(canonical: string): string;
+  /** Canonical form -> that person's public profile page, or null when the
+   *  type has no such page (google, email, discord). Lets the sender verify
+   *  who they are about to pay before they send. */
+  profileUrl(canonical: string): string | null;
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -102,7 +106,10 @@ function parseGithub(input: string): string | null {
 
 function parseDiscord(input: string): string | null {
   const body = unnamespace(input, "discord", true).toLowerCase();
-  if (!/^[a-z0-9._]{2,32}$/.test(body)) return null;
+  // Discord's current (post-discriminator) username rule: 2-32 chars,
+  // lowercase letters, digits, underscore, period, and no two periods in a
+  // row. Mirrored by the SQL trigger guard in backend/sql/handles_discord.sql.
+  if (!/^(?!.*\.\.)[a-z0-9._]{2,32}$/.test(body)) return null;
   return namespace("discord", body);
 }
 
@@ -113,6 +120,7 @@ function parseTelegram(input: string): string | null {
 }
 
 const identity = (c: string) => c;
+const noProfile = () => null;
 
 export const HANDLE_TYPES: readonly HandleType[] = [
   {
@@ -123,6 +131,7 @@ export const HANDLE_TYPES: readonly HandleType[] = [
     identityProviders: ["google"],
     parse: parseEmailLike,
     format: identity,
+    profileUrl: noProfile,
   },
   {
     id: "x",
@@ -133,6 +142,7 @@ export const HANDLE_TYPES: readonly HandleType[] = [
     identityProviders: ["x", "twitter", "twitter_v2"],
     parse: parseX,
     format: identity,
+    profileUrl: (c) => "https://x.com/" + c.replace(/^@/, ""),
   },
   {
     id: "email",
@@ -142,6 +152,7 @@ export const HANDLE_TYPES: readonly HandleType[] = [
     identityProviders: ["email"],
     parse: parseEmailLike,
     format: identity,
+    profileUrl: noProfile,
   },
   {
     id: "github",
@@ -153,6 +164,7 @@ export const HANDLE_TYPES: readonly HandleType[] = [
     // Bare login, no "@": GitHub logins are not "@handles" and the UI puts the
     // GitHub icon and label next to the value already.
     format: (c) => unnamespace(c, "github"),
+    profileUrl: (c) => "https://github.com/" + unnamespace(c, "github"),
   },
   {
     id: "discord",
@@ -162,6 +174,8 @@ export const HANDLE_TYPES: readonly HandleType[] = [
     identityProviders: ["discord"],
     parse: parseDiscord,
     format: (c) => unnamespace(c, "discord"),
+    // Discord has no public profile page reachable from a username alone.
+    profileUrl: noProfile,
   },
   {
     id: "telegram",
@@ -171,6 +185,7 @@ export const HANDLE_TYPES: readonly HandleType[] = [
     identityProviders: ["telegram"],
     parse: parseTelegram,
     format: (c) => "@" + unnamespace(c, "telegram"),
+    profileUrl: (c) => "https://t.me/" + unnamespace(c, "telegram"),
   },
 ];
 

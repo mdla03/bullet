@@ -239,7 +239,7 @@ Section 7 below supersedes them for the shape that actually ships.**
 
 ## 7. Pedersen shape (2026-09-08)
 
-**Scope:** `circuits/src/claim.circom` at dev commit 97ce901. The amount commitment is now C = amount * G + blinding * H on Jubjub, the BLS12-381 embedded curve, as the SOW specifies. The commitment leaves the circuit as two public inputs, `amountCommitmentX` and `amountCommitmentY`. The 64-bit range proof on `amount` is unchanged. G is the Jubjub generator and H is Zcash's value-commitment randomness base, both derived by `circuits/scripts/jubjub-ref.mjs` and cross-checked in `circuits/test/jubjub.test.mjs` (21 tests).
+**Scope:** `circuits/src/claim.circom` at dev commit 97ce901. The amount commitment is now C = amount * G + blinding * H on Jubjub, the BLS12-381 embedded curve, as the SOW specifies. The commitment leaves the circuit as two public inputs, `amountCommitmentX` and `amountCommitmentY`. The 64-bit range proof on `amount` is unchanged. G is the Jubjub generator and H is Zcash's value-commitment randomness base, both derived by `circuits/scripts/jubjub-ref.mjs` and cross-checked in `circuits/test/jubjub.test.mjs` (24 tests).
 
 ### 7.1 Circuit shape
 

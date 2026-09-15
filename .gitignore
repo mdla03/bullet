@@ -82,3 +82,4 @@ pnpm-debug.log*
 
 # compiled test circuits
 circuits/test/build/
+.vercel
