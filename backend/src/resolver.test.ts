@@ -25,7 +25,8 @@ const EMAIL_USER = { id: "usr_email_bob", stellarAddress: "GEMAIL000000000000000
 const AMBIG_X_USER = { id: "usr_amb_x_alice", stellarAddress: "GAMBX0000000000000000000000000000000000000000000ALICE", pubKey: "4".repeat(64) };
 const AMBIG_GH_USER = { id: "usr_amb_gh_alice", stellarAddress: "GAMBGH000000000000000000000000000000000000000000ALICE", pubKey: "5".repeat(64) };
 const DUAL_USER = { id: "usr_dual_dana", stellarAddress: "GDUAL0000000000000000000000000000000000000000000DANA", pubKey: "6".repeat(64) };
-const ALL_FAKE_USERS = [GH_USER, X_USER, EMAIL_USER, AMBIG_X_USER, AMBIG_GH_USER, DUAL_USER];
+const BOTH_USER = { id: "usr_both_zelda", stellarAddress: "GBOTH0000000000000000000000000000000000000000000ZELDA", pubKey: "7".repeat(64) };
+const ALL_FAKE_USERS = [GH_USER, X_USER, EMAIL_USER, AMBIG_X_USER, AMBIG_GH_USER, DUAL_USER, BOTH_USER];
 
 const FAKE_HANDLES = [
   { handle_normalized: "github:torvalds", user_id: GH_USER.id, avatar_url: "https://avatars.githubusercontent.com/u/1" },
@@ -43,6 +44,12 @@ const FAKE_HANDLES = [
   // stays correct if that invariant is ever violated some other way.
   { handle_normalized: "dana@example.com", user_id: DUAL_USER.id, avatar_url: null },
   { handle_normalized: "dana@example.com", user_id: DUAL_USER.id, avatar_url: null },
+  // One real person, two different handle types linked under the same
+  // display name ("zelda" on both GitHub and X) - not ambiguous (one
+  // user_id). GitHub row listed first on purpose; see resolver.ts's
+  // matchedRow comment for why the order must not matter.
+  { handle_normalized: "github:zelda", user_id: BOTH_USER.id, avatar_url: "https://avatars.githubusercontent.com/u/9" },
+  { handle_normalized: "@zelda", user_id: BOTH_USER.id, avatar_url: null },
 ];
 
 // store.js exports more than /resolve needs. Anything not stubbed below gets
@@ -101,6 +108,17 @@ const storeMock: Record<string, unknown> = new Proxy(STORE_STUBS as Record<strin
 });
 
 mock.module("./store.js", { namedExports: storeMock });
+
+// github.js hits the real GitHub API (githubUserExists); stub it so /resolve's
+// unregistered-GitHub candidate tests below run offline and deterministically.
+// "realuser" and "brandnew" stand in for genuine GitHub logins nobody has
+// registered on Bullet yet; everything else (including gibberish that merely
+// matches GitHub's username syntax) is "unconfirmed".
+mock.module("./github.js", {
+  namedExports: {
+    githubUserExists: async (login: string) => login === "realuser" || login === "brandnew",
+  },
+});
 
 const { app, rateLimit } = await import("./resolver.js");
 const { Keypair, hash } = await import("@stellar/stellar-base");
@@ -184,12 +202,12 @@ describe("GET /health", () => {
 describe("GET /resolve", () => {
   it("returns found:false for empty query", async () => {
     const r = await req("GET", "/resolve?q=");
-    assert.deepEqual(r.body, { found: false });
+    assert.deepEqual(r.body, { found: false, candidates: [] });
   });
 
   it("returns found:false for oversized query without hitting Supabase", async () => {
     const r = await req("GET", "/resolve?q=" + "a".repeat(300));
-    assert.deepEqual(r.body, { found: false });
+    assert.deepEqual(r.body, { found: false, candidates: [] });
   });
 
   it("resolves a bare github login (no @, no namespace)", async () => {
@@ -252,31 +270,86 @@ describe("GET /resolve", () => {
     );
   });
 
-  it("resolves an unregistered handle to 404, not 200", async () => {
+  it("resolves an unregistered but GitHub-confirmed handle to 404, not 200", async () => {
     // The sender's "send an invite instead" branch keys off this status, so a
     // not-found must not look like the 300 above, which also has found:false.
-    // GitHub is the exception: nobody owns this login here, but the query
-    // still parsed as a github candidate, so the invite screen still gets
-    // GitHub's public avatar redirect and the profile link.
-    const r = await req("GET", "/resolve?q=" + encodeURIComponent("github:nobodyhere"));
+    // GitHub is the exception: nobody owns this login on Bullet, but GitHub's
+    // API (stubbed above) confirms "realuser" is a real account, so the
+    // candidate list still carries GitHub's public avatar redirect and
+    // profile link.
+    const r = await req("GET", "/resolve?q=" + encodeURIComponent("github:realuser"));
     assert.equal(r.status, 404);
     assert.deepEqual(r.body, {
       found: false,
-      type: "github",
-      avatarUrl: "https://github.com/nobodyhere.png",
-      profileUrl: "https://github.com/nobodyhere",
+      candidates: [
+        {
+          type: "github",
+          label: "GitHub",
+          handle: "github:realuser",
+          avatarUrl: "https://github.com/realuser.png",
+          profileUrl: "https://github.com/realuser",
+        },
+      ],
     });
   });
 
-  it("resolves an unregistered X handle to a plain 404 (no fallback avatar)", async () => {
-    // Only github derives an avatar/profile from the handle alone with no
-    // lookup; X has no such public, keyless redirect, so an unregistered X
-    // handle gets the plain not-found body. The underscore makes this string
+  it("does not fabricate a GitHub match for a login GitHub does not confirm exists", async () => {
+    // Bug: the 404 candidate builder used to construct the avatar/profile
+    // from the raw input alone, with no check that the account exists - so
+    // gibberish that merely fits GitHub's username syntax (letters/digits,
+    // <= 39 chars) rendered a real-looking "found" person card. This string
+    // is 23 chars (too long for X's 15-char limit) and not a confirmed GitHub
+    // login (the githubUserExists stub above), so it must resolve to an empty
+    // candidate list, not a fabricated GitHub entry.
+    const r = await req(
+      "GET",
+      "/resolve?q=" + encodeURIComponent("sxjvkbsdhgkjwehgkjwehui")
+    );
+    assert.equal(r.status, 404);
+    assert.deepEqual(r.body, { found: false, candidates: [] });
+  });
+
+  it("resolves an unregistered X handle to a 404 with just an X candidate (no fallback avatar)", async () => {
+    // Only github ever needs confirmation before appearing; every other
+    // type's parse() succeeding is enough. The underscore makes this string
     // parse as X but not as github (github's charset has no underscore), so
-    // the github fallback genuinely never triggers here.
+    // there is exactly one, unverified (avatarUrl:null) candidate.
     const r = await req("GET", "/resolve?q=" + encodeURIComponent("@no_body_here"));
     assert.equal(r.status, 404);
-    assert.deepEqual(r.body, { found: false });
+    assert.deepEqual(r.body, {
+      found: false,
+      candidates: [
+        {
+          type: "x",
+          label: "X",
+          handle: "@no_body_here",
+          avatarUrl: null,
+          profileUrl: "https://x.com/no_body_here",
+        },
+      ],
+    });
+  });
+
+  it("offers both X and a confirmed GitHub login as candidates for a bare unregistered name", async () => {
+    // "brandnew" is unregistered but parses as both a valid X handle and a
+    // GitHub login the stub confirms exists - each is a different real
+    // recipient, so /resolve must offer both rather than picking one.
+    const r = await req("GET", "/resolve?q=brandnew");
+    assert.equal(r.status, 404);
+    const body = r.body as { found: boolean; candidates?: ResolveCandidate[] };
+    assert.deepEqual(
+      [...(body.candidates ?? [])].sort((a, b) => a.handle.localeCompare(b.handle)),
+      [
+        { type: "x", label: "X", handle: "@brandnew", avatarUrl: null, profileUrl: "https://x.com/brandnew" },
+        {
+          type: "github",
+          label: "GitHub",
+          handle: "github:brandnew",
+          avatarUrl: "https://github.com/brandnew.png",
+          profileUrl: "https://github.com/brandnew",
+        },
+      ]
+    );
   });
 
   // Regression guard, not a test of the exact-canonical rule: "github:alice"
@@ -321,6 +394,15 @@ describe("GET /resolve", () => {
       (r.body as { stellarAddress: string }).stellarAddress,
       DUAL_USER.stellarAddress
     );
+  });
+
+  it("picks X, not whichever row the DB returned first, when one user links both", async () => {
+    // See resolver.ts's matchedRow comment (findManyByLookup has no ORDER BY).
+    const r = await req("GET", "/resolve?q=zelda");
+    assert.equal(r.status, 200);
+    const body = r.body as ResolveResult;
+    assert.equal(body.stellarAddress, BOTH_USER.stellarAddress);
+    assert.equal(body.type, "x");
   });
 });
 

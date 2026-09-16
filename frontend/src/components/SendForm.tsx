@@ -122,14 +122,28 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
   const [recipient, setRecipient] = useState(initialRecipient ?? "");
   const [resolved, setResolved] = useState<ResolveResult | null>(null);
   const [unregistered, setUnregistered] = useState<string | null>(null);
-  // type/avatarUrl/profileUrl from a 404's githubFallback (backend/src/resolver.ts);
-  // undefined fields for every other unregistered handle type.
+  // type/avatarUrl/profileUrl from the chosen candidate in a 404's
+  // result.candidates (backend/src/resolver.ts); undefined fields for every
+  // other unregistered handle type.
   const [unregisteredInfo, setUnregisteredInfo] = useState<{
     type?: string;
     avatarUrl?: string | null;
     profileUrl?: string | null;
   } | null>(null);
+  // Picker rows, shared by two /resolve outcomes distinguished by
+  // `pickerMode`: "ambiguous" (HTTP 300 - several *registered* people match,
+  // picking one re-resolves it) and "unregistered" (HTTP 404 with more than
+  // one candidate - the query is plausible as more than one *unregistered*
+  // platform, e.g. bare "elonmusk" is both a valid X handle and a confirmed
+  // GitHub login; picking one sets that specific recipient directly, see
+  // onSelect below).
   const [candidates, setCandidates] = useState<ResolveCandidate[] | null>(null);
+  const [pickerMode, setPickerMode] = useState<"ambiguous" | "unregistered">(
+    "ambiguous"
+  );
+  // Set instead of `unregistered` when a 404 query names no plausible invite
+  // target at all (empty result.candidates from the backend).
+  const [notFoundHandle, setNotFoundHandle] = useState(false);
   const [expiryDays, setExpiryDays] = useState<15 | 30>(30);
   const [resolving, setResolving] = useState(false);
   const [selectedToken, setSelectedToken] = useState(TOKENS[0]);
@@ -176,6 +190,8 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
     setUnregistered(null);
     setUnregisteredInfo(null);
     setCandidates(null);
+    setPickerMode("ambiguous");
+    setNotFoundHandle(false);
     try {
       const res = await fetch(`${RESOLVER_URL}/resolve?q=${encodeURIComponent(q)}`);
       const result: ResolveResult = await res.json();
@@ -189,11 +205,30 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
       // resolver problem, and treating it as unregistered would send real
       // money into an invite the recipient never asked for.
       if (res.status === 404) {
+        // The backend already excludes GitHub unless it confirmed the login
+        // exists (resolver.ts's unregisteredCandidatesFor) and includes every
+        // other type whose parse() accepted the query, so this just branches
+        // on the count: nothing plausible, one specific recipient (unchanged
+        // flow, keeping `unregistered` as the raw query - the same form the
+        // invite path, e.g. an email's stored handle, has always used), or
+        // more than one platform to ask between (a bare name that is e.g.
+        // both a valid X handle and a confirmed GitHub login - each a
+        // different real recipient).
+        const list = result.candidates ?? [];
+        if (list.length === 0) {
+          setNotFoundHandle(true);
+          return;
+        }
+        if (list.length > 1) {
+          setPickerMode("unregistered");
+          setCandidates(list);
+          return;
+        }
         setUnregistered(q);
         setUnregisteredInfo({
-          type: result.type,
-          avatarUrl: result.avatarUrl,
-          profileUrl: result.profileUrl,
+          type: list[0].type,
+          avatarUrl: list[0].avatarUrl,
+          profileUrl: list[0].profileUrl,
         });
         return;
       }
@@ -224,6 +259,8 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
     setUnregistered(null);
     setUnregisteredInfo(null);
     setCandidates(null);
+    setPickerMode("ambiguous");
+    setNotFoundHandle(false);
     setStep("idle");
     setClaimLink("");
     setNotePosted(false);
@@ -484,12 +521,10 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
   const showAmountStep = !!(resolved || unregistered);
   const recipientCanonical = (resolved ? recipient : unregistered ?? "").trim();
   const recipientLabel = displayCanonical(recipientCanonical);
-  // Unregistered GitHub logins get a real public avatar + profile (see
-  // resolver.ts's githubFallback); every other unregistered type has neither,
-  // so that state stays text-only rather than showing a fake placeholder face.
-  // githubFallback is the only source of unregisteredInfo.type, so it is
-  // always either "github" (handled below) or absent; no other type ever
-  // reaches this state.
+  // Unregistered GitHub logins get a real public avatar + profile (only ever
+  // set when the backend confirmed the account exists - see resolver.ts's
+  // unregisteredCandidatesFor); every other unregistered type has neither, so
+  // that state stays text-only rather than showing a fake placeholder face.
   const unregisteredGithub =
     unregistered && unregisteredInfo?.type === "github" ? unregisteredInfo : null;
 
@@ -525,7 +560,9 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
           {candidates && (
             <div className="space-y-2 rounded-xl border border-fog p-3">
               <p className="text-sm text-graphite">
-                More than one person goes by that name. Pick who you meant.
+                {pickerMode === "unregistered"
+                  ? "Nobody with this name has joined yet. Pick where to send the claim link."
+                  : "More than one person goes by that name. Pick who you meant."}
               </p>
               {candidates.map((c) => (
                 <CandidateRow
@@ -534,11 +571,40 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
                   disabled={resolving}
                   onSelect={() => {
                     setRecipient(displayCanonical(c.handle));
-                    handleResolve(c.handle);
+                    if (pickerMode === "unregistered") {
+                      // Set state directly instead of round-tripping through
+                      // handleResolve(c.handle): parseGithub also strips a
+                      // leading "@" (shared/src/handles.ts's unnamespace), so
+                      // an X canonical like "@elonmusk" still parses as a
+                      // github candidate too, and re-querying it would land
+                      // back on this same multi-candidate branch instead of
+                      // picking the chosen platform. c.handle is already this
+                      // type's canonical form, and its avatarUrl/profileUrl
+                      // are already the confirmed values from the 404
+                      // response, so no extra request is needed.
+                      setCandidates(null);
+                      setUnregistered(c.handle);
+                      setUnregisteredInfo({
+                        type: c.type,
+                        avatarUrl: c.avatarUrl,
+                        profileUrl: c.profileUrl,
+                      });
+                    } else {
+                      // Ambiguous match among registered people: re-resolve
+                      // the chosen canonical handle to fetch their real
+                      // stellarAddress etc.
+                      handleResolve(c.handle);
+                    }
                   }}
                 />
               ))}
             </div>
+          )}
+
+          {notFoundHandle && (
+            <p className="px-1 text-sm text-graphite">
+              No one found for that handle.
+            </p>
           )}
         </div>
       ) : (
