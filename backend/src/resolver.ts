@@ -1,8 +1,8 @@
 import { fileURLToPath } from "node:url";
 import express, { type Request, type Response, type NextFunction } from "express";
 import cors from "cors";
-import type { ResolveResult } from "@zeekpay/shared";
-import { enabledHandleTypes, getHandleType, handleTypeForCanonical } from "@zeekpay/shared";
+import type { ResolveCandidate, ResolveResult } from "@zeekpay/shared";
+import { enabledHandleTypes, handleTypeForCanonical } from "@zeekpay/shared";
 import * as store from "./store.js";
 import * as leaves from "./leaves.js";
 import * as tree from "./tree.js";
@@ -10,6 +10,7 @@ import * as invite from "./invite.js";
 import * as email from "./email.js";
 import * as indexer from "./indexer.js";
 import { telegramRouter } from "./telegram.js";
+import { githubUserExists } from "./github.js";
 import { requireAuth, serviceClient } from "./supabase.js";
 import { verifyLinkWalletSig } from "./verify.js";
 import * as StellarSdk from "@stellar/stellar-sdk";
@@ -125,33 +126,56 @@ app.get("/health", (_req: Request, res: Response) => {
 // pick one"). Both bodies carry found:false, so a client that only reads the
 // body still behaves as it did.
 //
-// `fallback` carries the GitHub-only exception: a login nobody has registered
-// still has a real face and profile at github.com, so the invite screen can
-// show both even though there's no row in handles to read them from.
-function resolveNotFound(
-  res: Response,
-  fallback?: { type: "github"; avatarUrl: string; profileUrl: string | null }
-): void {
-  res.status(404).json({ found: false, ...fallback } satisfies ResolveResult);
+// `candidates` is the same ResolveCandidate shape the 300 ambiguity response
+// uses (see unregisteredCandidatesFor below), so the client renders one
+// picker for "several registered people might match" and "nobody's
+// registered, but more than one platform could be who you mean".
+function resolveNotFound(res: Response, candidates: ResolveCandidate[] = []): void {
+  res.status(404).json({ found: false, candidates } satisfies ResolveResult);
 }
 
-/** GitHub's avatar redirect (no API call, no auth) plus its profile page, for
- *  a query that parsed as a github candidate whether or not that login is
- *  registered. Only github gets this: it's the only type here whose avatar
- *  and profile page are derivable from the handle alone with no lookup. */
-function githubFallback(
-  q: string
-): { type: "github"; avatarUrl: string; profileUrl: string | null } | undefined {
-  const github = getHandleType("github");
-  if (!github) return undefined;
-  const canonical = github.parse(q);
-  if (!canonical) return undefined;
-  const login = github.format(canonical);
-  return {
-    type: "github",
-    avatarUrl: `https://github.com/${login}.png`,
-    profileUrl: github.profileUrl(canonical),
-  };
+/** Builds the /resolve 404 body's candidate list from the already-parsed
+ *  canonical forms (`candidates` below, built once per request from
+ *  enabledHandleTypes().parse(q)).
+ *
+ *  Every type is offered as an invite target except GitHub, which is only
+ *  included when GitHub confirms the login is a real account
+ *  (githubUserExists): a string can match GitHub's username syntax
+ *  (letters/digits/hyphens, <= 39 chars) without belonging to anyone, and
+ *  gibberish like "sxjvkbsdhgkjwehgkjwehui" parses fine. Fabricating a
+ *  "found" person card for handles nobody owns was the bug this guards.
+ *
+ *  Runs the GitHub check at most once per request: `parsedCandidates` has at
+ *  most one github: entry, since parseGithub produces one canonical form per
+ *  query, and this loop touches each candidate once. */
+async function unregisteredCandidatesFor(
+  parsedCandidates: string[]
+): Promise<ResolveCandidate[]> {
+  const result: ResolveCandidate[] = [];
+  for (const canonical of parsedCandidates) {
+    const t = handleTypeForCanonical(canonical);
+    if (!t) continue;
+    if (t.id === "github") {
+      const login = t.format(canonical);
+      if (!(await githubUserExists(login))) continue;
+      result.push({
+        type: "github",
+        label: t.label,
+        handle: canonical,
+        avatarUrl: `https://github.com/${login}.png`,
+        profileUrl: t.profileUrl(canonical),
+      });
+    } else {
+      result.push({
+        type: t.id,
+        label: t.label,
+        handle: canonical,
+        avatarUrl: null,
+        profileUrl: t.profileUrl(canonical),
+      });
+    }
+  }
+  return result;
 }
 
 // Rate-limited per IP on the same terms as /auth/lookup: /resolve is public
@@ -185,7 +209,18 @@ app.get("/resolve", rateLimit(20, 60 * 1000), async (req: Request, res: Response
   let matchedRow: store.LookupRow | undefined;
   if (distinctUserIds.length === 1) {
     userId = distinctUserIds[0];
-    matchedRow = rows.find((r) => r.user_id === userId);
+    // Pick deterministically by registry order (the order `candidates` was
+    // built in above), not by whatever order Postgres happened to return
+    // `rows` in: findManyByLookup's query (store.ts) has no ORDER BY, so when
+    // one person has linked more than one handle type under the same name
+    // (e.g. GitHub "elonmusk" and X "@elonmusk" both on one account), picking
+    // rows[0] / rows.find() shows whichever type the database returned
+    // first - unspecified, and not guaranteed to stay the same across
+    // identical calls. `candidates` is ordered by enabledHandleTypes(), so
+    // this always prefers the same type (X before GitHub) for the same input.
+    matchedRow = candidates
+      .map((c) => rows.find((r) => r.handle_normalized === c))
+      .find((r): r is store.LookupRow => r !== undefined);
   } else if (distinctUserIds.length > 1) {
     // Different candidates belong to different people (e.g. an X "@alice"
     // and a github "github:alice"). If the caller already typed the exact
@@ -224,12 +259,12 @@ app.get("/resolve", rateLimit(20, 60 * 1000), async (req: Request, res: Response
     }
   }
   if (!userId || !matchedRow) {
-    return void resolveNotFound(res, githubFallback(q));
+    return void resolveNotFound(res, await unregisteredCandidatesFor(candidates));
   }
 
   const user = await store.getUser(userId);
   if (!user || !user.wallet) {
-    return void resolveNotFound(res, githubFallback(q));
+    return void resolveNotFound(res, await unregisteredCandidatesFor(candidates));
   }
   const matchedType = handleTypeForCanonical(matchedRow.handle_normalized);
   res.json({

@@ -38,19 +38,27 @@ export interface ResolveResult {
   contractAddress?: string;
   usdcSac?: string;
   /** HandleTypeId of the registry type that resolved, e.g. "github". Set
-   *  alongside a successful (found:true) result. */
+   *  alongside a successful (found:true) result only; a 404 carries no
+   *  top-level type/avatarUrl/profileUrl (see `candidates` below instead). */
   type?: HandleTypeId;
   /** Provider profile photo, https only. See ResolveCandidate.avatarUrl for
-   *  what null vs. omitted means; also set for an unregistered GitHub handle
-   *  (found:false, 404) so the invite screen can still show a face. */
+   *  what null vs. omitted means. Set alongside found:true only. */
   avatarUrl?: string | null;
-  /** Public profile page for the resolved (or, for an unregistered GitHub
-   *  handle, the queried) person. See ResolveCandidate.profileUrl. */
+  /** Public profile page for the resolved person. See
+   *  ResolveCandidate.profileUrl. Set alongside found:true only. */
   profileUrl?: string | null;
-  /** Set (with an HTTP 300 status) when the query's candidate canonical forms
-   *  matched more than one person, e.g. a bare "alice" matching both an X and
-   *  a GitHub user. The handles that matched, for a disambiguation prompt;
-   *  found is always false alongside this. */
+  /** The invite-worthy candidates for a query that did not resolve, found is
+   *  always false alongside this:
+   *  - HTTP 300: the query's candidate canonical forms matched more than one
+   *    *registered* person, e.g. a bare "alice" matching both an X and a
+   *    GitHub user - each row's own avatar/profile, from `handles`.
+   *  - HTTP 404: the query parsed as more than one *unregistered* invite
+   *    target, e.g. a bare "elonmusk" being both a valid X handle and a
+   *    GitHub login GitHub confirms is real. GitHub only ever appears here
+   *    confirmed (see resolver.ts's unregisteredCandidatesFor); every other
+   *    type appears whenever its parse() accepts the query, with
+   *    avatarUrl:null (unverified). Zero entries: nothing plausible at all.
+   *    One entry: the client's existing single-recipient invite flow. */
   candidates?: ResolveCandidate[];
 }
 
