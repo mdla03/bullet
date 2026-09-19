@@ -20,12 +20,22 @@ function originOf(url: string | undefined): string | null {
 const supabaseOrigin = originOf(process.env.NEXT_PUBLIC_SUPABASE_URL);
 const supabaseWs = supabaseOrigin?.replace(/^https:/, "wss:") ?? null;
 
+// Freighter's mobile app can't reach the extension API, so wallet traffic from
+// its in-app browser goes over the WalletConnect v2 relay (lib/walletconnect.ts).
+// sign-client opens a websocket to the relay and fetches its own config over
+// https from the same host.
+const walletConnectSrc = [
+  "wss://relay.walletconnect.org",
+  "https://relay.walletconnect.org",
+];
+
 const connectSrc = [
   "'self'",
   originOf(process.env.NEXT_PUBLIC_SOROBAN_RPC_URL),
   originOf(process.env.NEXT_PUBLIC_RESOLVER_URL),
   supabaseOrigin,
   supabaseWs,
+  ...walletConnectSrc,
   // Next.js dev server uses a websocket for HMR / React Fast Refresh.
   isDev ? "ws:" : null,
 ].filter(Boolean);

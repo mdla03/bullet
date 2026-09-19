@@ -7,7 +7,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "tsx --test src/lib/walletconnect.test.ts"
   },
   "dependencies": {
     "@noble/curves": "1.9.7",
@@ -16,6 +17,7 @@
     "@stellar/stellar-sdk": "^16.0.1",
     "@supabase/ssr": "^0.12.0",
     "@supabase/supabase-js": "^2.110.0",
+    "@walletconnect/sign-client": "^2.25.0",
     "@zeekpay/shared": "workspace:*",
     "ed2curve": "^0.3.0",
     "ffjavascript": "0.3.1",
@@ -35,6 +37,7 @@
     "postcss": "^8.5.16",
     "puppeteer-core": "^25.8.0",
     "tailwindcss": "^4.3.2",
+    "tsx": "^4.22.4",
     "typescript": "^6.0.3"
   }
 }
