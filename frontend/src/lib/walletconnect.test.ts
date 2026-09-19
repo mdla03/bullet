@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { Keypair } from "@stellar/stellar-base";
 
-import { sep53Digest } from "./walletconnect";
+import { freighterDeepLink, sep53Digest } from "./walletconnect";
 
 // Official SEP-53 test vectors, ecosystem/sep-0053.md "Test cases".
 // These pin the exact preimage Freighter mobile signs. The first 32 bytes of
@@ -38,6 +38,32 @@ for (const v of VECTORS) {
     assert.equal(verified, true);
   });
 }
+
+// Freighter's own deep-link handler, copied from freighter-mobile
+// src/hooks/useWalletKitEventsManager.ts onDeepLink(). A URL that does not
+// survive this is dropped silently by the wallet: no prompt, no error, the
+// dapp just sits there until its approval timeout. Pinning the parser rather
+// than the string means a "tidier" URL that still looks right but stops
+// matching gets caught here instead of on a phone.
+const WALLET_KIT_MT_REDIRECT_NATIVE = "freighterwallet://wc-redirect";
+
+function freighterPairsWith(url: string): string | null {
+  if (!url?.includes(WALLET_KIT_MT_REDIRECT_NATIVE)) return null;
+  const uriParam = new URL(url).search.split("uri=")[1];
+  if (!uriParam) return null;
+  return decodeURIComponent(uriParam);
+}
+
+test("the deep link survives Freighter's onDeepLink parser", () => {
+  const uri = "wc:9b1f0a@2?relay-protocol=irn&symKey=deadbeef+/=";
+  assert.equal(freighterPairsWith(freighterDeepLink(uri)), uri);
+});
+
+test("the generic wc?uri= convention would NOT have matched", () => {
+  const uri = "wc:9b1f0a@2?relay-protocol=irn&symKey=deadbeef";
+  const generic = `freighterwallet://wc?uri=${encodeURIComponent(uri)}`;
+  assert.equal(freighterPairsWith(generic), null);
+});
 
 test("a different message does not verify", () => {
   const verified = Keypair.fromPublicKey(ADDRESS).verify(
