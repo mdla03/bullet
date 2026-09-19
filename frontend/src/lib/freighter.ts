@@ -1,8 +1,25 @@
-// Thin wrapper around @stellar/freighter-api that adds a timeout.
-// Freighter mobile's built-in browser sometimes hangs on requestAccess()
-// without ever resolving. This prevents the UI from getting stuck.
+// One wallet interface for both Freighter builds. Every caller uses these
+// functions and never picks a transport itself.
+//
+// @stellar/freighter-api only speaks to the browser extension: it posts a
+// FREIGHTER_EXTERNAL_MSG_REQUEST on window and waits for the content script to
+// answer. Freighter's mobile app has no content script, so nothing ever
+// replies and every call hangs until the timeout below. All the mobile app
+// injects is a marker object, so detect it and route to WalletConnect
+// (lib/walletconnect.ts) instead.
 
 const TIMEOUT_MS = 15_000;
+
+declare global {
+  interface Window {
+    stellar?: { provider?: string; platform?: string };
+  }
+}
+
+/** True inside the Freighter mobile app's in-app browser. */
+export function isFreighterMobileBrowser(): boolean {
+  return typeof window !== "undefined" && window.stellar?.platform === "mobile";
+}
 
 /** Freighter errors are sometimes a string, sometimes an { message } object. Normalize to text. */
 function freighterErrorText(err: unknown): string {
@@ -16,12 +33,24 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   return Promise.race([
     promise,
     new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error(`${label} timed out. Make sure Freighter is unlocked and try again.`)), ms)
+      setTimeout(
+        () =>
+          reject(
+            new Error(
+              `${label} timed out. Make sure the Freighter extension is installed and unlocked, then try again.`
+            )
+          ),
+        ms
+      )
     ),
   ]);
 }
 
 export async function freighterRequestAccess(): Promise<{ address: string }> {
+  if (isFreighterMobileBrowser()) {
+    const { wcConnect } = await import("@/lib/walletconnect");
+    return { address: await wcConnect() };
+  }
   const { requestAccess } = await import("@stellar/freighter-api");
   const res = await withTimeout(requestAccess(), TIMEOUT_MS, "Freighter connect");
   if ("error" in res && res.error) throw new Error(`Freighter: ${freighterErrorText(res.error)}`);
@@ -31,6 +60,7 @@ export async function freighterRequestAccess(): Promise<{ address: string }> {
 /** Returns the address ONLY if this site is already whitelisted in Freighter.
  * Does not trigger the connect popup. Returns null on any error. */
 export async function freighterGetAddressIfAllowed(): Promise<string | null> {
+  if (isFreighterMobileBrowser()) return null;
   try {
     const { getAddress } = await import("@stellar/freighter-api");
     const res = await withTimeout(getAddress(), 3_000, "Freighter address");
@@ -45,6 +75,10 @@ export async function freighterSignTransaction(
   xdr: string,
   networkPassphrase: string
 ): Promise<string> {
+  if (isFreighterMobileBrowser()) {
+    const { wcSignTransaction } = await import("@/lib/walletconnect");
+    return wcSignTransaction(xdr, networkPassphrase);
+  }
   const { signTransaction } = await import("@stellar/freighter-api");
   const res = await withTimeout(
     signTransaction(xdr, { networkPassphrase }),
@@ -59,6 +93,10 @@ export async function freighterSignMessage(
   message: string,
   address: string
 ): Promise<string | Buffer> {
+  if (isFreighterMobileBrowser()) {
+    const { wcSignMessage } = await import("@/lib/walletconnect");
+    return wcSignMessage(message, address);
+  }
   const { signMessage } = await import("@stellar/freighter-api");
   const res = await withTimeout(
     signMessage(message, { address }),
