@@ -95,17 +95,34 @@ function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> 
 }
 
 /**
- * Hand the pairing URI to the Freighter app. `freighterwallet` is the scheme
- * declared in its iOS Info.plist and android build.gradle (prod flavour); the
- * `wc?uri=` path is the WalletConnect deep-link convention every v2 wallet
- * implements.
+ * Hand the pairing URI to the Freighter app.
  *
- * ponytail: unverified on a real device. If Freighter ever changes the path,
- * connect fails with the timeout below rather than doing something wrong, and
- * the fix is this one line.
+ * This exact string matters. Freighter's deep-link handler
+ * (freighter-mobile src/hooks/useWalletKitEventsManager.ts) is:
+ *
+ *   if (!event.url?.includes(WALLET_KIT_MT_REDIRECT_NATIVE)) return;
+ *   const uriParam = new URL(event.url).search.split("uri=")[1];
+ *   walletKit.pair({ uri: decodeURIComponent(uriParam) });
+ *
+ * so the URL has to *contain* the wallet's registered native link and carry
+ * the pairing uri in the query string. Anything else is dropped silently:
+ * the generic `wc?uri=` convention does not match, which is why connecting
+ * failed at the approval timeout with no prompt on the phone.
+ *
+ * WALLET_KIT_MT_REDIRECT_NATIVE is not in their repo (it comes from CI env),
+ * but it is published in the WalletConnect wallet registry as Freighter's
+ * mobile.native link, which is the value AppKit itself deep-links to:
+ *   explorer-api.walletconnect.com/v3/wallets?search=freighter
+ *   -> mobile: { native: "freighterwallet://wc-redirect" }
  */
+const FREIGHTER_NATIVE_LINK = "freighterwallet://wc-redirect";
+
+export function freighterDeepLink(uri: string): string {
+  return `${FREIGHTER_NATIVE_LINK}?uri=${encodeURIComponent(uri)}`;
+}
+
 function openWallet(uri: string) {
-  window.location.href = `freighterwallet://wc?uri=${encodeURIComponent(uri)}`;
+  window.location.href = freighterDeepLink(uri);
 }
 
 /** Connect (or reuse a live session) and return the Stellar address. */
