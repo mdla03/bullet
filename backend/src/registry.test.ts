@@ -51,11 +51,9 @@ describe("handle registry: parse/format round trip", () => {
     });
   }
 
-  it("github and discord are enabled; telegram stays off until its provider is configured", () => {
+  it("all three SOW handle types are enabled", () => {
     const ids = enabledHandleTypes().map((h) => h.id);
-    assert.ok(ids.includes("github"));
-    assert.ok(ids.includes("discord"));
-    assert.ok(!ids.includes("telegram"));
+    for (const id of ["github", "discord", "telegram"] as const) assert.ok(ids.includes(id), id);
   });
 });
 
@@ -172,13 +170,11 @@ describe("handle registry: github canonical form", () => {
   });
 });
 
-// discord is enabled now; its own namespace/charset tests moved to the
-// "discord canonical form" block below, mirroring github's. telegram stays
-// disabled but is parsed here anyway: the namespace rule is what keeps it
-// from colliding with github/discord the day it's turned on too, and a rule
-// nothing tests is a rule that quietly rots. The round-trip and
-// handleTypeForCanonical checks below cover discord and telegram together
-// since both hold regardless of a type's enabled flag.
+// discord and telegram are both enabled now; discord's own namespace/charset
+// tests moved to the "discord canonical form" block below, mirroring
+// github's. The round-trip and handleTypeForCanonical checks below cover
+// discord and telegram together since both hold regardless of a type's
+// enabled flag.
 describe("handle registry: bare-name type namespacing", () => {
   const discord = getHandleType("discord")!;
   const telegram = getHandleType("telegram")!;
@@ -201,10 +197,10 @@ describe("handle registry: bare-name type namespacing", () => {
   });
 
   it("handleTypeForCanonical maps a stored canonical to its type whether or not the type is currently enabled", () => {
-    // A row written while discord was disabled (or restored from a backup)
-    // must not become unlabelable now that it's on, and the same must hold
-    // for telegram if it stays off: enabledHandleTypes() gates parsing new
-    // input, not looking up what a canonical string already is.
+    // A row written while a type was disabled (or restored from a backup)
+    // must not become unlabelable now that it's on: enabledHandleTypes()
+    // gates parsing new input, not looking up what a canonical string
+    // already is.
     assert.equal(handleTypeForCanonical("discord:alice")?.id, "discord");
     assert.equal(handleTypeForCanonical("telegram:alice_99")?.id, "telegram");
   });

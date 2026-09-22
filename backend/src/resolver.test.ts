@@ -207,6 +207,15 @@ function xCandidate(name: string): ResolveCandidate {
 function discordCandidate(name: string): ResolveCandidate {
   return { type: "discord", label: "Discord", handle: "discord:" + name, avatarUrl: null, profileUrl: null };
 }
+function telegramCandidate(name: string): ResolveCandidate {
+  return {
+    type: "telegram",
+    label: "Telegram",
+    handle: "telegram:" + name,
+    avatarUrl: null,
+    profileUrl: "https://t.me/" + name,
+  };
+}
 
 describe("GET /resolve", () => {
   it("returns found:false for empty query", async () => {
@@ -309,31 +318,40 @@ describe("GET /resolve", () => {
     // <= 39 chars) rendered a real-looking "found" person card. This string
     // is 23 chars (too long for X's 15-char limit) and not a confirmed GitHub
     // login (the githubUserExists stub above), so it must resolve without a
-    // fabricated GitHub entry. It still fits Discord's username charset
-    // (unverified, since discord candidates need no existence check), so that
-    // one candidate is expected.
+    // fabricated GitHub entry. It still fits Discord's and Telegram's username
+    // charsets (unverified, since neither needs an existence check), so those
+    // two candidates are expected.
     const r = await req(
       "GET",
       "/resolve?q=" + encodeURIComponent("sxjvkbsdhgkjwehgkjwehui")
     );
     assert.equal(r.status, 404);
-    assert.deepEqual(r.body, {
-      found: false,
-      candidates: [discordCandidate("sxjvkbsdhgkjwehgkjwehui")],
-    });
+    const body404 = r.body as { found: boolean; candidates?: ResolveCandidate[] };
+    assert.deepEqual(
+      [...(body404.candidates ?? [])].sort((a, b) => a.handle.localeCompare(b.handle)),
+      [
+        discordCandidate("sxjvkbsdhgkjwehgkjwehui"),
+        telegramCandidate("sxjvkbsdhgkjwehgkjwehui"),
+      ].sort((a, b) => a.handle.localeCompare(b.handle))
+    );
   });
 
-  it("resolves an unregistered X handle to a 404 with X and Discord candidates (no fallback avatar)", async () => {
+  it("resolves an unregistered X handle to a 404 with X, Discord and Telegram candidates (no fallback avatar)", async () => {
     // Only github ever needs confirmation before appearing; every other
     // type's parse() succeeding is enough. The underscore makes this string
-    // parse as X and as discord but not as github (github's charset has no
-    // underscore), so there are two unverified (avatarUrl:null) candidates.
+    // parse as X, discord and telegram but not as github (github's charset
+    // has no underscore), so there are three unverified (avatarUrl:null)
+    // candidates.
     const r = await req("GET", "/resolve?q=" + encodeURIComponent("@no_body_here"));
     assert.equal(r.status, 404);
     const body = r.body as { found: boolean; candidates?: ResolveCandidate[] };
     assert.deepEqual(
       [...(body.candidates ?? [])].sort((a, b) => a.handle.localeCompare(b.handle)),
-      [xCandidate("no_body_here"), discordCandidate("no_body_here")]
+      [
+        xCandidate("no_body_here"),
+        discordCandidate("no_body_here"),
+        telegramCandidate("no_body_here"),
+      ].sort((a, b) => a.handle.localeCompare(b.handle))
     );
   });
 
@@ -348,11 +366,11 @@ describe("GET /resolve", () => {
     });
   });
 
-  it("offers X, Discord and a confirmed GitHub login as candidates for a bare unregistered name", async () => {
+  it("offers X, Discord, Telegram and a confirmed GitHub login as candidates for a bare unregistered name", async () => {
     // "brandnew" is unregistered but parses as a valid X handle, a valid
-    // Discord username, and a GitHub login the stub confirms exists - each is
-    // a different real recipient, so /resolve must offer all three rather
-    // than picking one.
+    // Discord username, a valid Telegram username, and a GitHub login the
+    // stub confirms exists - each is a different real recipient, so
+    // /resolve must offer all four rather than picking one.
     const r = await req("GET", "/resolve?q=brandnew");
     assert.equal(r.status, 404);
     const body = r.body as { found: boolean; candidates?: ResolveCandidate[] };
@@ -368,7 +386,8 @@ describe("GET /resolve", () => {
           avatarUrl: "https://github.com/brandnew.png",
           profileUrl: "https://github.com/brandnew",
         },
-      ]
+        telegramCandidate("brandnew"),
+      ].sort((a, b) => a.handle.localeCompare(b.handle))
     );
   });
 
