@@ -181,7 +181,7 @@ export const HANDLE_TYPES: readonly HandleType[] = [
   {
     id: "telegram",
     label: "Telegram",
-    enabled: false,
+    enabled: true,
     proof: { type: "telegram-widget" },
     identityProviders: ["telegram"],
     parse: parseTelegram,

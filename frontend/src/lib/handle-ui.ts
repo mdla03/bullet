@@ -61,8 +61,9 @@ export function displayCanonical(canonical: string): string {
   return handleTypeForCanonical(canonical)?.format(canonical) ?? canonical;
 }
 
-// Icons for the OAuth-backed handle types. Telegram stays hidden as an OAuth
-// entry (registry enabled: false; it's proven via its own widget instead).
+// Icons for the OAuth-backed handle types. Telegram is enabled but not
+// OAuth-backed (it's proven via its own widget instead), so oauthHandleTypes()
+// below never surfaces it even though it has an icon entry here.
 export const OAUTH_ICON: Partial<
   Record<HandleTypeId, (p: SVGProps<SVGSVGElement>) => React.ReactElement>
 > = {
