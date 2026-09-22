@@ -94,6 +94,10 @@ export function Inbox() {
   const [keys, setKeys] = useState<BulletKeys | null>(null);
   const [notes, setNotes] = useState<InboxNote[] | null>(null);
   const [unlocking, setUnlocking] = useState(false);
+  /** A cached unlock is being restored. Distinct from locked: showing the
+   *  unlock screen here would flash a Freighter prompt at someone who is
+   *  about to be let in without one. */
+  const [restoring, setRestoring] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [claims, setClaims] = useState<Record<string, ClaimStatus>>({});
   const [claimingAll, setClaimingAll] = useState(false);
@@ -162,22 +166,26 @@ export function Inbox() {
   useEffect(() => {
     if (!wallet || keys) return;
     const cached = loadUnlock();
-    if (!cached) return;
     const known = [
       wallet.bullet_pubkey,
       ...wallet.previous.map((p) => p.bullet_pubkey),
     ];
-    // Account switched wallets since the cache was written: make them unlock.
-    if (!known.includes(cached.keys.pubKeyHex)) {
-      clearUnlock();
+    // Nothing cached, or the account switched wallets since it was written:
+    // this is a real lock, show the unlock screen.
+    if (!cached || !known.includes(cached.keys.pubKeyHex)) {
+      if (cached) clearUnlock();
+      setRestoring(false);
       return;
     }
     touchUnlock();
     setAddress(cached.address);
     setKeys(cached.keys);
-    loadNotes(cached.keys, cached.address).catch((e) =>
-      setError(e instanceof Error ? e.message : String(e))
-    );
+    // Notes load over the network and each unclaimed one costs a chain read,
+    // so this is seconds, not milliseconds. restoring stays true until it
+    // settles, either way: a failure here still needs the unlock screen.
+    loadNotes(cached.keys, cached.address)
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setRestoring(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wallet]);
 
@@ -186,6 +194,7 @@ export function Inbox() {
     setKeys(null);
     setNotes(null);
     setAddress("");
+    setRestoring(false); // a lock is the one state that should show the prompt
   }
 
   // Idle timeout. Any activity pushes the deadline out; once it passes, the
@@ -501,6 +510,19 @@ export function Inbox() {
       })}
     </div>
   );
+
+  // Restoring a cached unlock. Same skeleton as the session/wallet load above,
+  // so the inbox arrives in one transition instead of flashing a prompt that
+  // answers itself.
+  if (restoring) {
+    return (
+      <div className="space-y-3 rounded-2xl border border-fog bg-white p-6">
+        <Skeleton className="h-6 w-32" />
+        <Skeleton className="h-4 w-full" />
+        <Skeleton className="h-11 rounded-full" />
+      </div>
+    );
+  }
 
   if (!keys || !notes) {
     return (
