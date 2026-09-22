@@ -299,6 +299,7 @@ export function Inbox() {
         const { freighterSignTransaction } = await import("@/lib/freighter");
         const rdHexInv = BigInt(p.recipientDigest).toString(16).padStart(64, "0");
         hash = await claimInvite(
+          note.inviteId,
           note.custodyStellarSecret,
           address,
           proof_a,
@@ -348,7 +349,7 @@ export function Inbox() {
       }
 
       set({ state: "done", tx: hash });
-      markClaimed(note.id); // best-effort; the nullifier is the real record
+      markClaimed(note.id, hash); // best-effort; the nullifier is the real record
       postActivity({ type: "claim", amount: toStroops(note.payload), tokenId: p.tokenId ?? 0, txHash: hash });
       return true;
     } catch (e) {
@@ -450,7 +451,6 @@ export function Inbox() {
   if (!keys || !notes) {
     return (
       <div className="space-y-4">
-        {strandedBanner}
         <div className="space-y-4 rounded-2xl border border-fog bg-white p-6">
           <h2 className="text-xl font-bold tracking-tight">Unlock inbox</h2>
           <button
@@ -492,7 +492,6 @@ export function Inbox() {
 
   return (
     <div className="space-y-4">
-      {strandedBanner}
       <div className="overflow-hidden rounded-2xl border border-fog bg-white">
         <div className="flex items-center justify-between gap-3 px-5 py-4">
           <div className="min-w-0">
@@ -549,6 +548,7 @@ export function Inbox() {
               {notes.slice(0, claimableShown).map((note) => {
                 const status = claims[note.id];
                 const claimed = !!note.claimedAt || status?.state === "done";
+                const claimTx = note.claimTx ?? (status?.state === "done" ? status.tx : null);
                 const busy =
                   status &&
                   (status.state === "proving" ||
@@ -574,9 +574,9 @@ export function Inbox() {
                       <span className="flex items-center gap-1.5 text-xs font-medium text-signal">
                         <CheckIcon className="h-3.5 w-3.5" />
                         Claimed
-                        {status?.state === "done" && (
+                        {claimTx && (
                           <a
-                            href={`https://stellar.expert/explorer/testnet/tx/${status.tx}`}
+                            href={`https://stellar.expert/explorer/testnet/tx/${claimTx}`}
                             target="_blank"
                             rel="noreferrer"
                             className="ml-1 text-graphite hover:text-ink"
@@ -638,6 +638,8 @@ export function Inbox() {
           </>
         )}
       </div>
+
+      {strandedBanner}
 
       {error && (
         <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">

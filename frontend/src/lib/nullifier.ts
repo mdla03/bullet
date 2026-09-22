@@ -18,7 +18,9 @@ const CONTRACT_ID = process.env.NEXT_PUBLIC_CONTRACT_ID ?? "";
 const NETWORK_PASSPHRASE =
   process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ?? StellarSdk.Networks.TESTNET;
 
-/** Poseidon([secret]) as 32-byte big-endian hex. Mirrors prove_browser.ts. */
+/** Poseidon([secret]) as 32-byte big-endian hex. Mirrors prove_browser.ts.
+ *  Byte-for-byte copy of backend/src/invite.ts's nullifierHexFromSecret; see
+ *  that copy's comment for why it isn't hoisted into shared/. */
 export function nullifierHexFromSecret(secretHex: string): string {
   const secretDec = BigInt("0x" + secretHex).toString();
   const dec = poseidon([secretDec]);

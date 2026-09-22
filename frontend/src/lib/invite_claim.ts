@@ -42,8 +42,11 @@ const NETWORK_PASSPHRASE =
  * custody keypair signs both on-chain txs, but the forward's destination
  * trustline (if one is needed) can only be opened by the account it belongs
  * to, so that one step needs the user's own wallet signature.
+ * `inviteId` is the pending_invites row id (note.inviteId), used only to
+ * tell the backend which row to stamp claimed_at on once TX B lands.
  */
 export async function claimInvite(
+  inviteId: string,
   custodyStellarSecret: string,
   userRealWallet: string,
   proofA: string,
@@ -130,5 +133,21 @@ export async function claimInvite(
   if (finalB.status !== "SUCCESS") {
     throw new Error(`invite forward ended with status: ${finalB.status}`);
   }
+
+  // Stamp pending_invites.claimed_at now, at the moment the custody-forward
+  // transfer actually succeeds, instead of relying only on the separate,
+  // later markClaimed(note.id) call in Inbox.tsx (which cascades to this
+  // same row via notes.invite_id, but is itself best-effort and can be
+  // skipped, e.g. if the tab closes right after this resolves).
+  try {
+    const { apiFetch } = await import("./api");
+    await apiFetch("/invite/mark-claimed", {
+      method: "POST",
+      body: JSON.stringify({ inviteId }),
+    });
+  } catch {
+    // Best-effort. The on-chain transfer (resB.hash) is the real record.
+  }
+
   return resA.hash;
 }

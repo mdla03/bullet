@@ -16,6 +16,8 @@ import nacl from "tweetnacl";
 // @ts-expect-error — ed2curve ships no types.
 import ed2curve from "ed2curve";
 import { serviceClient } from "./supabase.js";
+import { poseidon } from "./poseidon.js";
+import { RPC_URL, CONTRACT_ID, ADMIN_KEY } from "./chain_config.js";
 
 const HORIZON_URL =
   process.env.HORIZON_URL ?? "https://horizon-testnet.stellar.org";
@@ -249,8 +251,113 @@ export async function deliverInvitesFor(
   return { delivered };
 }
 
-/** Sender's dashboard: their sent invites, newest first. */
-export async function listInvitesForSender(senderUserId: string): Promise<
+/** Poseidon([secret]) as 32-byte big-endian hex — the nullifier a claim proof
+ *  binds. Byte-for-byte copy of frontend/src/lib/nullifier.ts's
+ *  nullifierHexFromSecret, so a value computed here matches what the
+ *  contract actually recorded. Not hoisted into shared/: this side's
+ *  poseidon() (./poseidon.ts) reads circomlibjs's constants via node:fs at
+ *  module load, while frontend/src/lib/poseidon.ts statically imports a
+ *  bundled JSON copy so it works in the browser — unifying them would either
+ *  add a circomlibjs dependency to shared/ or break the frontend bundle. */
+export function nullifierHexFromSecret(secretHex: string): string {
+  const secretDec = BigInt("0x" + secretHex).toString();
+  const dec = poseidon([secretDec]);
+  const h = BigInt(dec).toString(16);
+  if (h.length > 64) throw new Error(`nullifier overflow: ${dec}`);
+  return h.padStart(64, "0");
+}
+
+/** Build the is_nullifier_used call, simulate it against `account`, and read
+ *  back the bool result. Shared by isNullifierUsedOnChain (one-off check) and
+ *  listInvitesForSender's reconciliation (many checks reusing one account). */
+async function simulateIsNullifierUsed(
+  rpc: StellarSdk.rpc.Server,
+  contract: StellarSdk.Contract,
+  account: StellarSdk.Account,
+  nullifierHex: string
+): Promise<boolean> {
+  const op = contract.call(
+    "is_nullifier_used",
+    StellarSdk.xdr.ScVal.scvBytes(Buffer.from(nullifierHex, "hex"))
+  );
+  const tx = new StellarSdk.TransactionBuilder(account, {
+    fee: "100",
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(op)
+    .setTimeout(30)
+    .build();
+  const sim = await rpc.simulateTransaction(tx);
+  if (StellarSdk.rpc.Api.isSimulationError(sim)) {
+    throw new Error(sim.error);
+  }
+  const retval = sim.result?.retval;
+  return retval ? StellarSdk.scValToNative(retval) === true : false;
+}
+
+/** Read-only: ask the deployed contract whether this nullifier is spent, via
+ *  a throwaway simulated (unsigned, unsubmitted) invocation of
+ *  is_nullifier_used — the same public getter frontend/src/lib/nullifier.ts
+ *  calls from the browser. The admin account (already funded for the
+ *  indexer's post_root calls) only supplies the sim tx envelope's source;
+ *  nothing is signed or sent. */
+export async function isNullifierUsedOnChain(nullifierHex: string): Promise<boolean> {
+  if (!CONTRACT_ID) throw new Error("ZEEKPAY_CONTRACT_ID not set");
+  if (!ADMIN_KEY) throw new Error("ZEEKPAY_ADMIN_KEY not set");
+  const rpc = new StellarSdk.rpc.Server(RPC_URL);
+  const contract = new StellarSdk.Contract(CONTRACT_ID);
+  const sourcePub = StellarSdk.Keypair.fromSecret(ADMIN_KEY).publicKey();
+  const account = await rpc.getAccount(sourcePub);
+  return simulateIsNullifierUsed(rpc, contract, account, nullifierHex);
+}
+
+/** Build the rpc/contract/account ONCE, then return a checker closure that
+ *  only does the per-nullifier simulate. Used by listInvitesForSender so a
+ *  list call with N unclaimed rows does a single getAccount instead of N. */
+async function prepareNullifierChecker(): Promise<
+  (nullifierHex: string) => Promise<boolean>
+> {
+  if (!CONTRACT_ID) throw new Error("ZEEKPAY_CONTRACT_ID not set");
+  if (!ADMIN_KEY) throw new Error("ZEEKPAY_ADMIN_KEY not set");
+  const rpc = new StellarSdk.rpc.Server(RPC_URL);
+  const contract = new StellarSdk.Contract(CONTRACT_ID);
+  const sourcePub = StellarSdk.Keypair.fromSecret(ADMIN_KEY).publicKey();
+  const account = await rpc.getAccount(sourcePub);
+  return (nullifierHex: string) =>
+    simulateIsNullifierUsed(rpc, contract, account, nullifierHex);
+}
+
+interface PendingInviteRow {
+  id: string;
+  handle_normalized: string;
+  denom: number;
+  claim_payload: unknown;
+  expires_at: string;
+  delivered_at: string | null;
+  claimed_at: string | null;
+  refunded_at: string | null;
+  created_at: string;
+}
+
+/** Sender's dashboard: their sent invites, newest first.
+ *
+ * The public claim-link path (frontend/src/app/c, claim_tx.ts's claimNote)
+ * pays out straight to whatever wallet the claimer connects and never calls
+ * this backend at all (see invite_claim.ts / markInviteClaimedIfOwned's
+ * doc comment in store.ts for the other, backend-visible claim path this
+ * one bypasses) — so an invite claimed that way never gets its claimed_at
+ * stamped by anything else. Reconcile every still-unclaimed row against the
+ * chain here, the same read-only nullifier check a human would do by hand.
+ *
+ * ponytail: one RPC simulate per unclaimed invite per list call. Fine for a
+ * sender's handful of pending invites; the real upgrade path is the indexer
+ * (indexer.ts) stamping claimed_at from on-chain claim events instead of
+ * this page-load-time reconciliation.
+ */
+export async function listInvitesForSender(
+  senderUserId: string,
+  checkNullifierUsed?: (nullifierHex: string) => Promise<boolean>
+): Promise<
   Array<{
     id: string;
     handle: string;
@@ -265,12 +372,60 @@ export async function listInvitesForSender(senderUserId: string): Promise<
   const { data, error } = await serviceClient
     .from("pending_invites")
     .select(
-      "id, handle_normalized, denom, expires_at, delivered_at, claimed_at, refunded_at, created_at"
+      "id, handle_normalized, denom, claim_payload, expires_at, delivered_at, claimed_at, refunded_at, created_at"
     )
     .eq("sender_user_id", senderUserId)
+    // Claimed invites belong in the sender's regular send history (already
+    // recorded there when the invite was sent), not in this pending list.
+    .is("claimed_at", null)
     .order("created_at", { ascending: false });
   if (error) return [];
-  return (data ?? []).map((r) => ({
+  const rows = (data ?? []) as PendingInviteRow[];
+
+  // Built lazily and memoized so at most one getAccount happens per list
+  // call, shared by every row that actually needs a chain check — a sender
+  // whose pending rows carry no claim_payload.secret never touches the
+  // network at all.
+  let checkerPromise: Promise<(nullifierHex: string) => Promise<boolean>> | null = null;
+  const getChecker = () => {
+    if (!checkerPromise) {
+      checkerPromise = checkNullifierUsed
+        ? Promise.resolve(checkNullifierUsed)
+        : prepareNullifierChecker();
+    }
+    return checkerPromise;
+  };
+
+  async function claimedOnChain(r: PendingInviteRow): Promise<boolean> {
+    const secret = (r.claim_payload as { secret?: string } | null)?.secret;
+    if (!secret) return false;
+    try {
+      const check = await getChecker();
+      return await check(nullifierHexFromSecret(secret));
+    } catch (e) {
+      // Never let a chain hiccup break the listing — the row just stays
+      // pending until the next list call (or the sender actually claims
+      // it through the app, which stamps it directly).
+      console.error("[invite] nullifier check failed for", r.id, String(e).slice(0, 200));
+      return false;
+    }
+  }
+
+  const kept = (
+    await Promise.all(rows.map(async (r) => ((await claimedOnChain(r)) ? null : r)))
+  ).filter((r): r is PendingInviteRow => r !== null);
+
+  const keptIds = new Set(kept.map((r) => r.id));
+  const claimedIds = rows.filter((r) => !keptIds.has(r.id)).map((r) => r.id);
+  if (claimedIds.length > 0) {
+    await serviceClient
+      .from("pending_invites")
+      .update({ claimed_at: new Date().toISOString() })
+      .in("id", claimedIds)
+      .is("claimed_at", null);
+  }
+
+  return kept.map((r) => ({
     id: r.id,
     handle: r.handle_normalized,
     amount: r.denom,
