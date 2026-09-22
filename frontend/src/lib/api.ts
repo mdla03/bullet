@@ -50,6 +50,8 @@ export interface ActivityItem {
   token_id: number;
   tx_hash: string | null;
   handle: string | null;
+  /** Claim rows only: which note this claim spent. */
+  note_id: string | null;
   created_at: string;
 }
 
@@ -59,6 +61,7 @@ export async function postActivity(row: {
   tokenId?: number;
   txHash?: string;
   handle?: string;
+  noteId?: string;
 }): Promise<void> {
   await apiFetch("/activity", {
     method: "POST",

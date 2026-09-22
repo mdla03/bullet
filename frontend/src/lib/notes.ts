@@ -56,6 +56,9 @@ export interface InboxNote {
    * Stellar secret (S…); the recipient uses it to sign the claim+forward tx. */
   custodyStellarSecret?: string;
   inviteId?: string;
+  /** Transaction that claimed this note, when a claim row records it. Lets a
+   *  claim from an earlier session still link to the explorer. */
+  claimTx?: string;
 }
 
 /** Encrypt a claim payload to the recipient's Bullet pubkey and store it.

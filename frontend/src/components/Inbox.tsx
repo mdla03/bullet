@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import type { Session } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
-import { getMe, postActivity, type PreviousWallet } from "@/lib/api";
+import { getActivity, getMe, postActivity, type PreviousWallet } from "@/lib/api";
 import { KEY_DOMAIN_MESSAGE, signatureToHex } from "@/lib/register";
 import {
   countUnclaimedByPubkey,
@@ -297,6 +297,20 @@ export function Inbox() {
   // never shows a Claim button that would fail with NullifierUsed (#6).
   async function loadNotes(k: BulletKeys, source: string) {
     const list = await fetchNotes(k);
+    // Tx hashes for claims made in earlier sessions, fetched alongside the
+    // chain reads below rather than before them. Best-effort: without it a
+    // claimed note still renders, just without its explorer link.
+    const claimTxs = getActivity()
+      .then((items) => {
+        const byNote: Record<string, string> = {};
+        for (const a of items) {
+          // Ordered newest first, so the first hit is the most recent claim.
+          if (a.type === "claim" && a.note_id && a.tx_hash && !byNote[a.note_id])
+            byNote[a.note_id] = a.tx_hash;
+        }
+        return byNote;
+      })
+      .catch(() => ({}) as Record<string, string>);
     const spent = await Promise.all(
       list.map(async (n) => {
         if (n.claimedAt) return false;
@@ -310,14 +324,16 @@ export function Inbox() {
         }
       })
     );
+    const txByNote = await claimTxs;
     const now = new Date().toISOString();
     setNotes(
       list.map((n, i) => {
+        const withTx = { ...n, claimTx: txByNote[n.id] };
         if (spent[i] && !n.claimedAt) {
           markClaimed(n.id); // best-effort DB catch-up
-          return { ...n, claimedAt: now };
+          return { ...withTx, claimedAt: now };
         }
-        return n;
+        return withTx;
       })
     );
   }
@@ -413,7 +429,7 @@ export function Inbox() {
 
       set({ state: "done", tx: hash });
       markClaimed(note.id); // best-effort; the nullifier is the real record
-      postActivity({ type: "claim", amount: toStroops(note.payload), tokenId: p.tokenId ?? 0, txHash: hash });
+      postActivity({ type: "claim", amount: toStroops(note.payload), tokenId: p.tokenId ?? 0, txHash: hash, noteId: note.id });
       return true;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -626,6 +642,8 @@ export function Inbox() {
               {notes.slice(0, claimableShown).map((note) => {
                 const status = claims[note.id];
                 const claimed = !!note.claimedAt || status?.state === "done";
+                // This session's claim, else one recorded by an earlier one.
+                const claimTx = status?.state === "done" ? status.tx : note.claimTx;
                 const busy =
                   status &&
                   (status.state === "proving" ||
@@ -651,9 +669,9 @@ export function Inbox() {
                       <span className="flex items-center gap-1.5 text-xs font-medium text-signal">
                         <CheckIcon className="h-3.5 w-3.5" />
                         Claimed
-                        {status?.state === "done" && (
+                        {claimTx && (
                           <a
-                            href={`https://stellar.expert/explorer/testnet/tx/${status.tx}`}
+                            href={`https://stellar.expert/explorer/testnet/tx/${claimTx}`}
                             target="_blank"
                             rel="noreferrer"
                             className="ml-1 text-graphite hover:text-ink"
