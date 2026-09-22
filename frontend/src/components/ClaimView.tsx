@@ -8,7 +8,9 @@ import { proveBrowser } from "@/lib/prove_browser";
 import { createClient } from "@/lib/supabase/client";
 import { getMe } from "@/lib/api";
 import { freighterGetAddressIfAllowed } from "@/lib/freighter";
+import { humanizeChainError } from "@/lib/chain_errors";
 import { AlertCircleIcon, ChevronDownIcon, InboxIcon } from "@/components/icons";
+import { ErrorDetails } from "@/components/ErrorDetails";
 
 const TOKEN_LABELS: Record<number, string> = { 0: "USDC", 1: "XLM", 2: "USDT" };
 const TOKEN_DECIMALS: Record<number, number> = { 0: 10_000_000, 1: 10_000_000, 2: 10_000_000 };
@@ -140,7 +142,8 @@ export function ClaimView({ encoded }: { encoded: string }) {
         },
         p.tokenId ?? 0,
         amountCommitmentX,
-        amountCommitmentY
+        amountCommitmentY,
+        (label) => setProveDetail(label)
       );
 
       setTxHash(hash);
@@ -213,6 +216,14 @@ export function ClaimView({ encoded }: { encoded: string }) {
     step === "proving" ||
     step === "signing" ||
     step === "submitting";
+  // Only a claim (tx/RPC) failure carries a raw HostError log worth
+  // expanding; a Freighter connect failure is already a short, human line.
+  // handleClaim's catch is the only place that sets an error while leaving
+  // step at "matched" (it also never advances past "matched" for the
+  // in-progress steps), so that's a reliable signal a shown error came from
+  // a claim rather than a connect attempt (handleConnect's catch always
+  // moves to step "error").
+  const errorIsClaim = step === "matched";
 
   return (
     <div className="space-y-6">
@@ -257,7 +268,10 @@ export function ClaimView({ encoded }: { encoded: string }) {
       {/* Error */}
       {error && (
         <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error}
+          <ErrorDetails
+            message={errorIsClaim ? humanizeChainError(error, tokenLabel) : error}
+            details={errorIsClaim ? error : undefined}
+          />
         </div>
       )}
 
@@ -301,9 +315,10 @@ export function ClaimView({ encoded }: { encoded: string }) {
           {STEP_LABELS[step]}
         </button>
       )}
-      {step === "proving" && proveDetail && (
-        <p className="text-center text-xs text-graphite">{proveDetail}</p>
-      )}
+      {(step === "proving" || step === "signing" || step === "submitting") &&
+        proveDetail && (
+          <p className="text-center text-xs text-graphite">{proveDetail}</p>
+        )}
 
       {/* Done */}
       {step === "done" && (

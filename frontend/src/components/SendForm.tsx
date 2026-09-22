@@ -17,6 +17,8 @@ import {
   LoaderIcon,
 } from "@/components/icons";
 import { CandidateRow, RecipientRow } from "@/components/RecipientRow";
+import { ErrorDetails } from "@/components/ErrorDetails";
+import { humanizeChainError } from "@/lib/chain_errors";
 
 /** Shown under the recipient row once /resolve 404s: plain, factual, no
  *  promise of more anonymity or speed than the invite flow actually gives. */
@@ -86,12 +88,6 @@ const SEND_STEPS: { key: Step; label: string }[] = [
   { key: "signing", label: "Sign in Freighter" },
   { key: "submitting", label: "Submitting to Stellar" },
 ];
-
-function humanizeSendError(raw: string): string {
-  if (/Account not found:/i.test(raw))
-    return "Your Stellar wallet isn't funded on testnet yet. Grab free XLM from friendbot.stellar.org and try again.";
-  return raw;
-}
 
 function CopyButton({ text, label }: { text: string; label: string }) {
   const [copied, setCopied] = useState(false);
@@ -366,7 +362,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
       setSentAsInvite(true);
       setStep("done");
     } catch (e) {
-      setError(humanizeSendError(e instanceof Error ? e.message : String(e)));
+      setError(e instanceof Error ? e.message : String(e));
       setStep("error");
     }
   }
@@ -455,7 +451,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
       window.dispatchEvent(new Event("bullet:send-complete"));
       setStep("done");
     } catch (e) {
-      setError(humanizeSendError(e instanceof Error ? e.message : String(e)));
+      setError(e instanceof Error ? e.message : String(e));
       setStep("error");
     }
   }
@@ -561,7 +557,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
             <div className="space-y-2 rounded-xl border border-fog p-3">
               <p className="text-sm text-graphite">
                 {pickerMode === "unregistered"
-                  ? "Nobody with this name has joined yet. Pick where to send the claim link."
+                  ? "Nobody with this name has joined Bullet yet. Pick where to send the claim link."
                   : "More than one person goes by that name. Pick who you meant."}
               </p>
               {candidates.map((c) => (
@@ -785,7 +781,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
 
       {error && (
         <div className="break-words rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error}
+          <ErrorDetails message={humanizeChainError(error, undefined, "send")} details={error} />
         </div>
       )}
 
