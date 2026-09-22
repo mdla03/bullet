@@ -199,6 +199,15 @@ describe("GET /health", () => {
 // /resolve is rate-limited at 20 requests per minute per IP and the whole
 // suite shares one IP, so this block has a budget: keep the request count
 // comfortably under 20 or the last cases start coming back 429.
+// The X and Discord candidate shapes below only ever vary by name; these
+// build the same object literal the resolver returns for each.
+function xCandidate(name: string): ResolveCandidate {
+  return { type: "x", label: "X", handle: "@" + name, avatarUrl: null, profileUrl: "https://x.com/" + name };
+}
+function discordCandidate(name: string): ResolveCandidate {
+  return { type: "discord", label: "Discord", handle: "discord:" + name, avatarUrl: null, profileUrl: null };
+}
+
 describe("GET /resolve", () => {
   it("returns found:false for empty query", async () => {
     const r = await req("GET", "/resolve?q=");
@@ -258,7 +267,7 @@ describe("GET /resolve", () => {
     assert.deepEqual(
       [...(body.candidates ?? [])].sort((a, b) => a.handle.localeCompare(b.handle)),
       [
-        { type: "x", label: "X", handle: "@alice", avatarUrl: null, profileUrl: "https://x.com/alice" },
+        xCandidate("alice"),
         {
           type: "github",
           label: "GitHub",
@@ -299,48 +308,59 @@ describe("GET /resolve", () => {
     // gibberish that merely fits GitHub's username syntax (letters/digits,
     // <= 39 chars) rendered a real-looking "found" person card. This string
     // is 23 chars (too long for X's 15-char limit) and not a confirmed GitHub
-    // login (the githubUserExists stub above), so it must resolve to an empty
-    // candidate list, not a fabricated GitHub entry.
+    // login (the githubUserExists stub above), so it must resolve without a
+    // fabricated GitHub entry. It still fits Discord's username charset
+    // (unverified, since discord candidates need no existence check), so that
+    // one candidate is expected.
     const r = await req(
       "GET",
       "/resolve?q=" + encodeURIComponent("sxjvkbsdhgkjwehgkjwehui")
     );
     assert.equal(r.status, 404);
-    assert.deepEqual(r.body, { found: false, candidates: [] });
-  });
-
-  it("resolves an unregistered X handle to a 404 with just an X candidate (no fallback avatar)", async () => {
-    // Only github ever needs confirmation before appearing; every other
-    // type's parse() succeeding is enough. The underscore makes this string
-    // parse as X but not as github (github's charset has no underscore), so
-    // there is exactly one, unverified (avatarUrl:null) candidate.
-    const r = await req("GET", "/resolve?q=" + encodeURIComponent("@no_body_here"));
-    assert.equal(r.status, 404);
     assert.deepEqual(r.body, {
       found: false,
-      candidates: [
-        {
-          type: "x",
-          label: "X",
-          handle: "@no_body_here",
-          avatarUrl: null,
-          profileUrl: "https://x.com/no_body_here",
-        },
-      ],
+      candidates: [discordCandidate("sxjvkbsdhgkjwehgkjwehui")],
     });
   });
 
-  it("offers both X and a confirmed GitHub login as candidates for a bare unregistered name", async () => {
-    // "brandnew" is unregistered but parses as both a valid X handle and a
-    // GitHub login the stub confirms exists - each is a different real
-    // recipient, so /resolve must offer both rather than picking one.
+  it("resolves an unregistered X handle to a 404 with X and Discord candidates (no fallback avatar)", async () => {
+    // Only github ever needs confirmation before appearing; every other
+    // type's parse() succeeding is enough. The underscore makes this string
+    // parse as X and as discord but not as github (github's charset has no
+    // underscore), so there are two unverified (avatarUrl:null) candidates.
+    const r = await req("GET", "/resolve?q=" + encodeURIComponent("@no_body_here"));
+    assert.equal(r.status, 404);
+    const body = r.body as { found: boolean; candidates?: ResolveCandidate[] };
+    assert.deepEqual(
+      [...(body.candidates ?? [])].sort((a, b) => a.handle.localeCompare(b.handle)),
+      [xCandidate("no_body_here"), discordCandidate("no_body_here")]
+    );
+  });
+
+  it("resolves a namespaced x:name query to a single X candidate", async () => {
+    // X's own parse() (shared/src/handles.ts) accepts both "@name" and
+    // "x:name", so this yields exactly one X candidate and no others.
+    const r = await req("GET", "/resolve?q=" + encodeURIComponent("x:no_body_here_9x"));
+    assert.equal(r.status, 404);
+    assert.deepEqual(r.body, {
+      found: false,
+      candidates: [xCandidate("no_body_here_9x")],
+    });
+  });
+
+  it("offers X, Discord and a confirmed GitHub login as candidates for a bare unregistered name", async () => {
+    // "brandnew" is unregistered but parses as a valid X handle, a valid
+    // Discord username, and a GitHub login the stub confirms exists - each is
+    // a different real recipient, so /resolve must offer all three rather
+    // than picking one.
     const r = await req("GET", "/resolve?q=brandnew");
     assert.equal(r.status, 404);
     const body = r.body as { found: boolean; candidates?: ResolveCandidate[] };
     assert.deepEqual(
       [...(body.candidates ?? [])].sort((a, b) => a.handle.localeCompare(b.handle)),
       [
-        { type: "x", label: "X", handle: "@brandnew", avatarUrl: null, profileUrl: "https://x.com/brandnew" },
+        xCandidate("brandnew"),
+        discordCandidate("brandnew"),
         {
           type: "github",
           label: "GitHub",

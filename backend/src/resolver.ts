@@ -189,8 +189,8 @@ app.get("/resolve", rateLimit(20, 60 * 1000), async (req: Request, res: Response
 
   // Every enabled handle type's parse() (shared/src/handles.ts) gets a shot at
   // the raw query, so "torvalds", "@torvalds" and "github:torvalds" all reach
-  // the same github:torvalds row. X ("@name") and email are just two of the
-  // types in this loop now, parsing exactly as they always did.
+  // the same github:torvalds row. X accepts both "@name" and "x:name" via its
+  // own parse(), and email is just another type in this loop.
   const candidates = [
     ...new Set(
       enabledHandleTypes()

@@ -8,7 +8,7 @@ import {
   type HandleTypeId,
   type OAuthProviderId,
 } from "@zeekpay/shared";
-import { GithubIcon, TelegramIcon, GoogleIcon, MailIcon, XBrandIcon } from "@/components/icons";
+import { DiscordIcon, GithubIcon, TelegramIcon, GoogleIcon, MailIcon, XBrandIcon } from "@/components/icons";
 
 /** The OAuth-backed variant of a handle proof. Its `provider` is the registry's
  *  own `OAuthProviderId`, every member of which is also a Supabase `Provider`,
@@ -61,14 +61,15 @@ export function displayCanonical(canonical: string): string {
   return handleTypeForCanonical(canonical)?.format(canonical) ?? canonical;
 }
 
-// Icons for the OAuth-backed handle types. Discord/telegram stay hidden
-// (registry enabled: false), so they're never looked up here.
+// Icons for the OAuth-backed handle types. Telegram stays hidden as an OAuth
+// entry (registry enabled: false; it's proven via its own widget instead).
 export const OAUTH_ICON: Partial<
   Record<HandleTypeId, (p: SVGProps<SVGSVGElement>) => React.ReactElement>
 > = {
   google: GoogleIcon,
   x: XBrandIcon,
   github: GithubIcon,
+  discord: DiscordIcon,
   telegram: TelegramIcon,
 };
 

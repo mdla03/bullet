@@ -50,8 +50,9 @@ export interface HandleType {
    *  bare email: one person, one address, one row.
    *
    *  Types whose handle is a bare name therefore carry a "<type>:" namespace,
-   *  so a GitHub "alice" and a Discord "alice" are different keys. X keeps its
-   *  "@name" form: the leading "@" is the namespace, and no other type here
+   *  so a GitHub "alice" and a Discord "alice" are different keys. X accepts
+   *  both "@name" and "x:name" as input, but its canonical form is always
+   *  "@name": the leading "@" is the namespace, and no other type here
    *  produces one. */
   parse(input: string): string | null;
   /** Canonical form -> how it's displayed. Strips the namespace: the UI already
@@ -89,7 +90,7 @@ function parseEmailLike(input: string): string | null {
 }
 
 function parseX(input: string): string | null {
-  const body = input.trim().replace(/^@/, "");
+  const body = unnamespace(input, "x", true);
   if (!/^[A-Za-z0-9_]{1,15}$/.test(body)) return null;
   return "@" + body.toLowerCase();
 }
@@ -169,7 +170,7 @@ export const HANDLE_TYPES: readonly HandleType[] = [
   {
     id: "discord",
     label: "Discord",
-    enabled: false,
+    enabled: true,
     proof: { type: "supabase-oauth", provider: "discord" },
     identityProviders: ["discord"],
     parse: parseDiscord,

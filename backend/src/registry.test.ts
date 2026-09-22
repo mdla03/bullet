@@ -38,6 +38,12 @@ describe("handle registry: parse/format round trip", () => {
       // same canonical value.
       const reparsed = handleType.parse(displayed);
       assert.equal(reparsed, canonical);
+
+      // X accepts "x:name" as an input namespace alongside "@name", both
+      // parsing to the same "@"-prefixed canonical form.
+      if (handleType.id === "x") {
+        assert.equal(handleType.parse("x:SomeOne"), "@someone");
+      }
     });
 
     it(`${handleType.id}: parse rejects empty input`, () => {
@@ -45,10 +51,10 @@ describe("handle registry: parse/format round trip", () => {
     });
   }
 
-  it("github is enabled; discord and telegram stay off until their providers are configured", () => {
+  it("github and discord are enabled; telegram stays off until its provider is configured", () => {
     const ids = enabledHandleTypes().map((h) => h.id);
     assert.ok(ids.includes("github"));
-    assert.ok(!ids.includes("discord"));
+    assert.ok(ids.includes("discord"));
     assert.ok(!ids.includes("telegram"));
   });
 });

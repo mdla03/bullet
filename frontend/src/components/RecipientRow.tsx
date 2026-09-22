@@ -98,9 +98,11 @@ export function RecipientRow({
   );
 }
 
-/** One row in the /resolve ambiguity picker: avatar, handle with its brand
- *  mark, and the type label on the right. Same avatar/initial fallback as
- *  RecipientRow, at a smaller size for a list of several rows. */
+/** One row in the /resolve ambiguity picker: avatar, handle, and the
+ *  platform's brand mark on the right (accessible name via sr-only text,
+ *  since the icon alone is the only indicator of platform now). Same
+ *  avatar/initial fallback as RecipientRow, at a smaller size for a list of
+ *  several rows. */
 export function CandidateRow({
   candidate,
   onSelect,
@@ -121,11 +123,15 @@ export function CandidateRow({
       className="flex w-full items-center gap-3 rounded-full border border-fog bg-white px-3 py-2 text-sm transition-colors hover:border-graphite disabled:opacity-50"
     >
       <Avatar avatarUrl={candidate.avatarUrl} initial={initial} size={32} />
-      <span className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-left font-medium">
-        {BrandIcon && <BrandIcon className="h-4 w-4 shrink-0 text-ink" />}
-        <span className="truncate">{label}</span>
+      <span className="min-w-0 flex-1 truncate text-left font-medium">
+        {label}
       </span>
-      <span className="shrink-0 text-graphite">{candidate.label}</span>
+      {BrandIcon && (
+        <span className="shrink-0 text-graphite">
+          <BrandIcon className="h-4 w-4" />
+          <span className="sr-only">{candidate.label}</span>
+        </span>
+      )}
     </button>
   );
 }
