@@ -325,12 +325,23 @@ export interface Activity {
   token_id: number;
   tx_hash: string | null;
   handle: string | null;
+  /** Claim rows only: the note this claim spent, so the inbox can link a claim
+   *  made in an earlier session to its transaction. Never set on send rows,
+   *  which would link a sender to a recipient's note. */
+  note_id: string | null;
   created_at: string;
 }
 
 export async function insertActivity(
   userId: string,
-  row: { type: "send" | "claim"; amount: number; token_id?: number; tx_hash?: string; handle?: string }
+  row: {
+    type: "send" | "claim";
+    amount: number;
+    token_id?: number;
+    tx_hash?: string;
+    handle?: string;
+    note_id?: string;
+  }
 ): Promise<boolean> {
   const { error } = await serviceClient.from("activity").insert({
     user_id: userId,
@@ -339,6 +350,7 @@ export async function insertActivity(
     token_id: row.token_id ?? 0,
     tx_hash: row.tx_hash ?? null,
     handle: row.handle ?? null,
+    note_id: row.type === "claim" ? row.note_id ?? null : null,
   });
   return !error;
 }
@@ -346,7 +358,7 @@ export async function insertActivity(
 export async function listActivity(userId: string): Promise<Activity[]> {
   const { data, error } = await serviceClient
     .from("activity")
-    .select("id, type, amount, token_id, tx_hash, handle, created_at")
+    .select("id, type, amount, token_id, tx_hash, handle, note_id, created_at")
     .eq("user_id", userId)
     .order("created_at", { ascending: false })
     .limit(100);

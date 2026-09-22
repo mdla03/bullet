@@ -52,15 +52,15 @@ export interface InboxNote {
   payload: ClaimPayload;
   createdAt: string;
   claimedAt: string | null;
-  /** Claim transaction hash, persisted server-side so the stellar.expert link
-   *  on a claimed note survives a refresh instead of only living in the
-   *  claiming tab's in-memory state. Null for notes claimed before this was
-   *  tracked, or claimed elsewhere (e.g. a backup link) without a known hash. */
-  claimTx: string | null;
   /** Present when this note came from an invite. Decrypted custody wallet
    * Stellar secret (S…); the recipient uses it to sign the claim+forward tx. */
   custodyStellarSecret?: string;
   inviteId?: string;
+  /** Transaction that claimed this note, when a claim row records it (joined
+   *  from `activity.note_id` in Inbox.tsx's loadNotes, not stored here). Lets
+   *  a claim from an earlier session still link to the explorer without
+   *  putting a tx hash on this publicly-readable table. */
+  claimTx?: string;
 }
 
 /** Encrypt a claim payload to the recipient's Bullet pubkey and store it.
@@ -122,7 +122,7 @@ export async function fetchNotes(keys: BulletKeys): Promise<InboxNote[]> {
   const { data, error } = await supabase
     .from("notes")
     .select(
-      "id, ephemeral_pubkey, nonce, ciphertext, created_at, claimed_at, claim_tx, invite_id, custody_secret"
+      "id, ephemeral_pubkey, nonce, ciphertext, created_at, claimed_at, invite_id, custody_secret"
     )
     .eq("recipient_pubkey", keys.pubKeyHex)
     .order("created_at", { ascending: false });
@@ -164,7 +164,6 @@ export async function fetchNotes(keys: BulletKeys): Promise<InboxNote[]> {
         payload: JSON.parse(new TextDecoder().decode(opened)) as ClaimPayload,
         createdAt: row.created_at,
         claimedAt: row.claimed_at,
-        claimTx: row.claim_tx ?? null,
         inviteId: row.invite_id ?? undefined,
         custodyStellarSecret,
       });
@@ -177,8 +176,9 @@ export async function fetchNotes(keys: BulletKeys): Promise<InboxNote[]> {
 
 /** Stamp a note claimed so it renders as history instead of claimable.
  * Goes through the backend since notes.UPDATE is RLS-locked to service_role.
- * `tx`, when known, is persisted alongside so the stellar.expert link on a
- * claimed note survives a refresh. */
+ * `tx` still writes notes.claim_tx server-side if passed, but no caller does:
+ * the explorer link now comes from activity.note_id (see Inbox.tsx's
+ * loadNotes), which doesn't sit on this publicly-readable table. */
 export async function markClaimed(id: string, tx?: string): Promise<void> {
   const { apiFetch } = await import("./api");
   try {

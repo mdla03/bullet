@@ -59,6 +59,7 @@ const PORT = parseInt(process.env.PORT ?? process.env.RESOLVER_PORT ?? "3001", 1
 // ── validation helpers ────────────────────────────────────────────────────────
 
 const STELLAR_RE = /^G[A-Z2-7]{55}$/;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ZEEKPAY_KEY_RE = /^[0-9a-f]{64}$/;
 const SIG_RE = /^[0-9a-f]{128}$/;
 
@@ -485,17 +486,20 @@ app.post("/notes", rateLimit(60, 10 * 60 * 1000), async (req: Request, res: Resp
 
 app.post("/activity", requireAuth, async (req: Request, res: Response) => {
   const userId = (req as Request & { userId?: string }).userId!;
-  const { type, amount, txHash, handle, tokenId } = req.body as {
+  const { type, amount, txHash, handle, tokenId, noteId } = req.body as {
     type?: string;
     amount?: number;
     txHash?: string;
     handle?: string;
     tokenId?: number;
+    noteId?: string;
   };
   if (type !== "send" && type !== "claim")
     return void badRequest(res, "type must be 'send' or 'claim'");
   if (typeof amount !== "number" || amount <= 0)
     return void badRequest(res, "amount must be a positive number (stroops)");
+  if (noteId !== undefined && !UUID_RE.test(noteId))
+    return void badRequest(res, "noteId must be a uuid");
 
   const ok = await store.insertActivity(userId, {
     type,
@@ -503,6 +507,9 @@ app.post("/activity", requireAuth, async (req: Request, res: Response) => {
     token_id: typeof tokenId === "number" ? tokenId : 0,
     tx_hash: txHash,
     handle: type === "send" ? handle : undefined,
+    // Dropped for sends by insertActivity: a note id on a send row would link
+    // the sender to the recipient's note.
+    note_id: noteId,
   });
   if (!ok) return void res.status(500).json({ error: "activity_insert_failed" });
   res.json({ ok: true });

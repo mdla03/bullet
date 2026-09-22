@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import type { Session } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
-import { getMe, postActivity, type PreviousWallet } from "@/lib/api";
+import { getActivity, getMe, postActivity, type PreviousWallet } from "@/lib/api";
 import { KEY_DOMAIN_MESSAGE, signatureToHex } from "@/lib/register";
 import {
   countUnclaimedByPubkey,
@@ -14,6 +14,12 @@ import {
   type BulletKeys,
   type InboxNote,
 } from "@/lib/notes";
+import {
+  clearUnlock,
+  loadUnlock,
+  saveUnlock,
+  touchUnlock,
+} from "@/lib/unlock_cache";
 import { type ClaimPayload } from "@/lib/claim_link";
 import { claimNote } from "@/lib/claim_tx";
 import { isNullifierUsed, nullifierHexFromSecret } from "@/lib/nullifier";
@@ -90,6 +96,10 @@ export function Inbox() {
   const [keys, setKeys] = useState<BulletKeys | null>(null);
   const [notes, setNotes] = useState<InboxNote[] | null>(null);
   const [unlocking, setUnlocking] = useState(false);
+  /** A cached unlock is being restored. Distinct from locked: showing the
+   *  unlock screen here would flash a Freighter prompt at someone who is
+   *  about to be let in without one. */
+  const [restoring, setRestoring] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [claims, setClaims] = useState<Record<string, ClaimStatus>>({});
   const [claimingAll, setClaimingAll] = useState(false);
@@ -152,6 +162,73 @@ export function Inbox() {
     };
   }, [wallet, notes]);
 
+  // Restore a cached unlock. The viewing key survives a reload for as long as
+  // the idle window holds, so returning to the inbox doesn't re-prompt
+  // Freighter every time.
+  useEffect(() => {
+    if (!wallet || keys) return;
+    const cached = loadUnlock();
+    const known = [
+      wallet.bullet_pubkey,
+      ...wallet.previous.map((p) => p.bullet_pubkey),
+    ];
+    // Nothing cached, or the account switched wallets since it was written:
+    // this is a real lock, show the unlock screen.
+    if (!cached || !known.includes(cached.keys.pubKeyHex)) {
+      if (cached) clearUnlock();
+      setRestoring(false);
+      return;
+    }
+    touchUnlock();
+    setAddress(cached.address);
+    setKeys(cached.keys);
+    // Notes load over the network and each unclaimed one costs a chain read,
+    // so this is seconds, not milliseconds. restoring stays true until it
+    // settles, either way: a failure here still needs the unlock screen.
+    loadNotes(cached.keys, cached.address)
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setRestoring(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wallet]);
+
+  function lock() {
+    clearUnlock();
+    setKeys(null);
+    setNotes(null);
+    setAddress("");
+    setRestoring(false); // a lock is the one state that should show the prompt
+  }
+
+  // Idle timeout. Any activity pushes the deadline out; once it passes, the
+  // inbox drops the key and goes back to the unlock screen.
+  useEffect(() => {
+    if (!keys) return;
+    let lastBump = Date.now();
+    const bump = () => {
+      const now = Date.now();
+      if (now - lastBump < 30_000) return; // deadline is 5 min, 30s is precise enough
+      lastBump = now;
+      touchUnlock();
+    };
+    const events = ["pointerdown", "keydown", "mousemove", "scroll", "focus"];
+    events.forEach((e) => window.addEventListener(e, bump, { passive: true }));
+    const timer = setInterval(() => {
+      // A claim in flight (proving, or waiting on a Freighter signature) can
+      // run past the window with no page activity. Count it as activity.
+      const busy =
+        claimingAll ||
+        Object.values(claims).some((c) =>
+          ["proving", "signing", "submitting"].includes(c.state)
+        );
+      if (busy) touchUnlock();
+      else if (!loadUnlock()) lock();
+    }, 15_000);
+    return () => {
+      events.forEach((e) => window.removeEventListener(e, bump));
+      clearInterval(timer);
+    };
+  }, [keys, claims, claimingAll]);
+
   async function unlock() {
     if (!wallet) return;
     setError("");
@@ -183,6 +260,7 @@ export function Inbox() {
 
       setAddress(addr);
       setKeys(derived);
+      saveUnlock(addr, derived);
       await loadNotes(derived, addr);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -221,6 +299,20 @@ export function Inbox() {
   // never shows a Claim button that would fail with NullifierUsed (#6).
   async function loadNotes(k: BulletKeys, source: string) {
     const list = await fetchNotes(k);
+    // Tx hashes for claims made in earlier sessions, fetched alongside the
+    // chain reads below rather than before them. Best-effort: without it a
+    // claimed note still renders, just without its explorer link.
+    const claimTxs = getActivity()
+      .then((items) => {
+        const byNote: Record<string, string> = {};
+        for (const a of items) {
+          // Ordered newest first, so the first hit is the most recent claim.
+          if (a.type === "claim" && a.note_id && a.tx_hash && !byNote[a.note_id])
+            byNote[a.note_id] = a.tx_hash;
+        }
+        return byNote;
+      })
+      .catch(() => ({}) as Record<string, string>);
     const spent = await Promise.all(
       list.map(async (n) => {
         if (n.claimedAt) return false;
@@ -234,14 +326,16 @@ export function Inbox() {
         }
       })
     );
+    const txByNote = await claimTxs;
     const now = new Date().toISOString();
     setNotes(
       list.map((n, i) => {
+        const withTx = { ...n, claimTx: txByNote[n.id] };
         if (spent[i] && !n.claimedAt) {
           markClaimed(n.id); // best-effort DB catch-up
-          return { ...n, claimedAt: now };
+          return { ...withTx, claimedAt: now };
         }
-        return n;
+        return withTx;
       })
     );
   }
@@ -349,8 +443,8 @@ export function Inbox() {
       }
 
       set({ state: "done", tx: hash });
-      markClaimed(note.id, hash); // best-effort; the nullifier is the real record
-      postActivity({ type: "claim", amount: toStroops(note.payload), tokenId: p.tokenId ?? 0, txHash: hash });
+      markClaimed(note.id); // best-effort; the nullifier is the real record
+      postActivity({ type: "claim", amount: toStroops(note.payload), tokenId: p.tokenId ?? 0, txHash: hash, noteId: note.id });
       return true;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -447,6 +541,19 @@ export function Inbox() {
       })}
     </div>
   );
+
+  // Restoring a cached unlock. Same skeleton as the session/wallet load above,
+  // so the inbox arrives in one transition instead of flashing a prompt that
+  // answers itself.
+  if (restoring) {
+    return (
+      <div className="space-y-3 rounded-2xl border border-fog bg-white p-6">
+        <Skeleton className="h-6 w-32" />
+        <Skeleton className="h-4 w-full" />
+        <Skeleton className="h-11 rounded-full" />
+      </div>
+    );
+  }
 
   if (!keys || !notes) {
     return (
@@ -548,7 +655,8 @@ export function Inbox() {
               {notes.slice(0, claimableShown).map((note) => {
                 const status = claims[note.id];
                 const claimed = !!note.claimedAt || status?.state === "done";
-                const claimTx = note.claimTx ?? (status?.state === "done" ? status.tx : null);
+                // This session's claim, else one recorded by an earlier one.
+                const claimTx = status?.state === "done" ? status.tx : note.claimTx;
                 const busy =
                   status &&
                   (status.state === "proving" ||
