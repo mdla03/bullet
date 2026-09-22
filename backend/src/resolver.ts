@@ -14,6 +14,7 @@ import { githubUserExists } from "./github.js";
 import { requireAuth, serviceClient } from "./supabase.js";
 import { verifyLinkWalletSig } from "./verify.js";
 import * as StellarSdk from "@stellar/stellar-sdk";
+import { CONTRACT_ID, ADMIN_KEY } from "./chain_config.js";
 
 const app = express();
 // CORS allowlist (M3). Reflecting any origin with credentials is unsafe and
@@ -51,7 +52,7 @@ app.use(
 );
 app.use(express.json());
 
-const CONTRACT_ADDRESS = process.env.ZEEKPAY_CONTRACT_ID ?? "";
+const CONTRACT_ADDRESS = CONTRACT_ID;
 const USDC_SAC = process.env.USDC_SAC_ID ?? "";
 const PORT = parseInt(process.env.PORT ?? process.env.RESOLVER_PORT ?? "3001", 10);
 
@@ -102,7 +103,7 @@ app.get("/health", (_req: Request, res: Response) => {
   let adminPub: string | null = null;
   let adminError: string | null = null;
   try {
-    const k = process.env.ZEEKPAY_ADMIN_KEY;
+    const k = ADMIN_KEY;
     if (!k) adminError = "not set";
     else {
       adminPub = StellarSdk.Keypair.fromSecret(k).publicKey();
@@ -112,10 +113,13 @@ app.get("/health", (_req: Request, res: Response) => {
   }
   res.json({
     ok: true,
-    contractId: process.env.ZEEKPAY_CONTRACT_ID ?? null,
+    contractId: CONTRACT_ID || null,
     adminPub,
     adminError,
-    adminKeyLen: process.env.ZEEKPAY_ADMIN_KEY?.length ?? 0,
+    adminKeyLen: ADMIN_KEY.length,
+    // Deliberately not chain_config's RPC_URL here: this diagnostic wants to
+    // show "default" when neither env var is set, not the concrete fallback
+    // URL chain_config resolves to.
     rpcUrl: process.env.BULLET_RPC_URL ?? process.env.SOROBAN_RPC_URL ?? "default",
     networkPassphrase: process.env.NETWORK_PASSPHRASE ?? "default",
     nodeVersion: process.version,
@@ -190,8 +194,8 @@ app.get("/resolve", rateLimit(20, 60 * 1000), async (req: Request, res: Response
 
   // Every enabled handle type's parse() (shared/src/handles.ts) gets a shot at
   // the raw query, so "torvalds", "@torvalds" and "github:torvalds" all reach
-  // the same github:torvalds row. X ("@name") and email are just two of the
-  // types in this loop now, parsing exactly as they always did.
+  // the same github:torvalds row. X accepts both "@name" and "x:name" via its
+  // own parse(), and email is just another type in this loop.
   const candidates = [
     ...new Set(
       enabledHandleTypes()
@@ -414,6 +418,19 @@ app.get("/invites", requireAuth, async (req: Request, res: Response) => {
   const userId = (req as Request & { userId?: string }).userId!;
   const items = await invite.listInvitesForSender(userId);
   res.json({ items });
+});
+
+// Called from frontend/src/lib/invite_claim.ts's claimInvite, right after the
+// custody-forward (TX B) transfer succeeds, so the sender's invite list stops
+// showing it as pending without waiting on the separate /notes/mark-claimed
+// call Inbox.tsx also makes afterward.
+app.post("/invite/mark-claimed", requireAuth, async (req: Request, res: Response) => {
+  const userId = (req as Request & { userId?: string }).userId!;
+  const { inviteId } = req.body as { inviteId?: string };
+  if (!inviteId) return void badRequest(res, "inviteId required");
+  const ok = await store.markInviteClaimedIfOwned(userId, inviteId);
+  if (!ok) return void res.status(404).json({ error: "not_yours_or_missing" });
+  res.json({ ok: true });
 });
 
 // ── /notes/mark-claimed: caller-owned note only (writes are RLS-locked) ───────

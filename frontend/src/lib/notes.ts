@@ -56,8 +56,10 @@ export interface InboxNote {
    * Stellar secret (S…); the recipient uses it to sign the claim+forward tx. */
   custodyStellarSecret?: string;
   inviteId?: string;
-  /** Transaction that claimed this note, when a claim row records it. Lets a
-   *  claim from an earlier session still link to the explorer. */
+  /** Transaction that claimed this note, when a claim row records it (joined
+   *  from `activity.note_id` in Inbox.tsx's loadNotes, not stored here). Lets
+   *  a claim from an earlier session still link to the explorer without
+   *  putting a tx hash on this publicly-readable table. */
   claimTx?: string;
 }
 
@@ -173,7 +175,9 @@ export async function fetchNotes(keys: BulletKeys): Promise<InboxNote[]> {
 }
 
 /** Stamp a note claimed so it renders as history instead of claimable.
- * Goes through the backend since notes.UPDATE is RLS-locked to service_role. */
+ * Goes through the backend since notes.UPDATE is RLS-locked to service_role.
+ * The explorer link comes from activity.note_id (see Inbox.tsx's loadNotes),
+ * which doesn't sit on this publicly-readable table. */
 export async function markClaimed(id: string): Promise<void> {
   const { apiFetch } = await import("./api");
   try {

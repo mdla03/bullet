@@ -23,6 +23,7 @@ import {
 import { type ClaimPayload } from "@/lib/claim_link";
 import { claimNote } from "@/lib/claim_tx";
 import { isNullifierUsed, nullifierHexFromSecret } from "@/lib/nullifier";
+import { humanizeChainError } from "@/lib/chain_errors";
 import {
   ArrowDownLeftIcon,
   CheckIcon,
@@ -32,6 +33,7 @@ import {
   WalletIcon,
 } from "@/components/icons";
 import { Skeleton } from "@/components/Skeleton";
+import { ErrorDetails } from "@/components/ErrorDetails";
 
 const PAGE_SIZE = 5;
 import { proveBrowser } from "@/lib/prove_browser";
@@ -51,7 +53,7 @@ function shortAddr(a: string): string {
 
 type ClaimStatus =
   | { state: "proving" }
-  | { state: "signing" }
+  | { state: "signing"; detail?: string }
   | { state: "submitting" }
   | { state: "done"; tx: string }
   | { state: "error"; message: string };
@@ -383,11 +385,15 @@ export function Inbox() {
       set({ state: "signing" });
       let hash: string;
       if (note.inviteId && note.custodyStellarSecret) {
-        // Invite: custody wallet claims + forwards to the user's real wallet
-        // in one tx. No Freighter prompt needed.
-        set({ state: "submitting" });
+        // Invite: custody wallet claims into custody, then forwards to the
+        // user's real wallet. The forward can need a trustline on that
+        // wallet first, same exposure as the direct claim path; only the
+        // user's own wallet can open it, so this can still prompt Freighter
+        // even though the two claim/forward txs themselves don't.
+        const { freighterSignTransaction } = await import("@/lib/freighter");
         const rdHexInv = BigInt(p.recipientDigest).toString(16).padStart(64, "0");
         hash = await claimInvite(
+          note.inviteId,
           note.custodyStellarSecret,
           address,
           proof_a,
@@ -399,7 +405,15 @@ export function Inbox() {
           BigInt(p.amount),
           p.tokenId ?? 0,
           amountCommitmentX,
-          amountCommitmentY
+          amountCommitmentY,
+          async (xdr) => {
+            set({ state: "submitting" });
+            return freighterSignTransaction(
+              xdr,
+              process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ?? "Test SDF Network ; September 2015"
+            );
+          },
+          (label) => set({ state: "signing", detail: label })
         );
       } else {
         const { freighterSignTransaction } = await import("@/lib/freighter");
@@ -423,7 +437,8 @@ export function Inbox() {
           },
           p.tokenId ?? 0,
           amountCommitmentX,
-          amountCommitmentY
+          amountCommitmentY,
+          (label) => set({ state: "signing", detail: label })
         );
       }
 
@@ -543,7 +558,6 @@ export function Inbox() {
   if (!keys || !notes) {
     return (
       <div className="space-y-4">
-        {strandedBanner}
         <div className="space-y-4 rounded-2xl border border-fog bg-white p-6">
           <h2 className="text-xl font-bold tracking-tight">Unlock inbox</h2>
           <button
@@ -561,7 +575,7 @@ export function Inbox() {
         </div>
         {error && (
           <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
-            {error}
+            <ErrorDetails message={error} />
           </div>
         )}
       </div>
@@ -585,7 +599,6 @@ export function Inbox() {
 
   return (
     <div className="space-y-4">
-      {strandedBanner}
       <div className="overflow-hidden rounded-2xl border border-fog bg-white">
         <div className="flex items-center justify-between gap-3 px-5 py-4">
           <div className="min-w-0">
@@ -684,7 +697,8 @@ export function Inbox() {
                     ) : busy ? (
                       <span className="flex items-center gap-2 text-xs text-graphite">
                         <LoaderIcon className="h-4 w-4 animate-spin" />
-                        {CLAIM_LABELS[status.state]}
+                        {(status.state === "signing" && status.detail) ||
+                          CLAIM_LABELS[status.state]}
                       </span>
                     ) : (
                       <button
@@ -696,7 +710,15 @@ export function Inbox() {
                       </button>
                     )}
                     {status?.state === "error" && (
-                      <p className="w-full text-xs text-red-700">{status.message}</p>
+                      <div className="w-full text-xs text-red-700">
+                        <ErrorDetails
+                          message={humanizeChainError(
+                            status.message,
+                            TOKEN_LABELS[note.payload.tokenId ?? 0] ?? "USDC"
+                          )}
+                          details={status.message}
+                        />
+                      </div>
                     )}
                   </li>
                 );
@@ -725,9 +747,11 @@ export function Inbox() {
         )}
       </div>
 
+      {strandedBanner}
+
       {error && (
         <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error}
+          <ErrorDetails message={error} />
         </div>
       )}
     </div>

@@ -160,18 +160,28 @@ export async function getUser(userId: string): Promise<UserProfile | null> {
   };
 }
 
+/** Every bullet pubkey (current + previous) this user's wallet has ever
+ *  published, or null if they have no wallet linked. Shared ownership lookup
+ *  for markNoteClaimedIfOwned and markInviteClaimedIfOwned, which both need
+ *  "does this user's wallet own X" before touching anything. */
+async function ownedPubkeys(userId: string): Promise<string[] | null> {
+  const { data: wallet } = await serviceClient
+    .from("wallets")
+    .select("bullet_pubkey, previous")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (!wallet?.bullet_pubkey) return null;
+  return allPubkeys(wallet);
+}
+
 /** Mark a note claimed only if it's addressed to the caller's own wallet
  * bullet_pubkey. Prevents griefing under the RLS-locked notes table. */
 export async function markNoteClaimedIfOwned(
   userId: string,
   noteId: string
 ): Promise<boolean> {
-  const { data: wallet } = await serviceClient
-    .from("wallets")
-    .select("bullet_pubkey, previous")
-    .eq("user_id", userId)
-    .maybeSingle();
-  if (!wallet?.bullet_pubkey) return false;
+  const pubkeys = await ownedPubkeys(userId);
+  if (!pubkeys) return false;
 
   // Previous keys included: claiming a note stranded on an old wallet must
   // still be able to stamp it claimed.
@@ -179,7 +189,58 @@ export async function markNoteClaimedIfOwned(
     .from("notes")
     .update({ claimed_at: new Date().toISOString() })
     .eq("id", noteId)
-    .in("recipient_pubkey", allPubkeys(wallet))
+    .in("recipient_pubkey", pubkeys)
+    .select("id, invite_id")
+    .maybeSingle();
+  if (error || !data) return false;
+
+  // Invite-sourced notes carry invite_id, linking back to the pending_invites
+  // row that GET /invites reads. Without this, the sender's "Sent invites"
+  // list shows the invite as still pending forever, even after the recipient
+  // claims it here, because nothing else ever stamps that row's claimed_at.
+  if (data.invite_id) {
+    await serviceClient
+      .from("pending_invites")
+      .update({ claimed_at: new Date().toISOString() })
+      .eq("id", data.invite_id)
+      .is("claimed_at", null);
+  }
+  return true;
+}
+
+/** Mark a pending_invites row claimed directly, called from the custody-forward
+ *  claim path (frontend/src/lib/invite_claim.ts's claimInvite, right after the
+ *  TX B transfer succeeds) rather than through a notes-row update. That path
+ *  doesn't touch the notes table at all, so markNoteClaimedIfOwned's cascade
+ *  above never fires for it — this is its own, earlier stamp, not a
+ *  duplicate of that one (both end up no-ops on a second call, since this
+ *  only updates while claimed_at is still null).
+ *
+ *  Ownership check: a notes row with this invite_id addressed to the
+ *  caller's own wallet is proof this invite was actually delivered to them
+ *  (deliverInvitesFor only ever creates that row for the matched handle's
+ *  owner) — same shape of check as markNoteClaimedIfOwned, entered from the
+ *  other side. */
+export async function markInviteClaimedIfOwned(
+  userId: string,
+  inviteId: string
+): Promise<boolean> {
+  const pubkeys = await ownedPubkeys(userId);
+  if (!pubkeys) return false;
+
+  const { data: note } = await serviceClient
+    .from("notes")
+    .select("id")
+    .eq("invite_id", inviteId)
+    .in("recipient_pubkey", pubkeys)
+    .maybeSingle();
+  if (!note) return false;
+
+  const { data, error } = await serviceClient
+    .from("pending_invites")
+    .update({ claimed_at: new Date().toISOString() })
+    .eq("id", inviteId)
+    .is("claimed_at", null)
     .select("id")
     .maybeSingle();
   if (error) return false;

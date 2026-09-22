@@ -2,11 +2,17 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import type { Session } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 import { getMe } from "@/lib/api";
-import { ChevronDownIcon, LogOutIcon, RefreshIcon } from "@/components/icons";
+import {
+  ChevronDownIcon,
+  InboxIcon,
+  LogOutIcon,
+  RefreshIcon,
+  SendIcon,
+} from "@/components/icons";
 
 export default function IslandNav() {
   const [scrolled, setScrolled] = useState(false);
@@ -18,6 +24,7 @@ export default function IslandNav() {
   const lastY = useRef(0);
   const menuRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
     const onScroll = () => {
@@ -33,11 +40,25 @@ export default function IslandNav() {
 
   useEffect(() => {
     const supabase = createClient();
-    supabase.auth.getSession().then(({ data }) => setSession(data.session));
+    // Belt-and-suspenders: if getSession() never settles (hydration hiccup,
+    // dropped promise, slow network), stop treating the header as "loading"
+    // after 1.5s so it can't stay blank forever. Cleared below the moment the
+    // real session arrives, so the normal fast path never flashes.
+    const fallback = setTimeout(() => {
+      setSession((current) => (current === undefined ? null : current));
+    }, 1500);
+    supabase.auth
+      .getSession()
+      .then(({ data }) => setSession(data.session))
+      .catch(() => setSession(null))
+      .finally(() => clearTimeout(fallback));
     const { data: sub } = supabase.auth.onAuthStateChange((_e, s) =>
       setSession(s)
     );
-    return () => sub.subscription.unsubscribe();
+    return () => {
+      clearTimeout(fallback);
+      sub.subscription.unsubscribe();
+    };
   }, []);
 
   const refreshUnread = useCallback(async () => {
@@ -72,6 +93,12 @@ export default function IslandNav() {
   }, [menuOpen]);
 
   const signedIn = !!session;
+
+  function navIconClass(active: boolean): string {
+    return `flex items-center justify-center rounded-full bg-paper px-2.5 py-2.5 text-ink transition-colors hover:bg-white ${
+      active ? "bg-white" : ""
+    }`;
+  }
 
   async function signOut() {
     const { clearUnlock } = await import("@/lib/unlock_cache");
@@ -119,24 +146,42 @@ export default function IslandNav() {
           <>
             <Link
               href="/send"
-              className="rounded-full bg-paper px-5 py-2 text-sm font-semibold text-ink transition-colors hover:bg-white"
+              aria-label="Send"
+              title="Send"
+              onClick={(e) => {
+                if (pathname === "/send") {
+                  e.preventDefault();
+                  window.dispatchEvent(new CustomEvent("bullet:reset-send"));
+                }
+              }}
+              className={navIconClass(pathname === "/send")}
             >
-              Send
+              <SendIcon className="h-4 w-4 translate-y-[1px] -translate-x-[1px]" />
+            </Link>
+            <Link
+              href="/inbox"
+              aria-label={unread > 0 ? `Inbox, ${unread} unread` : "Inbox"}
+              title="Inbox"
+              className={`relative ${navIconClass(pathname === "/inbox")}`}
+            >
+              <InboxIcon className="h-4 w-4" />
+              {unread > 0 && (
+                <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-ink text-paper ring-2 ring-paper px-1 font-mono text-[10px]">
+                  {unread > 99 ? "99+" : unread}
+                </span>
+              )}
             </Link>
             <div ref={menuRef} className="relative">
               <button
                 onClick={() => setMenuOpen((o) => !o)}
                 aria-haspopup="menu"
                 aria-expanded={menuOpen}
-                aria-label={unread > 0 ? `Menu, ${unread} unread` : "Menu"}
+                aria-label="Menu"
                 className="relative flex items-center rounded-full p-2 text-paper/80 transition-colors hover:bg-white/10 hover:text-paper"
               >
                 <ChevronDownIcon
                   className={`h-4 w-4 transition-transform ${menuOpen ? "rotate-180" : ""}`}
                 />
-                {unread > 0 && (
-                  <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-paper ring-2 ring-ink" />
-                )}
               </button>
               <div
                 role="menu"
@@ -146,19 +191,6 @@ export default function IslandNav() {
                     : "pointer-events-none scale-95 opacity-0 -translate-y-1"
                 }`}
               >
-                <Link
-                  href="/inbox"
-                  role="menuitem"
-                  onClick={() => setMenuOpen(false)}
-                  className="flex items-center justify-between px-4 py-2.5 text-sm font-medium hover:bg-paper"
-                >
-                  Inbox
-                  {unread > 0 && (
-                    <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-ink px-1.5 text-[11px] font-semibold leading-none text-paper">
-                      {unread > 99 ? "99+" : unread}
-                    </span>
-                  )}
-                </Link>
                 <Link
                   href="/account"
                   role="menuitem"
@@ -190,7 +222,9 @@ export default function IslandNav() {
             </div>
           </>
         )}
-        {/* ponytail: undefined = loading; don't flash Sign in before we know. */}
+        {/* ponytail: undefined = loading, don't flash Sign in before we know;
+            the effect above guarantees session settles to null or a real
+            session within 1.5s, so this slot is never blank for long. */}
         {session === null && (
           <Link
             href="/register"

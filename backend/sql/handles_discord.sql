@@ -18,38 +18,29 @@
 --   the unique_violation swallow are all unchanged from handles_avatar.sql.
 --
 -- FIELD SOURCE (what identity_data carries for a Discord identity):
--- Supabase's docs page (https://supabase.com/docs/guides/auth/social-login/
--- auth-discord, fetched via search_docs 2026-09-14) covers app setup and the
--- signInWithOAuth() call but does not enumerate identity_data's keys per
--- provider; the generic "Identities" doc page only documents the
--- provider_id/user_id/identity_data envelope, not field names inside it. No
--- documented source exists for the concrete field name, so this is GoTrue
--- source knowledge (supabase/auth provider_discord.go), not a live-verified
--- fact the way handles_github.sql's branch was (see that file's "PROVEN END
--- TO END" note from a real GitHub sign-in). Treat this branch the same way
--- until a real Discord sign-in confirms it end to end:
+-- LIVE-VERIFIED 2026-09-22 from a real Discord sign-in (sendbulletxyz,
+-- provider_id 1548525755007242271, project fxtxvierohxvvusmhkoa), the same
+-- way handles_github.sql's branch was proven end to end. identity_data's
+-- top-level keys were: iss, sub, name, email, picture, full_name, avatar_url,
+-- provider_id, custom_claims (nested: global_name only), email_verified,
+-- phone_verified. No user_name or preferred_username key exists for this
+-- provider (unlike github and x, which set both).
 --
---   GoTrue's Discord provider calls Discord's /users/@me, which returns
---   (among others) `id`, `username`, `global_name`, `avatar`, `email`,
---   `verified`. It maps `username` (the single, lowercase-friendly handle
---   Discord kept when it dropped discriminators in 2023) onto the identity's
---   Name claim, i.e. identity_data->>'name'; there is no separate
---   `user_name` key for this provider the way there is for github and x
---   (those set both). `global_name` is the free-text display name shown in
---   the Discord client (can contain spaces, mixed case, any Unicode, is not
---   unique) and lands under identity_data->'custom_claims'->>'global_name';
---   it is deliberately NOT used here for the same reason a display name is
---   never used as a handle: it cannot satisfy the charset guard and it does
---   not uniquely identify the account.
+--   `name` held "sendbulletxyz#0" - GoTrue's Discord provider still appends
+--   "#<discriminator>" even under Discord's post-discriminator username
+--   system, where "0" means "no discriminator" rather than being omitted. The
+--   unique, charset-safe username is recovered by stripping that suffix:
+--   split_part(identity_data->>'name', '#', 1). This handles both the legacy
+--   "user#1234" form and the new-system "user#0" form identically.
 --
---   The branch below coalesces name and user_name (checking user_name first,
---   matching the github/x branches' coalesce order) so it keeps working if a
---   future GoTrue revision starts also setting user_name for Discord; today
---   only name is expected to be populated.
---
--- WHEN THIS GETS LIVE-VERIFIED: re-run the same query handles_github.sql
--- used, swapping provider = 'discord', and record the resulting row here,
--- the way that file records its first real GitHub sign-in.
+--   `full_name` held "sendbulletxyz" and looked like a clean username, but
+--   per GoTrue's Discord provider source that field carries Discord's
+--   *global* (display) name: free text, not unique, can contain spaces or
+--   Unicode. It only happened to equal the username on this test account -
+--   custom_claims.global_name ("Bullet" here) is the actual global name and
+--   differs from full_name, which would not be true if full_name were really
+--   sourced from global_name. Either way, full_name is not a safe handle
+--   source and must not be used.
 --
 -- ── the trigger function ─────────────────────────────────────────────────────
 --
@@ -82,9 +73,10 @@ begin
   elsif new.provider = 'discord' then
     -- See this file's header FIELD SOURCE note. Namespaced for the same
     -- collision reason as github: a bare "alice" from Discord must not read
-    -- as the same handle as a bare "alice" from GitHub.
-    v_handle := 'discord:' || lower(coalesce(new.identity_data->>'user_name',
-                                             new.identity_data->>'name'));
+    -- as the same handle as a bare "alice" from GitHub. split_part strips
+    -- GoTrue's "#<discriminator>" suffix (see FIELD SOURCE for why full_name
+    -- is not used instead).
+    v_handle := 'discord:' || lower(split_part(new.identity_data->>'name', '#', 1));
   else
     return new;
   end if;

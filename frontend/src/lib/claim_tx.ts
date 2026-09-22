@@ -1,5 +1,6 @@
 import * as StellarSdk from "@stellar/stellar-sdk";
 import { buildClaimOperation } from "./claim_encode";
+import { ensureTrustline } from "./trustline";
 
 const RPC_URL =
   process.env.NEXT_PUBLIC_SOROBAN_RPC_URL ?? "https://soroban-testnet.stellar.org";
@@ -18,6 +19,9 @@ const NETWORK_PASSPHRASE =
  * coordinates of the Pedersen amount commitment (publicSignals[5]/[6] from the
  * claim circuit); they are concatenated BE(X) || BE(Y) into the contract's
  * 64-byte `amount_commitment` argument.
+ * `onStatus`, if given, is called with short progress labels (e.g. "Adding
+ * USDT to your wallet", "Claiming") for the UI to show alongside its own
+ * step indicator.
  * Returns the transaction hash on SUCCESS.
  */
 export async function claimNote(
@@ -32,8 +36,15 @@ export async function claimNote(
   signTx: (xdr: string) => Promise<string>,
   tokenId: number,
   amountCommitmentX: string,
-  amountCommitmentY: string
+  amountCommitmentY: string,
+  onStatus?: (label: string) => void
 ): Promise<string> {
+  // The claim lands the asset directly in `connectedAddress`. Non-native
+  // assets need a trustline first, or the SAC rejects the transfer with
+  // "trustline entry is missing" deep inside a HostError diagnostic dump.
+  await ensureTrustline(tokenId, connectedAddress, signTx, onStatus);
+  onStatus?.("Claiming");
+
   const rpc = new StellarSdk.rpc.Server(RPC_URL);
   const contract = new StellarSdk.Contract(CONTRACT_ID);
 

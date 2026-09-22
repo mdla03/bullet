@@ -15,15 +15,13 @@
 
 import * as StellarSdk from "@stellar/stellar-sdk";
 import { buildClaimOperation } from "./claim_encode";
+import { ensureTrustline } from "./trustline";
+import { TOKEN_SAC } from "./tokens";
 
 const RPC_URL =
   process.env.NEXT_PUBLIC_SOROBAN_RPC_URL ??
   "https://soroban-testnet.stellar.org";
 const CONTRACT_ID = process.env.NEXT_PUBLIC_CONTRACT_ID ?? "";
-const USDC_SAC = process.env.NEXT_PUBLIC_USDC_SAC_ID ?? "";
-const XLM_SAC = process.env.NEXT_PUBLIC_XLM_SAC_ID ?? "";
-const USDT_SAC = process.env.NEXT_PUBLIC_USDT_SAC_ID ?? "";
-const TOKEN_SAC: Record<number, string> = { 0: USDC_SAC, 1: XLM_SAC, 2: USDT_SAC };
 const NETWORK_PASSPHRASE =
   process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ?? StellarSdk.Networks.TESTNET;
 
@@ -40,8 +38,15 @@ const NETWORK_PASSPHRASE =
  * coordinates of the Pedersen amount commitment (publicSignals[5]/[6] from
  * the claim circuit), concatenated BE(X) || BE(Y) into the contract's
  * 64-byte `amount_commitment` argument.
+ * `signTx` signs on behalf of `userRealWallet` (e.g. via Freighter): the
+ * custody keypair signs both on-chain txs, but the forward's destination
+ * trustline (if one is needed) can only be opened by the account it belongs
+ * to, so that one step needs the user's own wallet signature.
+ * `inviteId` is the pending_invites row id (note.inviteId), used only to
+ * tell the backend which row to stamp claimed_at on once TX B lands.
  */
 export async function claimInvite(
+  inviteId: string,
   custodyStellarSecret: string,
   userRealWallet: string,
   proofA: string,
@@ -53,7 +58,9 @@ export async function claimInvite(
   amount: bigint,
   tokenId: number,
   amountCommitmentX: string,
-  amountCommitmentY: string
+  amountCommitmentY: string,
+  signTx: (xdr: string) => Promise<string>,
+  onStatus?: (label: string) => void
 ): Promise<string> {
   const rpc = new StellarSdk.rpc.Server(RPC_URL);
   const custody = StellarSdk.Keypair.fromSecret(custodyStellarSecret);
@@ -94,8 +101,13 @@ export async function claimInvite(
     throw new Error(`invite claim ended with status: ${finalA.status}`);
   }
 
-  // TX B: forward tokens from custody to the recipient's real wallet.
-  const sacAddr = TOKEN_SAC[tokenId] ?? USDC_SAC;
+  // TX B: forward tokens from custody to the recipient's real wallet. Same
+  // trustline exposure as the direct claim path (claim_tx.ts's claimNote):
+  // a non-native transfer into a wallet that never opted into the asset
+  // fails at the SAC with "trustline entry is missing", so open it first.
+  await ensureTrustline(tokenId, userRealWallet, signTx, onStatus);
+
+  const sacAddr = TOKEN_SAC[tokenId] ?? TOKEN_SAC[0];
   const tokenContract = new StellarSdk.Contract(sacAddr);
   const transferOp = tokenContract.call(
     "transfer",
@@ -121,5 +133,21 @@ export async function claimInvite(
   if (finalB.status !== "SUCCESS") {
     throw new Error(`invite forward ended with status: ${finalB.status}`);
   }
+
+  // Stamp pending_invites.claimed_at now, at the moment the custody-forward
+  // transfer actually succeeds, instead of relying only on the separate,
+  // later markClaimed(note.id) call in Inbox.tsx (which cascades to this
+  // same row via notes.invite_id, but is itself best-effort and can be
+  // skipped, e.g. if the tab closes right after this resolves).
+  try {
+    const { apiFetch } = await import("./api");
+    await apiFetch("/invite/mark-claimed", {
+      method: "POST",
+      body: JSON.stringify({ inviteId }),
+    });
+  } catch {
+    // Best-effort. The on-chain transfer (resB.hash) is the real record.
+  }
+
   return resA.hash;
 }

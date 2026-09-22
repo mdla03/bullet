@@ -1,12 +1,23 @@
 import type { Metadata } from "next";
+import type { SVGProps } from "react";
 import { Geist_Mono, Inter } from "next/font/google";
 import Link from "next/link";
 import IslandNav from "@/components/IslandNav";
-import { GithubIcon, XBrandIcon } from "@/components/icons";
+import { DiscordIcon, GithubIcon, XBrandIcon } from "@/components/icons";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono" });
+
+const SOCIAL_LINKS: {
+  href: string;
+  label: string;
+  Icon: (props: SVGProps<SVGSVGElement>) => React.ReactNode;
+}[] = [
+  { href: "https://x.com/BulletPayFi", label: "Bullet on X", Icon: XBrandIcon },
+  { href: "https://discord.gg/SDTyKfteF", label: "Discord community", Icon: DiscordIcon },
+  { href: "https://github.com/mdla03/bullet", label: "Bullet on GitHub", Icon: GithubIcon },
+];
 
 export const metadata: Metadata = {
   title: "bullet · payments without a trace",
@@ -18,11 +29,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body
-        className={`${inter.variable} ${geistMono.variable} min-h-screen bg-paper font-sans text-ink antialiased`}
+        className={`${inter.variable} ${geistMono.variable} flex min-h-screen flex-col bg-paper font-sans text-ink antialiased`}
       >
         <IslandNav />
-        <main className="mx-auto max-w-5xl px-4 pb-12 pt-28">{children}</main>
-        <footer className="border-t border-fog">
+        <main className="mx-auto w-full max-w-5xl flex-1 px-4 pb-12 pt-28">{children}</main>
+        <footer className="mt-auto border-t border-fog">
           <div className="mx-auto flex max-w-5xl flex-col items-center justify-between gap-4 px-4 py-8 sm:flex-row">
             <Link href="/" className="flex items-center">
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -35,24 +46,18 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               >
                 Privacy
               </Link>
-              <a
-                href="https://x.com/BulletPayFi"
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label="Bullet on X"
-                className="transition-colors hover:text-ink"
-              >
-                <XBrandIcon className="h-4 w-4" />
-              </a>
-              <a
-                href="https://github.com/mdla03/bullet"
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label="Bullet on GitHub"
-                className="transition-colors hover:text-ink"
-              >
-                <GithubIcon className="h-4 w-4" />
-              </a>
+              {SOCIAL_LINKS.map(({ href, label, Icon }) => (
+                <a
+                  key={href}
+                  href={href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label={label}
+                  className="transition-colors hover:text-ink"
+                >
+                  <Icon className="h-4 w-4" />
+                </a>
+              ))}
             </nav>
           </div>
         </footer>
