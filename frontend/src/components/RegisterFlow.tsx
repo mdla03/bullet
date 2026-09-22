@@ -270,6 +270,8 @@ export function RegisterFlow({
   }
 
   async function signOut() {
+    const { clearUnlock } = await import("@/lib/unlock_cache");
+    clearUnlock();
     await supabase.auth.signOut();
     setMe(null);
     setAddress("");

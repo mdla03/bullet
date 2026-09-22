@@ -74,6 +74,8 @@ export default function IslandNav() {
   const signedIn = !!session;
 
   async function signOut() {
+    const { clearUnlock } = await import("@/lib/unlock_cache");
+    clearUnlock();
     await createClient().auth.signOut();
     setMenuOpen(false);
     router.replace("/");
