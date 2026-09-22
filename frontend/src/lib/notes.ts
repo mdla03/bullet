@@ -176,15 +176,14 @@ export async function fetchNotes(keys: BulletKeys): Promise<InboxNote[]> {
 
 /** Stamp a note claimed so it renders as history instead of claimable.
  * Goes through the backend since notes.UPDATE is RLS-locked to service_role.
- * `tx` still writes notes.claim_tx server-side if passed, but no caller does:
- * the explorer link now comes from activity.note_id (see Inbox.tsx's
- * loadNotes), which doesn't sit on this publicly-readable table. */
-export async function markClaimed(id: string, tx?: string): Promise<void> {
+ * The explorer link comes from activity.note_id (see Inbox.tsx's loadNotes),
+ * which doesn't sit on this publicly-readable table. */
+export async function markClaimed(id: string): Promise<void> {
   const { apiFetch } = await import("./api");
   try {
     await apiFetch("/notes/mark-claimed", {
       method: "POST",
-      body: JSON.stringify({ noteId: id, ...(tx ? { tx } : {}) }),
+      body: JSON.stringify({ noteId: id }),
     });
   } catch {
     // Best-effort. The on-chain nullifier is the real record.

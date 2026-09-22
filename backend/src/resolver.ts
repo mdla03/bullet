@@ -437,9 +437,9 @@ app.post("/invite/mark-claimed", requireAuth, async (req: Request, res: Response
 
 app.post("/notes/mark-claimed", requireAuth, async (req: Request, res: Response) => {
   const userId = (req as Request & { userId?: string }).userId!;
-  const { noteId, tx } = req.body as { noteId?: string; tx?: string };
+  const { noteId } = req.body as { noteId?: string };
   if (!noteId) return void badRequest(res, "noteId required");
-  const ok = await store.markNoteClaimedIfOwned(userId, noteId, typeof tx === "string" ? tx : undefined);
+  const ok = await store.markNoteClaimedIfOwned(userId, noteId);
   if (!ok) return void res.status(404).json({ error: "not_yours_or_missing" });
   res.json({ ok: true });
 });

@@ -173,18 +173,6 @@ describe("markNoteClaimedIfOwned", () => {
     assert.equal(tables.notes.find((r) => r.id === "note_invite")!.claimed_at, null);
     assert.equal(tables.pending_invites.find((r) => r.id === "inv_1")!.claimed_at, null);
   });
-
-  it("persists the claim tx hash on the notes row when given", async () => {
-    const ok = await markNoteClaimedIfOwned("usr_recipient", "note_plain", "tx_abc123");
-    assert.equal(ok, true);
-    assert.equal(tables.notes.find((r) => r.id === "note_plain")!.claim_tx, "tx_abc123");
-  });
-
-  it("leaves claim_tx unset when no tx hash is given", async () => {
-    const ok = await markNoteClaimedIfOwned("usr_recipient", "note_plain");
-    assert.equal(ok, true);
-    assert.equal(tables.notes.find((r) => r.id === "note_plain")!.claim_tx, undefined);
-  });
 });
 
 describe("markInviteClaimedIfOwned", () => {

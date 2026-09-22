@@ -175,14 +175,10 @@ async function ownedPubkeys(userId: string): Promise<string[] | null> {
 }
 
 /** Mark a note claimed only if it's addressed to the caller's own wallet
- * bullet_pubkey. Prevents griefing under the RLS-locked notes table.
- * `tx`, when given, is the claim transaction hash, persisted so the
- * stellar.expert link on a claimed note survives a page refresh instead of
- * only existing in the claiming tab's in-memory state. */
+ * bullet_pubkey. Prevents griefing under the RLS-locked notes table. */
 export async function markNoteClaimedIfOwned(
   userId: string,
-  noteId: string,
-  tx?: string
+  noteId: string
 ): Promise<boolean> {
   const pubkeys = await ownedPubkeys(userId);
   if (!pubkeys) return false;
@@ -191,7 +187,7 @@ export async function markNoteClaimedIfOwned(
   // still be able to stamp it claimed.
   const { data, error } = await serviceClient
     .from("notes")
-    .update({ claimed_at: new Date().toISOString(), ...(tx ? { claim_tx: tx } : {}) })
+    .update({ claimed_at: new Date().toISOString() })
     .eq("id", noteId)
     .in("recipient_pubkey", pubkeys)
     .select("id, invite_id")
