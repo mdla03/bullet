@@ -14,6 +14,12 @@ import {
   type BulletKeys,
   type InboxNote,
 } from "@/lib/notes";
+import {
+  clearUnlock,
+  loadUnlock,
+  saveUnlock,
+  touchUnlock,
+} from "@/lib/unlock_cache";
 import { type ClaimPayload } from "@/lib/claim_link";
 import { claimNote } from "@/lib/claim_tx";
 import { isNullifierUsed, nullifierHexFromSecret } from "@/lib/nullifier";
@@ -150,6 +156,68 @@ export function Inbox() {
     };
   }, [wallet, notes]);
 
+  // Restore a cached unlock. The viewing key survives a reload for as long as
+  // the idle window holds, so returning to the inbox doesn't re-prompt
+  // Freighter every time.
+  useEffect(() => {
+    if (!wallet || keys) return;
+    const cached = loadUnlock();
+    if (!cached) return;
+    const known = [
+      wallet.bullet_pubkey,
+      ...wallet.previous.map((p) => p.bullet_pubkey),
+    ];
+    // Account switched wallets since the cache was written: make them unlock.
+    if (!known.includes(cached.keys.pubKeyHex)) {
+      clearUnlock();
+      return;
+    }
+    touchUnlock();
+    setAddress(cached.address);
+    setKeys(cached.keys);
+    loadNotes(cached.keys, cached.address).catch((e) =>
+      setError(e instanceof Error ? e.message : String(e))
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wallet]);
+
+  function lock() {
+    clearUnlock();
+    setKeys(null);
+    setNotes(null);
+    setAddress("");
+  }
+
+  // Idle timeout. Any activity pushes the deadline out; once it passes, the
+  // inbox drops the key and goes back to the unlock screen.
+  useEffect(() => {
+    if (!keys) return;
+    let lastBump = Date.now();
+    const bump = () => {
+      const now = Date.now();
+      if (now - lastBump < 30_000) return; // deadline is 5 min, 30s is precise enough
+      lastBump = now;
+      touchUnlock();
+    };
+    const events = ["pointerdown", "keydown", "mousemove", "scroll", "focus"];
+    events.forEach((e) => window.addEventListener(e, bump, { passive: true }));
+    const timer = setInterval(() => {
+      // A claim in flight (proving, or waiting on a Freighter signature) can
+      // run past the window with no page activity. Count it as activity.
+      const busy =
+        claimingAll ||
+        Object.values(claims).some((c) =>
+          ["proving", "signing", "submitting"].includes(c.state)
+        );
+      if (busy) touchUnlock();
+      else if (!loadUnlock()) lock();
+    }, 15_000);
+    return () => {
+      events.forEach((e) => window.removeEventListener(e, bump));
+      clearInterval(timer);
+    };
+  }, [keys, claims, claimingAll]);
+
   async function unlock() {
     if (!wallet) return;
     setError("");
@@ -181,6 +249,7 @@ export function Inbox() {
 
       setAddress(addr);
       setKeys(derived);
+      saveUnlock(addr, derived);
       await loadNotes(derived, addr);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

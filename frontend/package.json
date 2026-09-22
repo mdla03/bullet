@@ -8,7 +8,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "tsx --test src/lib/walletconnect.test.ts"
+    "test": "tsx --test src/lib/walletconnect.test.ts src/lib/unlock_cache.test.ts"
   },
   "dependencies": {
     "@noble/curves": "1.9.7",
