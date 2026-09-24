@@ -45,7 +45,7 @@ function insertAt(leaf: string, leafIndex: number): void {
 export function rebuild(): void {
   nodes.clear();
   const all = leaves.list();
-  for (let i = 0; i < all.length; i++) insertAt(all[i], i);
+  all.forEach((leaf, i) => insertAt(leaf, i)); // forEach skips holes
 }
 
 /** Current Merkle root (as decimal string). */
@@ -61,7 +61,7 @@ export interface Path {
 
 /** Merkle path for the leaf at `leafIndex` against the CURRENT tree state. */
 export function pathFor(leafIndex: number): Path {
-  if (leafIndex < 0 || leafIndex >= leaves.count()) {
+  if (leafIndex < 0 || leafIndex >= leaves.count() || leaves.at(leafIndex) === undefined) {
     throw new Error(`leafIndex ${leafIndex} out of range (have ${leaves.count()} leaves)`);
   }
   const pathElements: string[] = [];

@@ -18,6 +18,7 @@ import ed2curve from "ed2curve";
 import { serviceClient } from "./supabase.js";
 import { poseidon } from "./poseidon.js";
 import { RPC_URL, CONTRACT_ID, ADMIN_KEY } from "./chain_config.js";
+import { decimalToHex32, simulateBoolView } from "./chain_view.js";
 
 const HORIZON_URL =
   process.env.HORIZON_URL ?? "https://horizon-testnet.stellar.org";
@@ -262,9 +263,7 @@ export async function deliverInvitesFor(
 export function nullifierHexFromSecret(secretHex: string): string {
   const secretDec = BigInt("0x" + secretHex).toString();
   const dec = poseidon([secretDec]);
-  const h = BigInt(dec).toString(16);
-  if (h.length > 64) throw new Error(`nullifier overflow: ${dec}`);
-  return h.padStart(64, "0");
+  return decimalToHex32(dec);
 }
 
 /** Build the is_nullifier_used call, simulate it against `account`, and read
@@ -276,23 +275,14 @@ async function simulateIsNullifierUsed(
   account: StellarSdk.Account,
   nullifierHex: string
 ): Promise<boolean> {
-  const op = contract.call(
+  return simulateBoolView(
+    rpc,
+    contract,
+    account,
+    NETWORK_PASSPHRASE,
     "is_nullifier_used",
     StellarSdk.xdr.ScVal.scvBytes(Buffer.from(nullifierHex, "hex"))
   );
-  const tx = new StellarSdk.TransactionBuilder(account, {
-    fee: "100",
-    networkPassphrase: NETWORK_PASSPHRASE,
-  })
-    .addOperation(op)
-    .setTimeout(30)
-    .build();
-  const sim = await rpc.simulateTransaction(tx);
-  if (StellarSdk.rpc.Api.isSimulationError(sim)) {
-    throw new Error(sim.error);
-  }
-  const retval = sim.result?.retval;
-  return retval ? StellarSdk.scValToNative(retval) === true : false;
 }
 
 /** Read-only: ask the deployed contract whether this nullifier is spent, via

@@ -8,14 +8,19 @@
 
 import { serviceClient } from "./supabase.js";
 
-/** All leaves ordered by index (position == leafIndex in the tree). */
-export async function loadLeaves(): Promise<string[]> {
+/** All stored leaves with their contract leafIndex, ordered by index. Callers
+ *  must place each at leafIndex, never at its array position: rows can have
+ *  gaps. */
+export async function loadLeaves(): Promise<{ leafIndex: number; commitment: string }[]> {
   const { data, error } = await serviceClient
     .from("merkle_leaves")
     .select("leaf_index, commitment")
     .order("leaf_index", { ascending: true });
   if (error) throw new Error(`loadLeaves: ${error.message}`);
-  return (data ?? []).map((r) => r.commitment as string);
+  return (data ?? []).map((r) => ({
+    leafIndex: r.leaf_index as number,
+    commitment: r.commitment as string,
+  }));
 }
 
 /** Persist one leaf at its index. Idempotent (index is the primary key). */
@@ -27,6 +32,20 @@ export async function appendLeaf(
     .from("merkle_leaves")
     .upsert({ leaf_index: leafIndex, commitment }, { onConflict: "leaf_index" });
   if (error) throw new Error(`appendLeaf: ${error.message}`);
+}
+
+/** Persist several leaves in one round trip. Same idempotent (leaf_index PK)
+ *  upsert semantics as appendLeaf, batched per indexer poll page instead of
+ *  once per leaf. */
+export async function appendLeaves(
+  entries: { leafIndex: number; commitment: string }[]
+): Promise<void> {
+  if (entries.length === 0) return;
+  const { error } = await serviceClient.from("merkle_leaves").upsert(
+    entries.map((e) => ({ leaf_index: e.leafIndex, commitment: e.commitment })),
+    { onConflict: "leaf_index" }
+  );
+  if (error) throw new Error(`appendLeaves: ${error.message}`);
 }
 
 /** Delete all leaves and reset cursor. Used when switching contracts. */

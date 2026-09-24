@@ -16,6 +16,7 @@ import * as leaves from "./leaves.js";
 import * as tree from "./tree.js";
 import * as store from "./merkle_store.js";
 import { RPC_URL, CONTRACT_ID, ADMIN_KEY } from "./chain_config.js";
+import { decimalToHex32, simulateBoolView } from "./chain_view.js";
 
 const NETWORK_PASSPHRASE =
   process.env.NETWORK_PASSPHRASE ?? StellarSdk.Networks.TESTNET;
@@ -42,31 +43,41 @@ let running = false;
 let hydrated = false;
 let timer: ReturnType<typeof setTimeout> | null = null;
 
-/** Rebuild the in-memory tree from the durable Postgres store. Idempotent.
- *  Posts the current root on-chain so claims work immediately after restart. */
+/** Rebuild the in-memory tree from Postgres. Idempotent. Leaves go back to
+ *  their stored leafIndex, not their position in the result, so a gap stays
+ *  a gap instead of shifting every later leaf. */
 export async function hydrate(): Promise<void> {
   const all = await store.loadLeaves();
   leaves.clearAll();
+  for (const { leafIndex, commitment } of all) leaves.setAt(leafIndex, commitment);
+  leaves.flush();
   tree.rebuild();
-  for (let i = 0; i < all.length; i++) {
-    const idx = leaves.insert(all[i]);
-    tree.onLeafInserted(all[i], idx);
-  }
   hydrated = true;
   console.log(`[indexer] hydrated ${all.length} leaf(s) from Postgres`);
-  if (all.length > 0) {
-    try {
-      await postRoot(tree.root());
-      console.log("[indexer] root posted after hydration");
-    } catch (e) {
-      console.error("[indexer] post_root after hydration failed (non-fatal):", String(e).slice(0, 200));
-    }
-  }
 }
 
-/** One poll: fetch new deposit events since the cursor, insert confirmed
- *  leaves (in-memory + Postgres), post the root if anything changed, advance
- *  the cursor. Idempotent — duplicate events are dropped by dedupe. */
+// Pages followed per poll. Each getEvents request scans a bounded ledger
+// window (about 10k ledgers on the public testnet RPC) and returns a cursor to
+// continue from, so a backfill takes several pages even when most are empty.
+const MAX_PAGES = parseInt(process.env.INDEXER_MAX_PAGES ?? "50", 10);
+const PAGE_LIMIT = 200;
+// Leaf indices accepted as permanently missing (deposits older than RPC event
+// retention that were never indexed). Their notes stay unclaimable; any other
+// gap blocks post_root. Comma-separated, e.g. "0,1".
+const LOST_LEAVES = new Set(
+  (process.env.INDEXER_LOST_LEAVES ?? "")
+    .split(",")
+    .filter((x) => x.trim() !== "")
+    .map((x) => parseInt(x, 10))
+);
+
+/** Ledger encoded in an RPC event cursor ("<toid>-<n>", ledger = toid >> 32). */
+function cursorLedger(cursor: string): number {
+  return Number(BigInt(cursor.split("-")[0]) >> 32n);
+}
+
+/** One poll: page through events since the cursor and post the root if it
+ *  matches the chain. Idempotent: re-seen events are no-ops. */
 export async function pollOnce(): Promise<{ inserted: number }> {
   if (!CONTRACT_ID) throw new Error("ZEEKPAY_CONTRACT_ID not set");
   if (!hydrated) await hydrate();
@@ -108,33 +119,107 @@ export async function pollOnce(): Promise<{ inserted: number }> {
   }
 
   let inserted = 0;
-  let maxLedger = start - 1;
-  for (const ev of res.events) {
-    maxLedger = Math.max(maxLedger, ev.ledger);
-    try {
-      if (StellarSdk.scValToNative(ev.topic[0]) !== "deposit") continue;
-      const data = StellarSdk.scValToNative(ev.value) as unknown[];
-      const commitmentBytes = data[0] as Uint8Array;
-      if (!(commitmentBytes instanceof Uint8Array) || commitmentBytes.length === 0)
-        continue;
-      const dec = bytesToDecimal(commitmentBytes);
-      if (leaves.indexOf(dec) !== -1) continue; // already have it
-      const leafIndex = leaves.insert(dec);
-      tree.onLeafInserted(dec, leafIndex);
-      await store.appendLeaf(leafIndex, dec); // durable write-through
-      inserted += 1;
-    } catch (e) {
-      console.error("[indexer] skipped undecodable event:", String(e).slice(0, 200));
+  for (let page = 1; ; page++) {
+    // Decode this page's leaves first; write order (Postgres, then the disk
+    // cache) is applied once below instead of per event.
+    const pageLeaves = new Map<number, string>();
+    for (const ev of res.events) {
+      try {
+        // `note` (transact outputs) takes contract indices exactly like
+        // `deposit`, so both must land in the tree or it gaps.
+        const kind = StellarSdk.scValToNative(ev.topic[0]);
+        if (kind !== "deposit" && kind !== "note") continue;
+        const data = StellarSdk.scValToNative(ev.value) as unknown[];
+        const commitmentBytes = data[0] as Uint8Array;
+        const leafIndex = Number(data[1]); // the contract's own index
+        if (!(commitmentBytes instanceof Uint8Array) || commitmentBytes.length === 0)
+          continue;
+        if (!Number.isSafeInteger(leafIndex) || leafIndex < 0) continue;
+        const dec = bytesToDecimal(commitmentBytes);
+        const have = leaves.at(leafIndex) ?? pageLeaves.get(leafIndex);
+        if (have === dec) continue; // already have it
+        if (have !== undefined)
+          console.warn(`[indexer] leaf ${leafIndex} held a different commitment; replacing it with the on-chain one`);
+        pageLeaves.set(leafIndex, dec);
+        inserted += 1;
+      } catch (e) {
+        console.error("[indexer] skipped undecodable event:", String(e).slice(0, 200));
+      }
     }
+    if (pageLeaves.size > 0) {
+      const batch = [...pageLeaves].map(([leafIndex, commitment]) => ({ leafIndex, commitment }));
+      await store.appendLeaves(batch); // durable write-through, before the disk cache
+      for (const { leafIndex, commitment } of batch) {
+        leaves.setAt(leafIndex, commitment);
+        tree.onLeafInserted(commitment, leafIndex);
+      }
+      leaves.flush(); // one disk write per page, not one per leaf
+    }
+    // This page's leaves are stored, so its ledgers are done. A full page's
+    // cursor can point mid-ledger, so stop one ledger short and let the
+    // already-have check absorb the re-scan.
+    const scanned = Math.min(cursorLedger(res.cursor) - 1, res.latestLedger);
+    if (scanned >= start) await store.setCursor(scanned);
+    const caughtUp =
+      res.events.length < PAGE_LIMIT && cursorLedger(res.cursor) >= res.latestLedger;
+    if (caughtUp || page >= MAX_PAGES) break;
+    res = await rpc.getEvents({ cursor: res.cursor, filters, limit: PAGE_LIMIT });
   }
 
-  if (inserted > 0) {
-    await postRoot(tree.root());
-  }
-  // Advance cursor AFTER post_root succeeds so a failed root post retries
-  // the same event range on the next poll instead of silently skipping it.
-  await store.setCursor(res.events.length > 0 ? maxLedger : latest.sequence);
+  await maybePostRoot(rpc);
   return { inserted };
+}
+
+/** Read a u32/u64 unit variant (e.g. DataKey::Index) from instance storage. */
+async function readInstanceNumber(rpc: StellarSdk.rpc.Server, variant: string): Promise<number> {
+  const entry = await rpc.getContractData(
+    CONTRACT_ID,
+    StellarSdk.xdr.ScVal.scvLedgerKeyContractInstance(),
+    StellarSdk.rpc.Durability.Persistent
+  );
+  for (const e of entry.val.contractData().val().instance().storage() ?? []) {
+    const k = StellarSdk.scValToNative(e.key()) as unknown[];
+    if (Array.isArray(k) && k[0] === variant) return Number(StellarSdk.scValToNative(e.val()));
+  }
+  throw new Error(`contract instance has no ${variant}`);
+}
+
+/** Read-only: does the contract know this root? Simulated (never signed or
+ *  sent) the same way invite.ts checks is_nullifier_used, via the contract's
+ *  public is_known_root view, instead of reading its internal DataKey::Root
+ *  storage layout directly. */
+async function isKnownRoot(rpc: StellarSdk.rpc.Server, rootDec: string): Promise<boolean> {
+  if (!ADMIN_KEY) throw new Error("ZEEKPAY_ADMIN_KEY not set");
+  const contract = new StellarSdk.Contract(CONTRACT_ID);
+  const account = await rpc.getAccount(StellarSdk.Keypair.fromSecret(ADMIN_KEY).publicKey());
+  const rootHex = decimalToHex32(rootDec);
+  return simulateBoolView(
+    rpc,
+    contract,
+    account,
+    NETWORK_PASSPHRASE,
+    "is_known_root",
+    StellarSdk.xdr.ScVal.scvBytes(Buffer.from(rootHex, "hex"))
+  );
+}
+
+/** Post the root only when the tree provably matches the chain (no holes, and
+ *  count == contract Index): a root over a wrong tree strands every note
+ *  placed after the error. Skips the tx when the root is already on-chain. */
+async function maybePostRoot(rpc: StellarSdk.rpc.Server): Promise<void> {
+  const chainIndex = await readInstanceNumber(rpc, "Index");
+  const holes = leaves.missing().filter((i) => !LOST_LEAVES.has(i));
+  if (leaves.count() !== chainIndex || holes.length > 0) {
+    console.error(
+      `[indexer] RECONCILE MISMATCH: tree has ${leaves.count()} slot(s), contract Index is ${chainIndex}, ` +
+        `missing leaves [${holes.slice(0, 20).join(",")}${holes.length > 20 ? ",..." : ""}]. Not posting a root.`
+    );
+    return;
+  }
+  const root = tree.root();
+  if (await isKnownRoot(rpc, root)) return;
+  await postRoot(root);
+  console.log(`[indexer] root posted over ${chainIndex} leaf slot(s)`);
 }
 
 /** Publish the current tree root on-chain (admin/relayer). */
@@ -144,7 +229,7 @@ async function postRoot(rootDec: string): Promise<void> {
   const keypair = StellarSdk.Keypair.fromSecret(ADMIN_KEY);
   const contract = new StellarSdk.Contract(CONTRACT_ID);
 
-  const rootHex = BigInt(rootDec).toString(16).padStart(64, "0");
+  const rootHex = decimalToHex32(rootDec);
   const rootVal = StellarSdk.xdr.ScVal.scvBytes(Buffer.from(rootHex, "hex"));
   const op = contract.call("post_root", rootVal);
 
@@ -186,7 +271,7 @@ export function start(): void {
   const tick = async () => {
     try {
       const { inserted } = await pollOnce();
-      if (inserted > 0) console.log(`[indexer] inserted ${inserted} new leaf(s); root posted`);
+      if (inserted > 0) console.log(`[indexer] inserted ${inserted} new leaf(s)`);
       else console.log(`[indexer] poll ok, 0 new leaves, ${leaves.count()} total`);
     } catch (e) {
       console.log("[indexer] poll error: " + String(e).slice(0, 400));
