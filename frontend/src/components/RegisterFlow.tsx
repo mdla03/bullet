@@ -438,8 +438,15 @@ export function RegisterFlow({
             </button>
           ))}
           {/* Telegram is not a Supabase provider, so it cannot go through
-              signIn() above; TelegramSignIn carries its own flow. */}
-          {TELEGRAM_TYPES.length > 0 && <TelegramSignIn disabled={working === "oauth"} />}
+              signIn() above; TelegramSignIn carries its own flow. It shares
+              `working` all the same, so all five buttons spin together
+              whichever one was pressed. */}
+          {TELEGRAM_TYPES.length > 0 && (
+            <TelegramSignIn
+              busy={working === "oauth"}
+              onBusy={(b) => setWorking(b ? "oauth" : "")}
+            />
+          )}
           {UNSUPPORTED_TYPES.map((h) => (
             <div
               key={h.id}

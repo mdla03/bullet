@@ -1,0 +1,4 @@
+# Documents that are not part of the build. The SOW in particular should not
+# ride along in a build context.
+*.pdf
+*.docx

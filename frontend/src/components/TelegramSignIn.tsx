@@ -22,14 +22,26 @@ const BOT_ID = process.env.NEXT_PUBLIC_TELEGRAM_BOT_ID;
  * one-time token_hash. Exchanging it here is what actually signs the browser
  * in, and RegisterFlow's onAuthStateChange takes it from there.
  */
-export function TelegramSignIn({ disabled }: { disabled?: boolean }) {
-  const [working, setWorking] = useState(false);
+/**
+ * `busy` and `onBusy` are the caller's own sign-in flag rather than state held
+ * here: the other four buttons all read one shared `working` value, so they
+ * spin together whichever of them was pressed. Owning a private flag here
+ * would leave Telegram the odd one out in both directions, still showing its
+ * icon while the others spun and vice versa.
+ */
+export function TelegramSignIn({
+  busy,
+  onBusy,
+}: {
+  busy?: boolean;
+  onBusy?: (busy: boolean) => void;
+}) {
   const [error, setError] = useState("");
 
   async function signIn() {
     if (!BOT_ID) return;
     setError("");
-    setWorking(true);
+    onBusy?.(true);
     try {
       const user = await loginWithTelegram(BOT_ID);
       // Closing the popup without finishing is a cancel, not a failure.
@@ -45,7 +57,7 @@ export function TelegramSignIn({ disabled }: { disabled?: boolean }) {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setWorking(false);
+      onBusy?.(false);
     }
   }
 
@@ -55,10 +67,10 @@ export function TelegramSignIn({ disabled }: { disabled?: boolean }) {
     <>
       <button
         onClick={signIn}
-        disabled={disabled || working}
+        disabled={busy}
         className="flex w-full items-center justify-center gap-3 rounded-full border border-fog bg-white px-5 py-3 font-medium transition-colors hover:border-graphite disabled:opacity-50"
       >
-        {working ? (
+        {busy ? (
           <LoaderIcon className="h-5 w-5 animate-spin" />
         ) : (
           <TelegramIcon className="h-5 w-5" />
