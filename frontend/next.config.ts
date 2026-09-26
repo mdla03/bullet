@@ -45,16 +45,16 @@ const connectSrc = [
 // injects inline bootstrap scripts and inline styles, so without a
 // nonce+middleware setup 'unsafe-inline' is required for scripts and styles.
 //
-// telegram.org serves the Login Widget script (TelegramLogin.tsx); the widget
-// signs the user in through an oauth.telegram.org frame. Both hosts are
-// Telegram's own and are the only third-party scripts/frames the app loads.
-const telegramSrc = ["https://telegram.org", "https://oauth.telegram.org"];
+// TelegramLogin.tsx mounts the Login Widget frame itself rather than loading
+// telegram.org's loader script, which needs eval() and so cannot run under this
+// policy at all. The frame is the only third-party content the app embeds, and
+// no third-party script runs in our own origin.
+const telegramFrameSrc = ["https://oauth.telegram.org"];
 
 const scriptSrc = [
   "'self'",
   "'unsafe-inline'",
   "'wasm-unsafe-eval'",
-  ...telegramSrc,
   isDev ? "'unsafe-eval'" : null,
 ].filter(Boolean);
 
@@ -77,7 +77,7 @@ const csp = [
   `img-src 'self' data: blob: ${avatarImgSrc.join(" ")}`,
   `font-src 'self' data:`,
   `connect-src ${connectSrc.join(" ")}`,
-  `frame-src 'self' ${telegramSrc.join(" ")}`,
+  `frame-src 'self' ${telegramFrameSrc.join(" ")}`,
   `worker-src 'self' blob:`,
   `frame-ancestors 'none'`,
   `base-uri 'self'`,
