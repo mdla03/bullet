@@ -29,12 +29,20 @@ const walletConnectSrc = [
   "https://relay.walletconnect.org",
 ];
 
+// TelegramLogin.tsx drives the login itself, from our own button: it opens
+// oauth.telegram.org in a popup and then reads the result back over XHR. No
+// Telegram script runs in our origin and no Telegram frame is embedded, so
+// this host is needed in connect-src only. (Their loader needs eval() and
+// cannot run under this policy at all; see lib/telegram-widget.ts.)
+const telegramConnectSrc = "https://oauth.telegram.org";
+
 const connectSrc = [
   "'self'",
   originOf(process.env.NEXT_PUBLIC_SOROBAN_RPC_URL),
   originOf(process.env.NEXT_PUBLIC_RESOLVER_URL),
   supabaseOrigin,
   supabaseWs,
+  telegramConnectSrc,
   ...walletConnectSrc,
   // Next.js dev server uses a websocket for HMR / React Fast Refresh.
   isDev ? "ws:" : null,
@@ -44,13 +52,6 @@ const connectSrc = [
 // 'wasm-unsafe-eval'. Dev additionally needs 'unsafe-eval' for HMR. Next.js
 // injects inline bootstrap scripts and inline styles, so without a
 // nonce+middleware setup 'unsafe-inline' is required for scripts and styles.
-//
-// TelegramLogin.tsx mounts the Login Widget frame itself rather than loading
-// telegram.org's loader script, which needs eval() and so cannot run under this
-// policy at all. The frame is the only third-party content the app embeds, and
-// no third-party script runs in our own origin.
-const telegramFrameSrc = ["https://oauth.telegram.org"];
-
 const scriptSrc = [
   "'self'",
   "'unsafe-inline'",
@@ -77,7 +78,7 @@ const csp = [
   `img-src 'self' data: blob: ${avatarImgSrc.join(" ")}`,
   `font-src 'self' data:`,
   `connect-src ${connectSrc.join(" ")}`,
-  `frame-src 'self' ${telegramFrameSrc.join(" ")}`,
+  `frame-src 'self'`,
   `worker-src 'self' blob:`,
   `frame-ancestors 'none'`,
   `base-uri 'self'`,
