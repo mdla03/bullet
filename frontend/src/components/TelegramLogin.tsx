@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { TelegramIcon } from "@/components/icons";
 import { apiFetch } from "@/lib/api";
 import {
   DEFAULT_SIZE,
@@ -79,12 +78,10 @@ export function TelegramLogin({ onLinked }: { onLinked: () => void | Promise<voi
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-center gap-2 text-sm font-medium text-graphite">
-        <TelegramIcon className="h-4 w-4" />
-        Connect Telegram
-      </div>
-      {/* Telegram renders its own button in here. Its markup is fixed, so it
-          sits centred rather than being restyled into a pill. */}
+      {/* Telegram renders its own button in here, cross-origin: its wording,
+          colour and shape are fixed and no style of ours reaches inside. It
+          already reads "Log in with Telegram", so this carries no label of its
+          own; it sits centred rather than being restyled into a pill. */}
       <div className="flex justify-center">
         {src && (
           <iframe
