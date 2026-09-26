@@ -58,10 +58,18 @@ function livePayload(overrides: Record<string, string | number> = {}) {
 // stubbed throws by name instead of being undefined.
 const upsertCalls: unknown[][] = [];
 let upsertResult = true;
+/** User id the handles table reports for a Telegram subject, or null for one
+ *  that has never signed in here. */
+let existingUserForSubject: string | null = null;
+const subjectLookups: string[] = [];
 const STORE_STUBS = {
   upsertTelegramHandle: async (...args: unknown[]) => {
     upsertCalls.push(args);
     return upsertResult;
+  },
+  findUserByTelegramSubject: async (subject: string) => {
+    subjectLookups.push(subject);
+    return existingUserForSubject;
   },
 };
 const STORE_UNSTUBBED = Object.keys(await import("./store.js")).filter(
@@ -88,9 +96,32 @@ mock.module("./store.js", { namedExports: storeMock });
 
 // A bearer token is still required: the stub 401s without one, so the route
 // keeping requireAuth in front of the handler is what this asserts.
+// Supabase's admin API, as far as /telegram/signin uses it. Recording the
+// calls is the point: which email a session was minted for is the difference
+// between signing someone in and handing them another user's account.
+const createUserCalls: { email?: string }[] = [];
+const generateLinkCalls: { type: string; email: string }[] = [];
+let existingUserEmail: string | null = "ada@example.com";
+let generateLinkFails = false;
+const adminStub = {
+  getUserById: async (id: string) => ({
+    data: { user: existingUserEmail ? { id, email: existingUserEmail } : null },
+    error: null,
+  }),
+  createUser: async (attrs: { email?: string }) => {
+    createUserCalls.push(attrs);
+    return { data: { user: { id: "usr_created", email: attrs.email } }, error: null };
+  },
+  generateLink: async (args: { type: string; email: string }) => {
+    generateLinkCalls.push(args);
+    if (generateLinkFails) return { data: null, error: { message: "nope" } };
+    return { data: { properties: { hashed_token: "token_hash_abc" } }, error: null };
+  },
+};
+
 mock.module("./supabase.js", {
   namedExports: {
-    serviceClient: {},
+    serviceClient: { auth: { admin: adminStub } },
     verifyJwt: async () => TEST_USER_ID,
     requireAuth: (
       req: { header(n: string): string | undefined; userId?: string },
@@ -241,6 +272,12 @@ after(() => server.close());
 beforeEach(() => {
   upsertCalls.length = 0;
   upsertResult = true;
+  subjectLookups.length = 0;
+  createUserCalls.length = 0;
+  generateLinkCalls.length = 0;
+  existingUserForSubject = null;
+  existingUserEmail = "ada@example.com";
+  generateLinkFails = false;
   process.env.TELEGRAM_BOT_TOKEN = BOT_TOKEN;
 });
 
@@ -320,5 +357,111 @@ describe("POST /telegram/link", () => {
     const r = await post(livePayload());
     assert.equal(r.status, 500);
     assert.equal(r.body.error, "handle_link_failed");
+  });
+});
+
+// ── POST /telegram/signin ─────────────────────────────────────────────────────
+
+async function signin(
+  body: unknown
+): Promise<{ status: number; body: Record<string, unknown> }> {
+  const res = await fetch(`http://localhost:${port}/telegram/signin`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const text = await res.text();
+  let parsed: unknown = text;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    /* keep text */
+  }
+  return { status: res.status, body: parsed as Record<string, unknown> };
+}
+
+describe("POST /telegram/signin", () => {
+  it("mints nothing on a bad signature", async () => {
+    // The route is unauthenticated, so this check is the only thing between a
+    // caller and a session. It must fail before any admin call.
+    const r = await signin({ ...livePayload(), hash: "0".repeat(64) });
+    assert.equal(r.status, 400);
+    assert.deepEqual(generateLinkCalls, []);
+    assert.deepEqual(createUserCalls, []);
+    assert.deepEqual(upsertCalls, []);
+  });
+
+  it("mints nothing on a stale payload", async () => {
+    // An hour old: outside the ten-minute window, so a captured payload cannot
+    // be replayed into a session later.
+    const r = await signin(payload({}, 3600, Date.now()));
+    assert.equal(r.status, 400);
+    assert.deepEqual(generateLinkCalls, []);
+  });
+
+  it("503s when the bot token is unset, without touching Supabase", async () => {
+    delete process.env.TELEGRAM_BOT_TOKEN;
+    const r = await signin(livePayload());
+    assert.equal(r.status, 503);
+    assert.deepEqual(generateLinkCalls, []);
+    assert.deepEqual(createUserCalls, []);
+  });
+
+  it("signs an existing account in against its own email", async () => {
+    existingUserForSubject = "usr_existing";
+    existingUserEmail = "ada@example.com";
+    const r = await signin(livePayload());
+    assert.equal(r.status, 200);
+    assert.equal(r.body.token_hash, "token_hash_abc");
+    assert.equal(r.body.created, false);
+    // No account was created for someone who already had one.
+    assert.deepEqual(createUserCalls, []);
+    // The session is minted for the account the handle belongs to. A different
+    // email here is a takeover, not a bug in passing.
+    assert.deepEqual(generateLinkCalls, [{ type: "magiclink", email: "ada@example.com" }]);
+  });
+
+  it("looks the account up by Telegram id, never by username", async () => {
+    // Usernames get released and re-registered. Someone who takes over
+    // @ada_lovelace must not reach the original owner's account, and the only
+    // thing that stops them is which field this lookup uses.
+    existingUserForSubject = "usr_existing";
+    await signin(livePayload({ id: 999, username: "someone_else" }));
+    assert.deepEqual(subjectLookups, ["999"]);
+  });
+
+  it("creates an account at an unroutable address on first sign-in", async () => {
+    existingUserForSubject = null;
+    const r = await signin(livePayload());
+    assert.equal(r.status, 200);
+    assert.equal(r.body.created, true);
+    assert.deepEqual(createUserCalls, [
+      { email: "telegram-8675309@telegram.invalid", email_confirm: true },
+    ]);
+    // .invalid can never resolve, so nothing addressed to it can leave.
+    assert.match(String(createUserCalls[0].email), /@telegram\.invalid$/);
+    assert.deepEqual(generateLinkCalls, [
+      { type: "magiclink", email: "telegram-8675309@telegram.invalid" },
+    ]);
+  });
+
+  it("writes the handle on every sign-in, not just the first", async () => {
+    // A username changed on Telegram's side would otherwise leave the account
+    // payable at a name its owner no longer holds.
+    existingUserForSubject = "usr_existing";
+    await signin(livePayload({ username: "ada_renamed" }));
+    assert.equal(upsertCalls.length, 1);
+    assert.deepEqual(upsertCalls[0][0], "usr_existing");
+    assert.equal(
+      (upsertCalls[0][1] as { handle: string }).handle,
+      "telegram:ada_renamed"
+    );
+  });
+
+  it("500s without a token when the link cannot be generated", async () => {
+    generateLinkFails = true;
+    const r = await signin(livePayload());
+    assert.equal(r.status, 500);
+    assert.equal(r.body.token_hash, undefined);
   });
 });

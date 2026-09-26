@@ -295,6 +295,24 @@ export async function insertNote(row: {
  *  interleave them, and the trigger's rules only hold inside one statement.
  *  Returns false if the function lost that race, so the caller can surface a
  *  retryable error instead of reporting a link that did not happen. */
+/** The user a Telegram account already belongs to, by Telegram's numeric id.
+ *  Keyed on `subject` rather than the username: usernames get released and
+ *  re-registered, the id never changes, and only the id is what Telegram's
+ *  signature binds to an account. */
+export async function findUserByTelegramSubject(subject: string): Promise<string | null> {
+  const { data, error } = await serviceClient
+    .from("handles")
+    .select("user_id")
+    .eq("provider", "telegram")
+    .eq("subject", subject)
+    .maybeSingle();
+  if (error) {
+    console.error("[store] findUserByTelegramSubject failed:", error.message);
+    return null;
+  }
+  return data?.user_id ?? null;
+}
+
 export async function upsertTelegramHandle(
   userId: string,
   h: { subject: string; handle: string; avatarUrl: string | null }

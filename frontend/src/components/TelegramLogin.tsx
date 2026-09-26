@@ -1,97 +1,76 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
+import { LoaderIcon, TelegramIcon } from "@/components/icons";
 import { apiFetch } from "@/lib/api";
-import {
-  DEFAULT_SIZE,
-  WIDGET_ORIGIN,
-  parseWidgetMessage,
-  widgetSrc,
-  type TelegramUser,
-} from "@/lib/telegram-widget";
+import { loginWithTelegram } from "@/lib/telegram-widget";
 
-// The bot whose Login Widget is rendered. Unset in an environment that has no
-// bot configured, and then this component renders nothing at all: the backend
-// would 503 the link anyway (TELEGRAM_BOT_TOKEN), so a button that cannot work
-// is worse than no button.
-const BOT_USERNAME = process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME;
+// The bot this links against. Unset in an environment with no bot configured,
+// and then this component renders nothing at all: the backend would 503 the
+// link anyway (TELEGRAM_BOT_TOKEN), so a button that cannot work is worse than
+// no button. The id is the numeric prefix of the bot token, which is public.
+const BOT_ID = process.env.NEXT_PUBLIC_TELEGRAM_BOT_ID;
 
 /**
- * Telegram Login Widget plus the link call behind it.
+ * Connect Telegram, styled as one of this screen's connect buttons.
  *
- * Telegram is not a Supabase OAuth provider, so this proves ownership through
- * our own backend instead of signInWithOAuth: the widget returns a payload
+ * Telegram is not a Supabase OAuth provider, so ownership is proved through our
+ * own backend rather than signInWithOAuth: the login popup produces a payload
  * Telegram signed, POST /telegram/link verifies that signature with the bot
- * token and writes the handle for the signed-in user. `onLinked` then refreshes
- * the handle list, the same way returning from an OAuth callback does.
+ * token and writes the handle. `onLinked` then refreshes the handle list, the
+ * same way returning from an OAuth callback does. See lib/telegram-widget.ts
+ * for why this drives the flow itself instead of embedding Telegram's widget.
  */
 export function TelegramLogin({ onLinked }: { onLinked: () => void | Promise<void> }) {
-  const frame = useRef<HTMLIFrameElement>(null);
+  const [working, setWorking] = useState(false);
   const [error, setError] = useState("");
-  // The frame reports its own size once it has rendered the button. Seeded with
-  // the loader's own defaults for a large widget so it is not zero before then.
-  const [size, setSize] = useState(DEFAULT_SIZE);
-  // window.location is read in the effect, not during render: the src has to be
-  // identical between server and client markup or React discards the frame.
-  const [src, setSrc] = useState("");
 
-  useEffect(() => {
-    if (!BOT_USERNAME) return;
-    setSrc(widgetSrc(BOT_USERNAME, window.location.origin, window.location.href));
+  async function connect() {
+    if (!BOT_ID) return;
+    setError("");
+    setWorking(true);
+    try {
+      const user = await loginWithTelegram(BOT_ID);
+      // No payload means the popup was closed without finishing. That is a
+      // cancel, not a failure, so it passes without an error message.
+      if (!user) return;
 
-    const link = async (user: TelegramUser) => {
-      setError("");
-      try {
-        const res = await apiFetch("/telegram/link", {
-          method: "POST",
-          body: JSON.stringify(user),
-        });
-        if (!res.ok) {
-          const body = (await res.json().catch(() => ({}))) as { detail?: string };
-          setError(body.detail ?? `Could not link this Telegram account (${res.status}).`);
-          return;
-        }
-        await onLinked();
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+      const res = await apiFetch("/telegram/link", {
+        method: "POST",
+        body: JSON.stringify(user),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { detail?: string };
+        setError(body.detail ?? `Could not link this Telegram account (${res.status}).`);
+        return;
       }
-    };
+      await onLinked();
+    } catch (e) {
+      // Reaching here means the lookup itself failed rather than the user
+      // declining: most likely a browser refusing Telegram's cookie on a
+      // cross-site request, which no retry will fix.
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setWorking(false);
+    }
+  }
 
-    const onMessage = (e: MessageEvent) => {
-      // Pinned to both the origin and this exact frame: any other window may
-      // post to us, and the payload below is what proves handle ownership.
-      const trusted = e.origin === WIDGET_ORIGIN && e.source === frame.current?.contentWindow;
-      const msg = parseWidgetMessage(trusted, e.data);
-      if (msg?.type === "resize") {
-        setSize((s) => ({ width: msg.width ?? s.width, height: msg.height ?? s.height }));
-      } else if (msg?.type === "auth") {
-        void link(msg.user);
-      }
-    };
-
-    window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  if (!BOT_USERNAME) return null;
+  if (!BOT_ID) return null;
 
   return (
     <div className="space-y-2">
-      {/* Telegram renders its own button in here, cross-origin: its wording,
-          colour and shape are fixed and no style of ours reaches inside. It
-          already reads "Log in with Telegram", so this carries no label of its
-          own; it sits centred rather than being restyled into a pill. */}
-      <div className="flex justify-center">
-        {src && (
-          <iframe
-            ref={frame}
-            src={src}
-            title="Log in with Telegram"
-            style={{ width: size.width, height: size.height, border: 0, colorScheme: "light" }}
-          />
+      <button
+        onClick={connect}
+        disabled={working}
+        className="flex w-full items-center justify-center gap-2 rounded-full border border-fog bg-white px-4 py-2.5 text-sm font-medium transition-colors hover:border-graphite disabled:opacity-50"
+      >
+        {working ? (
+          <LoaderIcon className="h-4 w-4 animate-spin" />
+        ) : (
+          <TelegramIcon className="h-4 w-4" />
         )}
-      </div>
+        Connect Telegram
+      </button>
       {error && <p className="text-center text-sm text-graphite">{error}</p>}
     </div>
   );

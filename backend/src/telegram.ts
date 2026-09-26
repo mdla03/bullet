@@ -17,7 +17,7 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import express, { type Request, type RequestHandler, type Response, type Router } from "express";
 import { getHandleType } from "@zeekpay/shared";
-import { requireAuth } from "./supabase.js";
+import { requireAuth, serviceClient } from "./supabase.js";
 import * as store from "./store.js";
 
 /** Raw widget payload. Typed open rather than as a closed shape: Telegram has
@@ -98,7 +98,60 @@ export function verifyTelegramLogin(
   return { subject, handle, avatarUrl, authDate };
 }
 
-/** POST /telegram/link, mounted by resolver.ts.
+/**
+ * Address for a Telegram account that has no email of its own.
+ *
+ * Telegram never gives us one, and Supabase keys users by email, so a
+ * Telegram-only signup needs a placeholder. `.invalid` is reserved by RFC 2606
+ * and guaranteed never to resolve, so nothing addressed here can leave the
+ * building even if some future code path tries to send to it. Derived from the
+ * numeric id so it is stable: the same Telegram account always maps to the
+ * same row, and a username change does not strand an account.
+ */
+export function syntheticEmail(subject: string): string {
+  return `telegram-${subject}@telegram.invalid`;
+}
+
+/** A user who can be signed in, plus whether this call is what created them. */
+interface ResolvedUser {
+  userId: string;
+  email: string;
+  created: boolean;
+}
+
+/**
+ * The Supabase user behind a verified Telegram login, creating one on first
+ * sight.
+ *
+ * Lookup is by Telegram's numeric id via the handles row, never by username:
+ * usernames are released and re-registered, and the id is what the signature
+ * binds. A username that changed hands therefore cannot reach the previous
+ * owner's account.
+ */
+async function resolveUser(verified: VerifiedTelegramLogin): Promise<ResolvedUser> {
+  const existing = await store.findUserByTelegramSubject(verified.subject);
+  if (existing) {
+    const { data, error } = await serviceClient.auth.admin.getUserById(existing);
+    if (error || !data.user?.email) {
+      throw new Error("could not read the account this Telegram is linked to");
+    }
+    return { userId: existing, email: data.user.email, created: false };
+  }
+
+  const email = syntheticEmail(verified.subject);
+  const { data, error } = await serviceClient.auth.admin.createUser({
+    email,
+    // Nothing can ever be delivered to a .invalid address, so there is no
+    // confirmation to wait for. Telegram's signature is the proof here.
+    email_confirm: true,
+  });
+  if (error || !data.user) {
+    throw new Error(error?.message ?? "could not create an account");
+  }
+  return { userId: data.user.id, email, created: true };
+}
+
+/** POST /telegram/link and /telegram/signin, mounted by resolver.ts.
  *
  *  Takes `rateLimit` as an argument rather than importing it: resolver.ts
  *  imports this module, so importing its limiter back would be a cycle. */
@@ -139,6 +192,69 @@ export function telegramRouter(rateLimit: RequestHandler): Router {
         return;
       }
       res.json({ ok: true, handle: verified.handle });
+    }
+  );
+
+  // Sign in (or sign up) with Telegram. Unauthenticated by necessity: it is
+  // what produces a session. The only thing standing between a caller and a
+  // session is verifyTelegramLogin, so nothing below runs until the payload's
+  // HMAC checks out against the bot token and its auth_date is inside the
+  // ten-minute window.
+  router.post(
+    "/telegram/signin",
+    rateLimit,
+    async (req: Request, res: Response): Promise<void> => {
+      const botToken = process.env.TELEGRAM_BOT_TOKEN ?? "";
+      if (!botToken) {
+        res.status(503).json({
+          error: "telegram_unavailable",
+          detail: "Telegram sign-in is not configured on this server.",
+        });
+        return;
+      }
+
+      let verified: VerifiedTelegramLogin;
+      try {
+        verified = verifyTelegramLogin(req.body as TelegramLoginPayload, botToken);
+      } catch (e) {
+        res
+          .status(400)
+          .json({ error: "invalid_telegram_login", detail: (e as Error).message });
+        return;
+      }
+
+      let user: ResolvedUser;
+      try {
+        user = await resolveUser(verified);
+      } catch (e) {
+        console.error("[telegram] signin could not resolve a user:", (e as Error).message);
+        res.status(500).json({ error: "signin_failed", detail: (e as Error).message });
+        return;
+      }
+
+      // Write the handle on every sign-in, not just the first: a username that
+      // changed on Telegram's side would otherwise leave this account payable
+      // at a name its owner no longer holds.
+      if (!(await store.upsertTelegramHandle(user.userId, verified))) {
+        res.status(500).json({ error: "handle_link_failed" });
+        return;
+      }
+
+      // generateLink mints the token without sending any mail, which is the
+      // point: the address may be a .invalid placeholder that can never
+      // receive one. The browser exchanges this for a session via verifyOtp.
+      const { data, error } = await serviceClient.auth.admin.generateLink({
+        type: "magiclink",
+        email: user.email,
+      });
+      const tokenHash = data?.properties?.hashed_token;
+      if (error || !tokenHash) {
+        console.error("[telegram] generateLink failed:", error?.message);
+        res.status(500).json({ error: "signin_failed" });
+        return;
+      }
+
+      res.json({ token_hash: tokenHash, created: user.created, handle: verified.handle });
     }
   );
 
