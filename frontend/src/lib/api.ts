@@ -115,6 +115,21 @@ export async function telegramSignIn(
   return res.json();
 }
 
+/**
+ * Remove the caller's Telegram handle.
+ *
+ * Telegram has no auth.identities row, so supabase.auth.unlinkIdentity cannot
+ * reach it; this is the equivalent. The backend refuses when Telegram is the
+ * account's only remaining way in.
+ */
+export async function telegramUnlink(): Promise<void> {
+  const res = await apiFetch("/telegram/link", { method: "DELETE" });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { detail?: string };
+    throw new Error(body.detail ?? `Could not remove Telegram (${res.status}).`);
+  }
+}
+
 export async function getMe(): Promise<MeResponse> {
   const res = await apiFetch("/me");
   if (!res.ok) throw new Error(`/me failed (${res.status})`);

@@ -313,6 +313,22 @@ export async function findUserByTelegramSubject(subject: string): Promise<string
   return data?.user_id ?? null;
 }
 
+/** Removes this user's Telegram handle. Scoped to their own user_id, so the
+ *  route can never delete a row belonging to someone else even if a handle is
+ *  passed in from the client. */
+export async function deleteTelegramHandle(userId: string): Promise<boolean> {
+  const { error } = await serviceClient
+    .from("handles")
+    .delete()
+    .eq("user_id", userId)
+    .eq("provider", "telegram");
+  if (error) {
+    console.error("[store] deleteTelegramHandle failed:", error.message);
+    return false;
+  }
+  return true;
+}
+
 export async function upsertTelegramHandle(
   userId: string,
   h: { subject: string; handle: string; avatarUrl: string | null }

@@ -108,8 +108,28 @@ export function verifyTelegramLogin(
  * numeric id so it is stable: the same Telegram account always maps to the
  * same row, and a username change does not strand an account.
  */
+const SYNTHETIC_DOMAIN = "telegram.invalid";
+
 export function syntheticEmail(subject: string): string {
-  return `telegram-${subject}@telegram.invalid`;
+  return `telegram-${subject}@${SYNTHETIC_DOMAIN}`;
+}
+
+/**
+ * Whether this account could still be signed into if its Telegram handle were
+ * removed.
+ *
+ * Any OAuth identity counts. A plain `email` identity only counts when the
+ * address is real: an account created by Telegram sign-up carries a
+ * .invalid placeholder that can never receive a magic link, so treating it as
+ * a sign-in method would let someone unlink their way out of their own
+ * account with no route back in.
+ */
+export function hasOtherSignIn(user: {
+  email?: string | null;
+  identities?: { provider: string }[] | null;
+}): boolean {
+  if ((user.identities ?? []).some((i) => i.provider !== "email")) return true;
+  return Boolean(user.email) && !user.email!.endsWith(`@${SYNTHETIC_DOMAIN}`);
 }
 
 /** A user who can be signed in, plus whether this call is what created them. */
@@ -192,6 +212,41 @@ export function telegramRouter(rateLimit: RequestHandler): Router {
         return;
       }
       res.json({ ok: true, handle: verified.handle });
+    }
+  );
+
+  // Unlink. Telegram has no auth.identities row, so Supabase's unlinkIdentity
+  // cannot reach it and the account screen's usual path throws "Identity not
+  // found for this handle". This is that path's Telegram equivalent.
+  router.delete(
+    "/telegram/link",
+    requireAuth,
+    rateLimit,
+    async (req: Request, res: Response): Promise<void> => {
+      const userId = (req as Request & { userId?: string }).userId!;
+
+      const { data, error } = await serviceClient.auth.admin.getUserById(userId);
+      if (error || !data.user) {
+        res.status(500).json({ error: "unlink_failed" });
+        return;
+      }
+
+      // Refuse to strand the account. Telegram is a sign-in method now, so for
+      // an account created through Telegram sign-up it is the only one.
+      if (!hasOtherSignIn(data.user)) {
+        res.status(409).json({
+          error: "last_sign_in_method",
+          detail:
+            "Telegram is the only way into this account. Add another sign-in method first.",
+        });
+        return;
+      }
+
+      if (!(await store.deleteTelegramHandle(userId))) {
+        res.status(500).json({ error: "unlink_failed" });
+        return;
+      }
+      res.json({ ok: true });
     }
   );
 

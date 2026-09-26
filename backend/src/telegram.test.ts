@@ -71,7 +71,13 @@ const STORE_STUBS = {
     subjectLookups.push(subject);
     return existingUserForSubject;
   },
+  deleteTelegramHandle: async (userId: string) => {
+    deleteCalls.push(userId);
+    return deleteResult;
+  },
 };
+const deleteCalls: string[] = [];
+let deleteResult = true;
 const STORE_UNSTUBBED = Object.keys(await import("./store.js")).filter(
   (k) => !(k in STORE_STUBS)
 );
@@ -94,18 +100,21 @@ const storeMock: Record<string, unknown> = new Proxy(STORE_STUBS as Record<strin
 });
 mock.module("./store.js", { namedExports: storeMock });
 
-// A bearer token is still required: the stub 401s without one, so the route
-// keeping requireAuth in front of the handler is what this asserts.
-// Supabase's admin API, as far as /telegram/signin uses it. Recording the
-// calls is the point: which email a session was minted for is the difference
-// between signing someone in and handing them another user's account.
+// Supabase's admin API, as far as the routes use it. Recording the calls is
+// the point: which email a session was minted for is the difference between
+// signing someone in and handing them another user's account.
 const createUserCalls: { email?: string }[] = [];
 const generateLinkCalls: { type: string; email: string }[] = [];
 let existingUserEmail: string | null = "ada@example.com";
+let existingUserIdentities: { provider: string }[] = [{ provider: "google" }];
 let generateLinkFails = false;
 const adminStub = {
   getUserById: async (id: string) => ({
-    data: { user: existingUserEmail ? { id, email: existingUserEmail } : null },
+    data: {
+      user: existingUserEmail
+        ? { id, email: existingUserEmail, identities: existingUserIdentities }
+        : null,
+    },
     error: null,
   }),
   createUser: async (attrs: { email?: string }) => {
@@ -119,6 +128,8 @@ const adminStub = {
   },
 };
 
+// A bearer token is still required: the stub 401s without one, so the routes
+// keeping requireAuth in front of their handlers is what that asserts.
 mock.module("./supabase.js", {
   namedExports: {
     serviceClient: { auth: { admin: adminStub } },
@@ -139,7 +150,7 @@ mock.module("./supabase.js", {
 });
 
 const express = (await import("express")).default;
-const { verifyTelegramLogin, telegramRouter } = await import("./telegram.js");
+const { verifyTelegramLogin, telegramRouter, hasOtherSignIn } = await import("./telegram.js");
 
 // ── verifyTelegramLogin (pure) ────────────────────────────────────────────────
 
@@ -277,6 +288,9 @@ beforeEach(() => {
   generateLinkCalls.length = 0;
   existingUserForSubject = null;
   existingUserEmail = "ada@example.com";
+  existingUserIdentities = [{ provider: "google" }];
+  deleteCalls.length = 0;
+  deleteResult = true;
   generateLinkFails = false;
   process.env.TELEGRAM_BOT_TOKEN = BOT_TOKEN;
 });
@@ -357,6 +371,92 @@ describe("POST /telegram/link", () => {
     const r = await post(livePayload());
     assert.equal(r.status, 500);
     assert.equal(r.body.error, "handle_link_failed");
+  });
+});
+
+// ── hasOtherSignIn (pure) ─────────────────────────────────────────────────────
+
+describe("hasOtherSignIn", () => {
+  it("counts any OAuth identity", () => {
+    assert.equal(
+      hasOtherSignIn({ email: null, identities: [{ provider: "google" }] }),
+      true
+    );
+  });
+
+  it("counts a real email address", () => {
+    assert.equal(
+      hasOtherSignIn({ email: "ada@example.com", identities: [{ provider: "email" }] }),
+      true
+    );
+  });
+
+  it("does not count a .invalid placeholder", () => {
+    // An account created by Telegram sign-up carries this address. It can
+    // never receive a magic link, so it is not a way back in.
+    assert.equal(
+      hasOtherSignIn({
+        email: "telegram-8675309@telegram.invalid",
+        identities: [{ provider: "email" }],
+      }),
+      false
+    );
+  });
+
+  it("does not count no identities and no email", () => {
+    assert.equal(hasOtherSignIn({ email: null, identities: [] }), false);
+    assert.equal(hasOtherSignIn({}), false);
+  });
+});
+
+// ── DELETE /telegram/link ─────────────────────────────────────────────────────
+
+async function unlink(auth = true): Promise<{ status: number; body: Record<string, unknown> }> {
+  const res = await fetch(`http://localhost:${port}/telegram/link`, {
+    method: "DELETE",
+    headers: auth ? { Authorization: "Bearer test-token" } : {},
+  });
+  const text = await res.text();
+  let parsed: unknown = text;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    /* keep text */
+  }
+  return { status: res.status, body: parsed as Record<string, unknown> };
+}
+
+describe("DELETE /telegram/link", () => {
+  it("401s without an Authorization header, deleting nothing", async () => {
+    const r = await unlink(false);
+    assert.equal(r.status, 401);
+    assert.deepEqual(deleteCalls, []);
+  });
+
+  it("removes the handle for the signed-in user", async () => {
+    const r = await unlink();
+    assert.equal(r.status, 200);
+    // Scoped to the caller. Deleting for anyone else is the failure that
+    // matters, so assert on who, not just on the status.
+    assert.deepEqual(deleteCalls, [TEST_USER_ID]);
+  });
+
+  it("refuses when Telegram is the only way into the account", async () => {
+    // A Telegram sign-up account: placeholder address, no OAuth. Unlinking
+    // would lock its owner out permanently.
+    existingUserEmail = "telegram-8675309@telegram.invalid";
+    existingUserIdentities = [{ provider: "email" }];
+    const r = await unlink();
+    assert.equal(r.status, 409);
+    assert.equal(r.body.error, "last_sign_in_method");
+    assert.deepEqual(deleteCalls, [], "deleted the handle despite refusing");
+  });
+
+  it("500s when the delete fails", async () => {
+    deleteResult = false;
+    const r = await unlink();
+    assert.equal(r.status, 500);
+    assert.equal(r.body.error, "unlink_failed");
   });
 });
 
