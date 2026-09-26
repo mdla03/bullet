@@ -13,7 +13,7 @@ import {
   WalletIcon,
 } from "@/components/icons";
 import { createClient } from "@/lib/supabase/client";
-import { getMe, type MeResponse } from "@/lib/api";
+import { getMe, telegramUnlink, type MeResponse } from "@/lib/api";
 import { Skeleton } from "@/components/Skeleton";
 import { TelegramLogin } from "@/components/TelegramLogin";
 import {
@@ -106,6 +106,16 @@ export function AccountView() {
     setError("");
     setWorking(`unlink:${provider}:${handle}`);
     try {
+      // Telegram has no auth.identities row (its handle is written by
+      // link_telegram_handle, not by the identities trigger), so everything
+      // below would fail to find it. It has its own route instead, which also
+      // owns the "last way in" check that identities.length gives us here.
+      if (provider === "telegram") {
+        await telegramUnlink();
+        await refreshMe();
+        return;
+      }
+
       const { data, error: e1 } = await supabase.auth.getUserIdentities();
       if (e1) throw new Error(e1.message);
       const identities = data?.identities ?? [];
