@@ -14,6 +14,9 @@ export const dynamic = "force-dynamic";
 const TOKENS: Record<number, string> = { 0: "USDC", 1: "XLM", 2: "USDT" };
 const STROOPS = 10_000_000;
 const DAYS = 14;
+/** Window for the monthly-active count, and for the activity read behind both
+ *  active-user figures. */
+const MAU_DAYS = 30;
 
 const NETWORK = (process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ?? "").includes("Test")
   ? "testnet"
@@ -31,6 +34,13 @@ interface ActivityRow {
   handle: string | null;
 }
 
+/** A wallets row, as far as the wallet count needs it. `previous` holds every
+ *  wallet this account switched away from (backend/sql/wallet_previous.sql). */
+interface WalletRow {
+  stellar_address: string | null;
+  previous: { stellar_address?: string }[] | null;
+}
+
 /** Every handle type in registry order, so a platform with nothing yet still
  *  shows as a zero rather than vanishing. A missing row and a zero row mean
  *  very different things when the question is "does this platform work". */
@@ -46,8 +56,18 @@ async function loadMetrics() {
   const count = (table: string, col: string) =>
     db.from(table).select(col, { count: "exact", head: true });
 
-  const [leaves, cursor, activity, profiles, wallets, unclaimed, invites, ledger, handles] =
-    await Promise.all([
+  const [
+    leaves,
+    cursor,
+    activity,
+    profiles,
+    wallets,
+    unclaimed,
+    invites,
+    ledger,
+    handles,
+    activeWindow,
+  ] = await Promise.all([
       count("merkle_leaves", "leaf_index"),
       db.from("merkle_state").select("cursor_ledger").eq("id", true).maybeSingle(),
       db
@@ -56,7 +76,12 @@ async function loadMetrics() {
         .order("created_at", { ascending: false })
         .limit(5000),
       count("profiles", "id"),
-      count("wallets", "user_id"),
+      // Current wallet plus every one switched away from (wallet_previous.sql
+      // keeps them, since notes addressed to an old bullet_pubkey stay
+      // claimable only by reconnecting that wallet). Counting rows would count
+      // accounts holding a wallet right now, which silently drops every wallet
+      // anyone has unlinked.
+      db.from("wallets").select("stellar_address, previous").limit(10000),
       db.from("notes").select("id", { count: "exact", head: true }).is("claimed_at", null),
       count("pending_invites", "id"),
       latestLedger(),
@@ -65,6 +90,15 @@ async function loadMetrics() {
       // ponytail: reads rows and counts here rather than grouping in SQL;
       // swap for an rpc if the handle count ever outgrows one page.
       db.from("handles").select("provider").limit(10000),
+      // Active-user window. Queried separately from the activity read above
+      // rather than derived from it: that one is capped at the 5000 most
+      // recent rows overall, which would quietly understate a month once the
+      // log outgrows it.
+      db
+        .from("activity")
+        .select("user_id, created_at")
+        .gte("created_at", new Date(Date.now() - MAU_DAYS * 86_400_000).toISOString())
+        .limit(50000),
     ]);
 
   const rows = (activity.data ?? []) as ActivityRow[];
@@ -119,6 +153,30 @@ async function loadMetrics() {
     else sendsUnknownType += 1;
   }
 
+  // Every distinct wallet address the project has ever seen, current or since
+  // replaced. Deduped because two accounts can legitimately name the same
+  // address after a merge.
+  const walletAddresses = new Set<string>();
+  let walletsAttached = 0;
+  for (const w of (wallets.data ?? []) as WalletRow[]) {
+    if (w.stellar_address) {
+      walletAddresses.add(w.stellar_address);
+      walletsAttached += 1;
+    }
+    for (const prev of w.previous ?? []) {
+      if (prev?.stellar_address) walletAddresses.add(prev.stellar_address);
+    }
+  }
+
+  // Active = sent or claimed in the window. Rolling rather than calendar, so
+  // the number does not reset to near-zero just after midnight UTC.
+  const activeRows = (activeWindow.data ?? []) as { user_id: string; created_at: string }[];
+  const dayAgo = Date.now() - 86_400_000;
+  const dau = new Set(
+    activeRows.filter((r) => Date.parse(r.created_at) >= dayAgo).map((r) => r.user_id)
+  ).size;
+  const mau = new Set(activeRows.map((r) => r.user_id)).size;
+
   return {
     deposits: leaves.count ?? 0,
     cursorLedger: cursor.data?.cursor_ledger ?? null,
@@ -129,7 +187,10 @@ async function loadMetrics() {
     activeAccounts: new Set(rows.map((r) => r.user_id)).size,
     volume: [...volume.entries()].sort((a, b) => a[0] - b[0]),
     users: profiles.count ?? 0,
-    linkedWallets: wallets.count ?? 0,
+    walletsConnected: walletAddresses.size,
+    walletsAttached,
+    dau,
+    mau,
     unclaimedNotes: unclaimed.count ?? 0,
     pendingInvites: invites.count ?? 0,
     daily,
@@ -204,7 +265,13 @@ export default async function DashboardPage() {
         />
         <Stat label="Unclaimed notes" value={m.unclaimedNotes} />
         <Stat label="Registered users" value={m.users} />
-        <Stat label="Linked wallets" value={m.linkedWallets} note="wallet attached to account" />
+        <Stat
+          label="Wallets connected"
+          value={m.walletsConnected}
+          note={`unique, incl. unlinked · ${m.walletsAttached} attached now`}
+        />
+        <Stat label="Daily active users" value={m.dau} note="sent or claimed in 24h" />
+        <Stat label="Monthly active users" value={m.mau} note={`sent or claimed in ${MAU_DAYS}d`} />
         <Stat label="Pending invites" value={m.pendingInvites} />
         <Stat
           label="Indexer lag"
