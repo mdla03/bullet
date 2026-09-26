@@ -1,0 +1,109 @@
+# Runs the four test suites on every pull request and every push to master.
+#
+# Until this existed, the only checks on a PR were Vercel's preview build and a
+# Supabase check that skips, so a branch that broke every backend test still
+# showed green and merged clean. That matters more now than it used to: master
+# auto-deploys the backend to production, so a red suite that nobody sees ships.
+#
+# Jobs are split by toolchain rather than by speed. node-tests needs only pnpm
+# and covers most of the suite; contracts needs a Rust toolchain; circuits needs
+# the circom binary to compile its harness circuits, whose build output is
+# gitignored. Splitting them means a Rust or circom problem cannot mask a
+# backend failure, and the slow jobs run alongside the fast one.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+# A new push to the same branch makes the previous run's result irrelevant.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  node-tests:
+    name: backend + frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.7.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Typecheck as well as test: both of today's production bugs were in
+      # components, which no test covers, and tsc is the only automated thing
+      # that reads them at all.
+      - name: typecheck backend
+        run: pnpm --filter @zeekpay/backend exec tsc --noEmit
+
+      - name: typecheck frontend
+        run: pnpm --filter @bullet/frontend exec tsc --noEmit
+
+      - name: backend tests
+        run: pnpm --filter @zeekpay/backend test
+
+      - name: frontend tests
+        run: pnpm --filter @bullet/frontend test
+
+  contracts:
+    name: contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: contracts
+
+      # Native target only. These are unit tests, not a wasm build, so the
+      # wasm32v1-none target the deploy needs is not installed here.
+      - name: cargo test
+        working-directory: contracts
+        run: cargo test
+
+  circuits:
+    name: circuits
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.7.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # circuits/test/build/ is gitignored, so the harness circuits are
+      # compiled here. Pinned to the version the circuits were developed
+      # against: a compiler change is a change to what the tests are testing.
+      - name: install circom 2.2.3
+        run: |
+          curl -fsSL -o /usr/local/bin/circom \
+            https://github.com/iden3/circom/releases/download/v2.2.3/circom-linux-amd64
+          chmod +x /usr/local/bin/circom
+          circom --version
+
+      # `pnpm test` runs build-jubjub-tests.sh via pretest, which resolves
+      # circom from $CIRCOM before falling back to ~/.local/bin.
+      - name: circuit tests
+        working-directory: circuits
+        env:
+          CIRCOM: /usr/local/bin/circom
+        run: pnpm test
