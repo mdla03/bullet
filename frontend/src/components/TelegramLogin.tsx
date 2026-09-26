@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { LoaderIcon, TelegramIcon } from "@/components/icons";
 import { apiFetch } from "@/lib/api";
-import { fetchAuthResult, openAuthPopup, whenClosed } from "@/lib/telegram-widget";
+import { loginWithTelegram } from "@/lib/telegram-widget";
 
 // The bot this links against. Unset in an environment with no bot configured,
 // and then this component renders nothing at all: the backend would 503 the
@@ -28,15 +28,9 @@ export function TelegramLogin({ onLinked }: { onLinked: () => void | Promise<voi
   async function connect() {
     if (!BOT_ID) return;
     setError("");
-    const popup = openAuthPopup(BOT_ID, window.location.origin);
-    if (!popup) {
-      setError("Allow popups for this site to connect Telegram.");
-      return;
-    }
     setWorking(true);
     try {
-      await whenClosed(popup);
-      const user = await fetchAuthResult(BOT_ID, window.location.origin);
+      const user = await loginWithTelegram(BOT_ID);
       // No payload means the popup was closed without finishing. That is a
       // cancel, not a failure, so it passes without an error message.
       if (!user) return;

@@ -87,3 +87,27 @@ export function whenClosed(popup: Window, pollMs: number = POLL_MS): Promise<voi
     tick();
   });
 }
+
+/** Thrown when the popup never opened, which is a blocker rather than a
+ *  decision by the user and needs different wording. */
+export class PopupBlocked extends Error {
+  constructor() {
+    super("Allow popups for this site to continue with Telegram.");
+    this.name = "PopupBlocked";
+  }
+}
+
+/**
+ * The whole login: open the popup, wait for the user, read the result.
+ *
+ * Null means they closed it without finishing, which both callers treat as a
+ * cancel. Throws PopupBlocked if the window never opened, and passes through
+ * the lookup's own error if Telegram could not be reached.
+ */
+export async function loginWithTelegram(botId: string): Promise<TelegramUser | null> {
+  const origin = window.location.origin;
+  const popup = openAuthPopup(botId, origin);
+  if (!popup) throw new PopupBlocked();
+  await whenClosed(popup);
+  return fetchAuthResult(botId, origin);
+}

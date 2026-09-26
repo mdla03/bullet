@@ -91,6 +91,30 @@ export async function lookupEmailProviders(
   return res.json();
 }
 
+/**
+ * Trade a verified Telegram login for a Supabase session token, creating the
+ * account if this Telegram has never signed in here before.
+ *
+ * Unauthenticated on purpose: this is what produces the session, so there is
+ * none to send. The backend re-verifies Telegram's signature before it mints
+ * anything, and returns a one-time `token_hash` the caller exchanges through
+ * supabase.auth.verifyOtp.
+ */
+export async function telegramSignIn(
+  user: Record<string, string | number>
+): Promise<{ token_hash: string; created: boolean; handle: string }> {
+  const res = await fetch(`${RESOLVER_URL}/telegram/signin`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(user),
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { detail?: string };
+    throw new Error(body.detail ?? `Telegram sign-in failed (${res.status}).`);
+  }
+  return res.json();
+}
+
 export async function getMe(): Promise<MeResponse> {
   const res = await apiFetch("/me");
   if (!res.ok) throw new Error(`/me failed (${res.status})`);

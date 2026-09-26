@@ -13,6 +13,7 @@ import { createClient } from "@/lib/supabase/client";
 import { apiFetch, getMe, lookupEmailProviders, type MeResponse } from "@/lib/api";
 import { Skeleton } from "@/components/Skeleton";
 import { TelegramLogin } from "@/components/TelegramLogin";
+import { TelegramSignIn } from "@/components/TelegramSignIn";
 import { enabledHandleTypes, type OAuthProviderId } from "@zeekpay/shared";
 import {
   OAUTH_ICON,
@@ -436,6 +437,9 @@ export function RegisterFlow({
               <span>Continue with {p.label}</span>
             </button>
           ))}
+          {/* Telegram is not a Supabase provider, so it cannot go through
+              signIn() above; TelegramSignIn carries its own flow. */}
+          {TELEGRAM_TYPES.length > 0 && <TelegramSignIn disabled={working === "oauth"} />}
           {UNSUPPORTED_TYPES.map((h) => (
             <div
               key={h.id}
