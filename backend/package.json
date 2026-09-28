@@ -2,13 +2,14 @@
   "name": "@zeekpay/backend",
   "version": "0.0.0",
   "private": true,
-  "description": "ZeekPay backend — resolver, X OAuth, SendGrid (P1).",
+  "description": "ZeekPay backend \u2014 resolver, X OAuth, SendGrid (P1).",
   "type": "module",
   "scripts": {
     "dev": "tsx watch --env-file-if-exists=../.env src/resolver.ts",
     "start": "tsx src/resolver.ts",
     "build": "tsc",
-    "test": "node --import tsx/esm --experimental-test-module-mocks --test src/resolver.test.ts src/wallet_history.test.ts src/registry.test.ts src/telegram.test.ts src/invite.test.ts src/activity_note_id.test.ts src/indexer.test.ts"
+    "test": "node --import tsx/esm --experimental-test-module-mocks --test src/resolver.test.ts src/wallet_history.test.ts src/registry.test.ts src/telegram.test.ts src/invite.test.ts src/activity_note_id.test.ts src/indexer.test.ts src/verify_report.test.ts",
+    "report": "tsx --env-file-if-exists=../.env src/verify_report.ts"
   },
   "dependencies": {
     "@sendgrid/mail": "^8.1.6",
