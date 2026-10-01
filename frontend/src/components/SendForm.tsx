@@ -81,6 +81,13 @@ function parseAmountInput(
   return { stroops };
 }
 
+/** Base units to a trimmed decimal string, e.g. 25000000n -> "2.5". */
+function formatUnits(v: bigint, token: TokenConfig): string {
+  const places = token.decimals.toString().length - 1;
+  const frac = (v % token.decimals).toString().padStart(places, "0").replace(/0+$/, "");
+  return `${v / token.decimals}${frac ? `.${frac}` : ""}`;
+}
+
 type Step = "idle" | "computing" | "signing" | "submitting" | "done" | "error";
 
 const SEND_STEPS: { key: Step; label: string }[] = [
@@ -161,6 +168,44 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
   );
   const amountStroops = parsedAmount.stroops ?? null;
   const amountErrorMsg = amountInput.trim() ? parsedAmount.error : undefined;
+
+  // Sender's balance of the selected token; null while loading or if it can't
+  // be read, in which case the send is not blocked.
+  const [balance, setBalance] = useState<bigint | null>(null);
+  const hasRecipient = !!(resolved || unregistered);
+  // Refetch on token or recipient change and once when a send completes, so
+  // the balance is fresh. Reset to null only on a token change (no flicker).
+  const sendDone = step === "done";
+  const balanceTokenRef = useRef(selectedToken.id);
+  useEffect(() => {
+    if (!hasRecipient) return;
+    let cancelled = false;
+    if (balanceTokenRef.current !== selectedToken.id) {
+      balanceTokenRef.current = selectedToken.id;
+      setBalance(null);
+    }
+    (async () => {
+      const { freighterGetAddressIfAllowed } = await import("@/lib/freighter");
+      const addr = await freighterGetAddressIfAllowed();
+      if (!addr) return;
+      const { fetchTokenBalance } = await import("@/lib/balance");
+      const b = await fetchTokenBalance(selectedToken.id, addr);
+      if (!cancelled) setBalance(b);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [hasRecipient, selectedToken.id, sendDone]);
+  const insufficient =
+    balance !== null && amountStroops !== null && amountStroops > balance;
+  const insufficientMsg = insufficient
+    ? `Not enough ${selectedToken.label}. You have ${formatUnits(balance, selectedToken)} ${selectedToken.label}.`
+    : "";
+  // Why the send is blocked, or null when it can go ahead.
+  const sendBlock =
+    amountStroops === null || insufficient
+      ? insufficientMsg || amountErrorMsg || "Enter a valid amount."
+      : null;
 
   // Arriving from the hero send box: resolve the prefilled handle right away.
   const autoResolved = useRef(false);
@@ -267,8 +312,8 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
 
   async function handleSendInvite() {
     if (!unregistered) return;
-    if (amountStroops === null) {
-      setError(amountErrorMsg ?? "Enter a valid amount.");
+    if (sendBlock || amountStroops === null) {
+      setError(sendBlock ?? "Enter a valid amount.");
       return;
     }
     const amount = amountStroops;
@@ -369,8 +414,8 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
 
   async function handleSend() {
     if (!resolved?.stellarAddress) return;
-    if (amountStroops === null) {
-      setError(amountErrorMsg ?? "Enter a valid amount.");
+    if (sendBlock || amountStroops === null) {
+      setError(sendBlock ?? "Enter a valid amount.");
       return;
     }
     const amount = amountStroops;
@@ -675,11 +720,15 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
           </div>
 
           <div className="space-y-1.5">
+            <label htmlFor="send-amount" className="block px-1 text-sm font-medium">
+              Amount
+            </label>
             <div className="relative">
               <input
+                id="send-amount"
                 type="text"
                 inputMode="decimal"
-                placeholder="0.00"
+                placeholder="Enter any amount"
                 value={amountInput}
                 onChange={(e) => setAmountInput(e.target.value)}
                 disabled={busy}
@@ -692,8 +741,13 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
             {amountErrorMsg && (
               <p className="text-sm text-amber">{amountErrorMsg}</p>
             )}
+            {insufficientMsg && (
+              <p className="text-sm text-amber">{insufficientMsg}</p>
+            )}
           </div>
 
+          <div className="space-y-2">
+          <p className="px-1 text-xs text-graphite">Quick amounts</p>
           <div className="grid grid-cols-4 gap-2">
             {selectedToken.presets.map((d) => (
               <button
@@ -709,6 +763,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
                 {selectedToken.prefix}{d}
               </button>
             ))}
+          </div>
           </div>
 
           {unregistered && (
@@ -767,7 +822,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
                   handleSend();
                 }
               }}
-              disabled={amountStroops === null}
+              disabled={sendBlock !== null}
               className="flex w-full items-center justify-center rounded-full bg-ink px-5 py-3 font-semibold text-paper transition-colors hover:bg-ink/85 disabled:opacity-40"
             >
               {amountStroops === null
