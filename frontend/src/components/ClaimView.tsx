@@ -7,10 +7,17 @@ import { claimNote } from "@/lib/claim_tx";
 import { proveBrowser } from "@/lib/prove_browser";
 import { createClient } from "@/lib/supabase/client";
 import { getMe } from "@/lib/api";
-import { freighterGetAddressIfAllowed } from "@/lib/freighter";
+import { freighterEnsureAccess, freighterGetAddressIfAllowed } from "@/lib/freighter";
 import { humanizeChainError } from "@/lib/chain_errors";
 import { AlertCircleIcon, ChevronDownIcon, InboxIcon } from "@/components/icons";
 import { ErrorDetails } from "@/components/ErrorDetails";
+import {
+  ConnectFreighterButton,
+  FreighterLostAccess,
+  InstallFreighterLink,
+  isFreighterAccessLost,
+  useFreighterGate,
+} from "@/components/FreighterGate";
 
 const TOKEN_LABELS: Record<number, string> = { 0: "USDC", 1: "XLM", 2: "USDT" };
 const TOKEN_DECIMALS: Record<number, number> = { 0: 10_000_000, 1: 10_000_000, 2: 10_000_000 };
@@ -50,6 +57,7 @@ export function ClaimView({ encoded }: { encoded: string }) {
   const [proveDetail, setProveDetail] = useState("");
   const [error, setError] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const gate = useFreighterGate();
 
   // If the visitor is signed in with a linked wallet AND Freighter has this
   // origin whitelisted (returns address without a popup), skip the manual
@@ -94,6 +102,10 @@ export function ClaimView({ encoded }: { encoded: string }) {
     const p = payload!;
 
     try {
+      // 0. Freighter first, so its popup opens from the click rather than
+      // after a 15-30 s proof, by which time the grant may have dropped.
+      await freighterEnsureAccess();
+
       // 1. Generate ZK proof locally (browser). Secret never leaves the tab.
       setProveDetail("Loading proving assets…");
       setState((s) => ({ ...s, step: "proving" }));
@@ -266,34 +278,25 @@ export function ClaimView({ encoded }: { encoded: string }) {
       </div>
 
       {/* Error */}
-      {error && (
-        <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
-          <ErrorDetails
-            message={errorIsClaim ? humanizeChainError(error, tokenLabel) : error}
-            details={errorIsClaim ? error : undefined}
-          />
-        </div>
-      )}
+      {error &&
+        (errorIsClaim && isFreighterAccessLost(error) ? (
+          <FreighterLostAccess onRetry={handleClaim} />
+        ) : (
+          <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
+            <ErrorDetails
+              message={errorIsClaim ? humanizeChainError(error, tokenLabel) : error}
+              details={errorIsClaim ? error : undefined}
+            />
+          </div>
+        ))}
 
       {/* Connect button */}
-      {(step === "ready" || step === "error") && (
-        <button
-          onClick={handleConnect}
-          className="w-full rounded-full bg-ink px-4 py-3 font-semibold text-paper transition-colors hover:bg-ink/85"
-        >
-          Connect Wallet
-        </button>
-      )}
-
-      {step === "connecting" && (
-        <button
-          disabled
-          className="w-full rounded-full bg-ink px-4 py-3 font-semibold text-paper opacity-50"
-        >
-          <span className="mr-2 inline-block h-4 w-4 animate-spin rounded-full border-2 border-paper border-t-transparent align-middle" />
-          Connecting…
-        </button>
-      )}
+      {(step === "ready" || step === "error" || step === "connecting") &&
+        (gate.state === "not-installed" ? (
+          <InstallFreighterLink />
+        ) : (
+          <ConnectFreighterButton onClick={handleConnect} busy={step === "connecting"} />
+        ))}
 
       {/* Claim button — after wallet verified */}
       {step === "matched" && (
