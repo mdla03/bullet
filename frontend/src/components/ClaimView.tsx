@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { decodeClaimLink, type ClaimPayload } from "@/lib/claim_link";
 import { claimNote } from "@/lib/claim_tx";
 import { proveBrowser } from "@/lib/prove_browser";
+import { assertNoteAddressedTo } from "@/lib/recipient";
 import { createClient } from "@/lib/supabase/client";
 import { getMe } from "@/lib/api";
 import { freighterGetAddressIfAllowed } from "@/lib/freighter";
@@ -94,6 +95,10 @@ export function ClaimView({ encoded }: { encoded: string }) {
     const p = payload!;
 
     try {
+      // 0. Only the wallet the note is addressed to can claim it. Check before
+      //    spending ~15 s on a proof the contract would reject.
+      await assertNoteAddressedTo(connectedAddress, p.recipientDigest);
+
       // 1. Generate ZK proof locally (browser). Secret never leaves the tab.
       setProveDetail("Loading proving assets…");
       setState((s) => ({ ...s, step: "proving" }));

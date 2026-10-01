@@ -24,3 +24,17 @@ export async function computeRecipientDigest(stellarAddress: string): Promise<bi
         .join("")
   );
 }
+
+/** Throw a readable error unless `address` is the wallet a note is addressed
+ *  to. The contract pays only the address whose digest is in the proof, and
+ *  only if that address signs, so claiming from any other wallet would fail
+ *  on-chain with RecipientMismatch after a full proof. */
+export async function assertNoteAddressedTo(
+  address: string,
+  recipientDigestDec: string
+): Promise<void> {
+  if ((await computeRecipientDigest(address)).toString() !== recipientDigestDec)
+    throw new Error(
+      "This payment is addressed to a different wallet. Connect the wallet it was sent to, or sign in to Bullet and claim it from your inbox."
+    );
+}

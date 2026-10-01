@@ -1,6 +1,6 @@
 export interface ClaimPayload {
   secret: string;           // hex, 64 chars (32 bytes)
-  recipientDigest: string;  // decimal bigint string
+  recipientDigest: string;  // decimal: digest of the Stellar address that can claim
   amount: number;           // raw stroop value (e.g. 100000000 for 10 USDC)
   tokenId?: number;         // 0 = USDC (default), 1 = XLM
   // Context fields below are OPTIONAL: they are kept in the encrypted inbox
@@ -11,9 +11,6 @@ export interface ClaimPayload {
   /** Handle the sender addressed (e.g. "@elykable", "you@x.com"). Shown in the
    * inbox; not carried in the link. */
   recipientHandle?: string;
-  /** X25519 ephemeral pubkey (hex) used for stealth ECDH derivation of
-   * recipientDigest. Present in inbox notes; omitted from URL links. */
-  ephemeralPubkey?: string;
 }
 
 /** Only these three fields travel in the URL. Everything else is a known

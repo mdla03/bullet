@@ -1,32 +1,44 @@
 // Read-only check of a note's on-chain nullifier status.
 //
-// A note's nullifier = Poseidon([secret]) — the same value the claim proof
-// binds. Once ANY claim path spends it (inbox claim OR a backup claim link),
-// the contract records the nullifier and rejects every later claim with
-// Error::NullifierUsed (#6). The inbox uses this to render already-spent notes
-// as claimed instead of offering a Claim button that would fail on submit.
+// A note's nullifier = Poseidon([secret, leafIndex]), the same value the claim
+// and join-split proofs bind. Once ANY path spends it (inbox claim OR a backup
+// claim link), the contract records the nullifier and rejects every later
+// claim with Error::NullifierUsed (#6). The inbox uses this to render
+// already-spent notes as claimed instead of offering a Claim button that would
+// fail on submit.
 //
-// The secret never leaves the browser: we compute the nullifier locally and
-// only send that 32-byte hash to the contract's read-only getter.
+// The secret never leaves the browser: we compute the commitment and nullifier
+// locally. Only the commitment goes to the resolver (to learn the note's tree
+// index) and only the nullifier goes to the contract's read-only getter.
 
 import * as StellarSdk from "@stellar/stellar-sdk";
-import { poseidon } from "./poseidon";
+import { computeCommitment, noteNullifier } from "./commitment";
+import type { ClaimPayload } from "./claim_link";
 
 const RPC_URL =
   process.env.NEXT_PUBLIC_SOROBAN_RPC_URL ?? "https://soroban-testnet.stellar.org";
 const CONTRACT_ID = process.env.NEXT_PUBLIC_CONTRACT_ID ?? "";
 const NETWORK_PASSPHRASE =
   process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ?? StellarSdk.Networks.TESTNET;
+const RESOLVER_URL = process.env.NEXT_PUBLIC_RESOLVER_URL ?? "http://localhost:3001";
 
-/** Poseidon([secret]) as 32-byte big-endian hex. Mirrors prove_browser.ts.
- *  Byte-for-byte copy of backend/src/invite.ts's nullifierHexFromSecret; see
- *  that copy's comment for why it isn't hoisted into shared/. */
-export function nullifierHexFromSecret(secretHex: string): string {
-  const secretDec = BigInt("0x" + secretHex).toString();
-  const dec = poseidon([secretDec]);
-  const h = BigInt(dec).toString(16);
-  if (h.length > 64) throw new Error(`nullifier overflow: ${dec}`);
-  return h.padStart(64, "0");
+/** The note's nullifier as 32-byte big-endian hex, or null when the resolver
+ *  does not have the note in its tree yet (so it cannot have been claimed).
+ *  Same formula as backend/src/invite.ts's nullifierHexFromSecret. */
+export async function nullifierHexForNote(p: ClaimPayload): Promise<string | null> {
+  const secretDec = BigInt("0x" + p.secret).toString();
+  const commitment = computeCommitment(
+    secretDec,
+    p.recipientDigest,
+    String(p.amount),
+    String(p.tokenId ?? 0)
+  );
+  const res = await fetch(`${RESOLVER_URL}/path?commitment=${encodeURIComponent(commitment)}`);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`path lookup failed (${res.status})`);
+  const { leafIndex } = (await res.json()) as { leafIndex?: number };
+  if (typeof leafIndex !== "number") throw new Error("path lookup returned no leafIndex");
+  return BigInt(noteNullifier(secretDec, leafIndex)).toString(16).padStart(64, "0");
 }
 
 /**

@@ -3,18 +3,14 @@
 // The sender's browser sealed-box-encrypts the claim payload to the
 // recipient's registered Bullet pubkey (Ed25519, converted to X25519).
 // Only the recipient, re-deriving their key from the same Freighter
-// signature, can decrypt. Rows are public ciphertext; the money itself
+// signature, can decrypt. Rows are ciphertext, readable only through the
+// backend by the account they are addressed to; the money itself
 // is protected by the on-chain nullifier, not by this table.
 
 import nacl from "tweetnacl";
 import ed2curve from "ed2curve";
-import { createClient } from "./supabase/client";
+import { apiFetch, RESOLVER_URL } from "./api";
 import type { ClaimPayload } from "./claim_link";
-
-const supabase = createClient();
-
-const RESOLVER_URL =
-  process.env.NEXT_PUBLIC_RESOLVER_URL ?? "http://localhost:3001";
 
 function hexToBytes(hex: string): Uint8Array {
   const bytes = new Uint8Array(hex.length / 2);
@@ -59,7 +55,7 @@ export interface InboxNote {
   /** Transaction that claimed this note, when a claim row records it (joined
    *  from `activity.note_id` in Inbox.tsx's loadNotes, not stored here). Lets
    *  a claim from an earlier session still link to the explorer without
-   *  putting a tx hash on this publicly-readable table. */
+   *  putting a tx hash on the notes table. */
   claimTx?: string;
 }
 
@@ -103,33 +99,41 @@ export async function countUnclaimedByPubkey(
   pubkeys: string[]
 ): Promise<Record<string, number>> {
   if (pubkeys.length === 0) return {};
-  const { data, error } = await supabase
-    .from("notes")
-    .select("recipient_pubkey")
-    .in("recipient_pubkey", pubkeys)
-    .is("claimed_at", null);
-  if (error) return {};
-  const counts: Record<string, number> = {};
-  for (const row of data ?? []) {
-    const k = row.recipient_pubkey as string;
-    counts[k] = (counts[k] ?? 0) + 1;
+  try {
+    const res = await apiFetch("/notes/unclaimed-counts");
+    if (!res.ok) return {};
+    const { counts } = (await res.json()) as { counts: Record<string, number> };
+    return Object.fromEntries(
+      Object.entries(counts).filter(([k]) => pubkeys.includes(k))
+    );
+  } catch {
+    return {};
   }
-  return counts;
 }
 
-/** Fetch and decrypt every note addressed to these keys, newest first. */
+interface NoteRow {
+  id: string;
+  ephemeral_pubkey: string;
+  nonce: string;
+  ciphertext: string;
+  created_at: string;
+  claimed_at: string | null;
+  invite_id: string | null;
+  custody_secret: string | null;
+}
+
+/** Fetch and decrypt every note addressed to these keys, newest first. The
+ *  notes table is not browser-readable; the backend serves only the signed-in
+ *  account's own rows. */
 export async function fetchNotes(keys: BulletKeys): Promise<InboxNote[]> {
-  const { data, error } = await supabase
-    .from("notes")
-    .select(
-      "id, ephemeral_pubkey, nonce, ciphertext, created_at, claimed_at, invite_id, custody_secret"
-    )
-    .eq("recipient_pubkey", keys.pubKeyHex)
-    .order("created_at", { ascending: false });
-  if (error) throw new Error(`inbox scan failed: ${error.message}`);
+  const res = await apiFetch(
+    `/notes/mine?pubkey=${encodeURIComponent(keys.pubKeyHex)}`
+  );
+  if (!res.ok) throw new Error(`inbox scan failed (${res.status})`);
+  const { items } = (await res.json()) as { items: NoteRow[] };
 
   const notes: InboxNote[] = [];
-  for (const row of data ?? []) {
+  for (const row of items) {
     const opened = nacl.box.open(
       hexToBytes(row.ciphertext),
       hexToBytes(row.nonce),
@@ -177,9 +181,8 @@ export async function fetchNotes(keys: BulletKeys): Promise<InboxNote[]> {
 /** Stamp a note claimed so it renders as history instead of claimable.
  * Goes through the backend since notes.UPDATE is RLS-locked to service_role.
  * The explorer link comes from activity.note_id (see Inbox.tsx's loadNotes),
- * which doesn't sit on this publicly-readable table. */
+ * which does not sit on the notes table. */
 export async function markClaimed(id: string): Promise<void> {
-  const { apiFetch } = await import("./api");
   try {
     await apiFetch("/notes/mark-claimed", {
       method: "POST",

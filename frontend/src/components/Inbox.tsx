@@ -22,7 +22,8 @@ import {
 } from "@/lib/unlock_cache";
 import { type ClaimPayload } from "@/lib/claim_link";
 import { claimNote } from "@/lib/claim_tx";
-import { isNullifierUsed, nullifierHexFromSecret } from "@/lib/nullifier";
+import { isNullifierUsed, nullifierHexForNote } from "@/lib/nullifier";
+import { assertNoteAddressedTo } from "@/lib/recipient";
 import { humanizeChainError } from "@/lib/chain_errors";
 import {
   ArrowDownLeftIcon,
@@ -317,10 +318,9 @@ export function Inbox() {
       list.map(async (n) => {
         if (n.claimedAt) return false;
         try {
-          return await isNullifierUsed(
-            source,
-            nullifierHexFromSecret(n.payload.secret)
-          );
+          const nullifierHex = await nullifierHexForNote(n.payload);
+          if (!nullifierHex) return false; // not indexed yet, so not claimed
+          return await isNullifierUsed(source, nullifierHex);
         } catch {
           return false; // chain read failed: leave claimable, submit will guard
         }
@@ -366,6 +366,11 @@ export function Inbox() {
       setClaims((c) => ({ ...c, [note.id]: status }));
 
     try {
+      // A direct note is addressed to the wallet it was sent to, which is the
+      // unlocked one (current or previous) since that wallet's key opened it.
+      // An invite note is addressed to its custody wallet instead.
+      if (!(note.inviteId && note.custodyStellarSecret))
+        await assertNoteAddressedTo(address, p.recipientDigest);
       set({ state: "proving" });
       const {
         proof_a,

@@ -13,6 +13,10 @@ export function humanizeChainError(
   }
   if (/Account not found/i.test(raw))
     return "Your Stellar wallet isn't funded on testnet yet. Grab free XLM from friendbot.stellar.org and try again.";
+  // Match the token's diagnostic text, not Error(Contract, #10): that code
+  // collides with Bullet's own contract error codes.
+  if (/resulting balance is not within the allowed range/i.test(raw))
+    return "Not enough balance to cover this amount.";
   // placeholder for a code table keyed to the contract's Error enum in
   // contracts/zeekpay/src/lib.rs, follow-up.
   if (/NullifierUsed|Error\(Contract, #6\)/i.test(raw))

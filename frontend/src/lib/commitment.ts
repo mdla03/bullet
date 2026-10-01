@@ -26,3 +26,14 @@ export function computeCommitment(
     throw new Error("tokenId must be a non-negative decimal integer");
   return poseidon([secretDec, recipientDigestDec, amount, tokenId]);
 }
+
+/** Nullifier = Poseidon([secret, leafIndex]). claim.circom and
+ *  joinsplit.circom use the identical formula, so one note has one nullifier
+ *  whichever path spends it. `leafIndex` is the note's position in the tree,
+ *  the index the contract assigned it in its `note` event. */
+export function noteNullifier(secretDec: string, leafIndex: number): string {
+  if (!isValidFr(secretDec)) throw new Error("secret must be decimal < BLS12-381 r");
+  if (!Number.isSafeInteger(leafIndex) || leafIndex < 0)
+    throw new Error("leafIndex must be a non-negative integer");
+  return poseidon([secretDec, String(leafIndex)]);
+}

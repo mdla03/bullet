@@ -3,10 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ResolveCandidate, ResolveResult } from "@zeekpay/shared";
 import { displayCanonical } from "@/lib/handle-ui";
-import { computeRecipientDigest } from "@/lib/recipient";
-import { deriveStealthDigest } from "@/lib/stealth";
-import { computeCommitment } from "@/lib/commitment";
-import { depositNote } from "@/lib/deposit";
 import { encodeClaimLink, type ClaimPayload } from "@/lib/claim_link";
 import { postNote } from "@/lib/notes";
 import { apiFetch, postActivity } from "@/lib/api";
@@ -81,10 +77,17 @@ function parseAmountInput(
   return { stroops };
 }
 
+/** Base units to a trimmed decimal string, e.g. 25000000n -> "2.5". */
+function formatUnits(v: bigint, token: TokenConfig): string {
+  const places = token.decimals.toString().length - 1;
+  const frac = (v % token.decimals).toString().padStart(places, "0").replace(/0+$/, "");
+  return `${v / token.decimals}${frac ? `.${frac}` : ""}`;
+}
+
 type Step = "idle" | "computing" | "signing" | "submitting" | "done" | "error";
 
 const SEND_STEPS: { key: Step; label: string }[] = [
-  { key: "computing", label: "Creating the one-time commitment" },
+  { key: "computing", label: "Generating the proof" },
   { key: "signing", label: "Sign in Freighter" },
   { key: "submitting", label: "Submitting to Stellar" },
 ];
@@ -161,6 +164,44 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
   );
   const amountStroops = parsedAmount.stroops ?? null;
   const amountErrorMsg = amountInput.trim() ? parsedAmount.error : undefined;
+
+  // Sender's balance of the selected token; null while loading or if it can't
+  // be read, in which case the send is not blocked.
+  const [balance, setBalance] = useState<bigint | null>(null);
+  const hasRecipient = !!(resolved || unregistered);
+  // Refetch on token or recipient change and once when a send completes, so
+  // the balance is fresh. Reset to null only on a token change (no flicker).
+  const sendDone = step === "done";
+  const balanceTokenRef = useRef(selectedToken.id);
+  useEffect(() => {
+    if (!hasRecipient) return;
+    let cancelled = false;
+    if (balanceTokenRef.current !== selectedToken.id) {
+      balanceTokenRef.current = selectedToken.id;
+      setBalance(null);
+    }
+    (async () => {
+      const { freighterGetAddressIfAllowed } = await import("@/lib/freighter");
+      const addr = await freighterGetAddressIfAllowed();
+      if (!addr) return;
+      const { fetchTokenBalance } = await import("@/lib/balance");
+      const b = await fetchTokenBalance(selectedToken.id, addr);
+      if (!cancelled) setBalance(b);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [hasRecipient, selectedToken.id, sendDone]);
+  const insufficient =
+    balance !== null && amountStroops !== null && amountStroops > balance;
+  const insufficientMsg = insufficient
+    ? `Not enough ${selectedToken.label}. You have ${formatUnits(balance, selectedToken)} ${selectedToken.label}.`
+    : "";
+  // Why the send is blocked, or null when it can go ahead.
+  const sendBlock =
+    amountStroops === null || insufficient
+      ? insufficientMsg || amountErrorMsg || "Enter a valid amount."
+      : null;
 
   // Arriving from the hero send box: resolve the prefilled handle right away.
   const autoResolved = useRef(false);
@@ -267,8 +308,8 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
 
   async function handleSendInvite() {
     if (!unregistered) return;
-    if (amountStroops === null) {
-      setError(amountErrorMsg ?? "Enter a valid amount.");
+    if (sendBlock || amountStroops === null) {
+      setError(sendBlock ?? "Enter a valid amount.");
       return;
     }
     const amount = amountStroops;
@@ -279,6 +320,8 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
       const { freighterRequestAccess, freighterSignTransaction } = await import(
         "@/lib/freighter"
       );
+      // Loaded on send, not with the page: it pulls in snarkjs.
+      const { sendNote } = await import("@/lib/transact");
       const { address: senderAddress } = await freighterRequestAccess();
 
       // Get a per-invite custody Stellar wallet from the backend.
@@ -293,44 +336,28 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
         custodySecret: string;
       };
 
-      const recipientDigest = await computeRecipientDigest(custodyStellarAddress);
-
-      const secretBytes = new Uint8Array(32);
-      crypto.getRandomValues(secretBytes);
-      secretBytes[0] = 0;
-      const secret = Array.from(secretBytes)
-        .map((b) => b.toString(16).padStart(2, "0"))
-        .join("");
-      const secretBigInt = BigInt("0x" + secret);
-
-      // Commitment computed locally so the claim secret never leaves the tab.
-      const commitment = computeCommitment(
-        secretBigInt.toString(),
-        recipientDigest.toString(),
-        amount.toString(),
-        String(selectedToken.id)
-      );
-      const commitmentBigInt = BigInt(commitment);
-
-      setStep("signing");
-      const hash = await depositNote(
-        senderAddress,
-        commitmentBigInt,
+      // The note is addressed to the custody wallet, so only the custody key
+      // (held in the invite) can claim it. The recipient's inbox claims to
+      // custody and then forwards to their own wallet (invite_claim.ts).
+      const { hash, secretHex: secret, recipientDigest } = await sendNote({
+        sender: senderAddress,
+        recipient: custodyStellarAddress,
         amount,
-        async (xdr) => {
+        tokenId: selectedToken.id,
+        signTx: async (xdr) => {
           setStep("submitting");
           return freighterSignTransaction(
             xdr,
             process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ?? "Test SDF Network ; September 2015"
           );
         },
-        selectedToken.id
-      );
+        onStage: (stage) => setStep(stage === "proving" ? "computing" : "signing"),
+      });
       setTxHash(hash);
 
       const payload: ClaimPayload = {
         secret,
-        recipientDigest: recipientDigest.toString(),
+        recipientDigest,
         amount: Number(amount),
         tokenId: selectedToken.id,
         contractId: CONTRACT_ID,
@@ -369,8 +396,8 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
 
   async function handleSend() {
     if (!resolved?.stellarAddress) return;
-    if (amountStroops === null) {
-      setError(amountErrorMsg ?? "Enter a valid amount.");
+    if (sendBlock || amountStroops === null) {
+      setError(sendBlock ?? "Enter a valid amount.");
       return;
     }
     const amount = amountStroops;
@@ -383,45 +410,26 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
       const { freighterRequestAccess, freighterSignTransaction } = await import(
         "@/lib/freighter"
       );
+      // Loaded on send, not with the page: it pulls in snarkjs.
+      const { sendNote } = await import("@/lib/transact");
       const { address: senderAddress } = await freighterRequestAccess();
 
-      // 2. Derive per-payment stealth recipientDigest via ECDH with recipient's bullet key.
-      setStep("computing");
-      const { recipientDigest: recipientDigestDec, ephemeralPubHex } =
-        deriveStealthDigest(resolved.zeekPayPubKey!);
-      // 3. Generate random 32-byte secret; zero top byte so value < BLS12-381 r.
-      const secretBytes = new Uint8Array(32);
-      crypto.getRandomValues(secretBytes);
-      secretBytes[0] = 0;
-      const secret = Array.from(secretBytes)
-        .map((b) => b.toString(16).padStart(2, "0"))
-        .join("");
-      const secretBigInt = BigInt("0x" + secret);
-
-      // 4. Compute commitment locally so the claim secret never leaves the tab.
-      const commitment = computeCommitment(
-        secretBigInt.toString(),
-        recipientDigestDec,
-        amount.toString(),
-        String(selectedToken.id)
-      );
-      const commitmentBigInt = BigInt(commitment);
-
-      // 5. Build, sign, submit deposit transaction
-      setStep("signing");
-      const hash = await depositNote(
-        senderAddress,
-        commitmentBigInt,
+      // 2. Prove and submit a join-split send. The note is addressed to the
+      // recipient's registered wallet, so only that wallet can claim it.
+      const { hash, secretHex: secret, recipientDigest: recipientDigestDec } = await sendNote({
+        sender: senderAddress,
+        recipient: resolved.stellarAddress,
         amount,
-        async (xdr) => {
+        tokenId: selectedToken.id,
+        signTx: async (xdr) => {
           setStep("submitting");
           return freighterSignTransaction(
             xdr,
             process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ?? "Test SDF Network ; September 2015"
           );
         },
-        selectedToken.id
-      );
+        onStage: (stage) => setStep(stage === "proving" ? "computing" : "signing"),
+      });
       setTxHash(hash);
 
       // 6. Build claim link
@@ -433,7 +441,6 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
         contractId: CONTRACT_ID,
         network: "testnet",
         recipientHandle: recipient.trim(),
-        ephemeralPubkey: ephemeralPubHex,
       };
       setClaimLink(encodeClaimLink(payload, getFrontendUrl()));
 
@@ -675,15 +682,19 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
           </div>
 
           <div className="space-y-1.5">
+            <label htmlFor="send-amount" className="block px-1 text-sm font-medium">
+              Amount
+            </label>
             <div className="relative">
               <input
+                id="send-amount"
                 type="text"
                 inputMode="decimal"
-                placeholder="0.00"
+                placeholder="Enter any amount"
                 value={amountInput}
                 onChange={(e) => setAmountInput(e.target.value)}
                 disabled={busy}
-                className="w-full rounded-xl border border-fog bg-white px-4 py-3 pr-16 text-lg font-bold tracking-tight placeholder-graphite/70 focus:border-ink focus:outline-none disabled:opacity-50"
+                className="w-full rounded-xl border border-graphite/60 bg-paper/40 px-4 py-3 pr-16 text-lg font-bold tracking-tight placeholder-graphite/70 focus:border-ink focus:outline-none disabled:opacity-50"
               />
               <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-sm font-medium text-graphite">
                 {selectedToken.label}
@@ -692,15 +703,20 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
             {amountErrorMsg && (
               <p className="text-sm text-amber">{amountErrorMsg}</p>
             )}
+            {insufficientMsg && (
+              <p className="text-sm text-amber">{insufficientMsg}</p>
+            )}
           </div>
 
+          <div className="space-y-2">
+          <p className="px-1 text-xs text-graphite">Quick amounts</p>
           <div className="grid grid-cols-4 gap-2">
             {selectedToken.presets.map((d) => (
               <button
                 key={d}
                 onClick={() => setAmountInput(String(d))}
                 disabled={busy}
-                className={`rounded-xl border px-2 py-4 text-lg font-bold transition-all duration-200 ease-out active:scale-95 disabled:opacity-50 ${
+                className={`rounded-xl border px-2 py-2.5 text-base font-bold transition-all duration-200 ease-out active:scale-95 disabled:opacity-50 ${
                   amountInput.trim() === String(d)
                     ? "border-ink bg-ink text-paper shadow-md shadow-ink/10"
                     : "border-fog text-graphite hover:border-graphite"
@@ -709,6 +725,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
                 {selectedToken.prefix}{d}
               </button>
             ))}
+          </div>
           </div>
 
           {unregistered && (
@@ -767,7 +784,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
                   handleSend();
                 }
               }}
-              disabled={amountStroops === null}
+              disabled={sendBlock !== null}
               className="flex w-full items-center justify-center rounded-full bg-ink px-5 py-3 font-semibold text-paper transition-colors hover:bg-ink/85 disabled:opacity-40"
             >
               {amountStroops === null

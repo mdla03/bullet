@@ -1,22 +1,24 @@
-// Browser-side Groth16 prover. Mirrors backend/src/prove.ts byte layout so the
-// on-chain verifier accepts the resulting proof.
+// Browser-side Groth16 provers for claim.circom and joinsplit.circom. Proof
+// bytes are laid out the way the contract's verifier reads them.
 //
-// Flow: client already has {secret, recipientDigest, amount, tokenId} from the claim link.
+// Claim flow: client already has {secret, recipientDigest, amount, tokenId} from the claim link.
 // (1) Compute commitment = Poseidon([secret, recipientDigest, amount, tokenId]).
-// (2) Ask resolver for the Merkle path against the current tree.
-// (3) Compute nullifier = Poseidon([secret]) so the secret never leaves the tab.
+// (2) Ask resolver for the Merkle path and the note's leafIndex.
+// (3) Compute nullifier = Poseidon([secret, leafIndex]) so the secret never leaves the tab.
 // (4) Run snarkjs.groth16.fullProve locally against claim.wasm + claim.zkey.
-// (5) Format proof bytes for Soroban (matches backend byte layout).
+// (5) Format proof bytes for Soroban.
+//
+// Send flow: proveSend() runs a witness from joinsplit.ts against
+// joinsplit.wasm + joinsplit.zkey.
 
 // @ts-expect-error — snarkjs has no bundled types.
 import * as snarkjs from "snarkjs";
 import { poseidon } from "./poseidon";
 import { commit as pedersenCommit, BLINDING_BITS } from "./jubjub_commit";
+import { noteNullifier } from "./commitment";
 
 const RESOLVER_URL =
   process.env.NEXT_PUBLIC_RESOLVER_URL ?? "http://localhost:3001";
-const WASM_URL = "/circuits/claim.wasm";
-const ZKEY_URL = "/circuits/claim.zkey";
 
 export interface BrowserProveResult {
   proof_a: string;   // 192-char hex (G1)
@@ -45,22 +47,24 @@ function randomBlindingDec(): string {
   return v.toString();
 }
 
-let cachedAssets: { wasm: Uint8Array; zkey: Uint8Array } | null = null;
+type Circuit = "claim" | "joinsplit";
+const cachedAssets: Partial<Record<Circuit, Promise<{ wasm: Uint8Array; zkey: Uint8Array }>>> = {};
 
-async function loadAssets(): Promise<{ wasm: Uint8Array; zkey: Uint8Array }> {
-  if (cachedAssets) return cachedAssets;
-  const [wasmRes, zkeyRes] = await Promise.all([
-    fetch(WASM_URL),
-    fetch(ZKEY_URL),
-  ]);
-  if (!wasmRes.ok) throw new Error(`Failed to load claim.wasm (${wasmRes.status})`);
-  if (!zkeyRes.ok) throw new Error(`Failed to load claim.zkey (${zkeyRes.status})`);
-  const [wasm, zkey] = await Promise.all([
-    wasmRes.arrayBuffer(),
-    zkeyRes.arrayBuffer(),
-  ]);
-  cachedAssets = { wasm: new Uint8Array(wasm), zkey: new Uint8Array(zkey) };
-  return cachedAssets;
+function loadAssets(name: Circuit): Promise<{ wasm: Uint8Array; zkey: Uint8Array }> {
+  cachedAssets[name] ??= (async () => {
+    const [wasmRes, zkeyRes] = await Promise.all([
+      fetch(`/circuits/${name}.wasm`),
+      fetch(`/circuits/${name}.zkey`),
+    ]);
+    if (!wasmRes.ok) throw new Error(`Failed to load ${name}.wasm (${wasmRes.status})`);
+    if (!zkeyRes.ok) throw new Error(`Failed to load ${name}.zkey (${zkeyRes.status})`);
+    const [wasm, zkey] = await Promise.all([wasmRes.arrayBuffer(), zkeyRes.arrayBuffer()]);
+    return { wasm: new Uint8Array(wasm), zkey: new Uint8Array(zkey) };
+  })().catch((e) => {
+    delete cachedAssets[name]; // let a later attempt retry the download
+    throw e;
+  });
+  return cachedAssets[name]!;
 }
 
 function be(dec: string, bytes: number): string {
@@ -92,7 +96,6 @@ export async function proveBrowser(
 ): Promise<BrowserProveResult> {
   onStage?.("loading");
   const commitment = poseidon([secretDec, recipientDigest, amount, tokenId]);
-  const nullifier = poseidon([secretDec]);
 
   onStage?.("path");
   // Asset loading, the Merkle-path lookup, and the blinding sample +
@@ -100,7 +103,7 @@ export async function proveBrowser(
   // concurrently rather than one after another.
   const [{ wasm, zkey }, pathRes, { blinding, amountCommitmentX, amountCommitmentY }] =
     await Promise.all([
-      loadAssets(),
+      loadAssets("claim"),
       fetch(`${RESOLVER_URL}/path?commitment=${encodeURIComponent(commitment)}`),
       (async () => {
         const blinding = randomBlindingDec();
@@ -121,11 +124,16 @@ export async function proveBrowser(
       `Merkle path lookup failed: ${err.detail ?? pathRes.status}`
     );
   }
-  const { root, pathElements, pathIndices } = (await pathRes.json()) as {
+  const { leafIndex, root, pathElements, pathIndices } = (await pathRes.json()) as {
+    leafIndex: number;
     root: string;
     pathElements: string[];
     pathIndices: number[];
   };
+  if (!Number.isSafeInteger(leafIndex) || leafIndex < 0) {
+    throw new Error("Merkle path lookup returned no leaf index (resolver out of date?)");
+  }
+  const nullifier = noteNullifier(secretDec, leafIndex);
 
   onStage?.("proving");
   const { proof, publicSignals } = await snarkjs.groth16.fullProve(
@@ -138,6 +146,7 @@ export async function proveBrowser(
       secret: secretDec,
       pathElements,
       pathIndices,
+      leafIndex: String(leafIndex),
       blinding,
       amountCommitmentX,
       amountCommitmentY,
@@ -163,4 +172,37 @@ export async function proveBrowser(
     amountCommitmentX: fr(publicSignals[5]),
     amountCommitmentY: fr(publicSignals[6]),
   };
+}
+
+export interface SendProof {
+  proof_a: string; // 192-char hex (G1)
+  proof_b: string; // 384-char hex (G2)
+  proof_c: string; // 192-char hex (G1)
+}
+
+/**
+ * Prove a join-split (joinsplit.circom) in the browser. `input` and
+ * `expectedPublic` come from buildSendWitness (joinsplit.ts). The public
+ * signals are checked against what the contract will derive, so a stale
+ * joinsplit.wasm/zkey fails here with a readable message instead of on-chain
+ * as InvalidProof.
+ */
+export async function proveSend(
+  input: Record<string, unknown>,
+  expectedPublic: string[],
+  onStage?: (stage: "loading" | "proving") => void
+): Promise<SendProof> {
+  onStage?.("loading");
+  const { wasm, zkey } = await loadAssets("joinsplit");
+  onStage?.("proving");
+  const { proof, publicSignals } = await snarkjs.groth16.fullProve(input, wasm, zkey);
+  if (
+    publicSignals.length !== expectedPublic.length ||
+    publicSignals.some((v: string, i: number) => v !== expectedPublic[i])
+  ) {
+    throw new Error(
+      `join-split public signals do not match the transaction (served joinsplit.wasm/zkey may be stale)`
+    );
+  }
+  return { proof_a: g1(proof.pi_a), proof_b: g2(proof.pi_b), proof_c: g1(proof.pi_c) };
 }
