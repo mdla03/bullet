@@ -30,10 +30,16 @@ import {
   ExternalLinkIcon,
   LoaderIcon,
   RefreshIcon,
-  WalletIcon,
 } from "@/components/icons";
 import { Skeleton } from "@/components/Skeleton";
 import { ErrorDetails } from "@/components/ErrorDetails";
+import {
+  FreighterGate,
+  FreighterLostAccess,
+  isFreighterAccessLost,
+  useFreighterGate,
+} from "@/components/FreighterGate";
+import { freighterAccessState, freighterEnsureAccess } from "@/lib/freighter";
 
 const PAGE_SIZE = 5;
 import { proveBrowser } from "@/lib/prove_browser";
@@ -106,6 +112,7 @@ export function Inbox() {
   const [claimableShown, setClaimableShown] = useState(PAGE_SIZE);
   const [strandedCounts, setStrandedCounts] = useState<Record<string, number>>({});
   const [error, setError] = useState("");
+  const gate = useFreighterGate();
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -167,27 +174,34 @@ export function Inbox() {
   // Freighter every time.
   useEffect(() => {
     if (!wallet || keys) return;
-    const cached = loadUnlock();
-    const known = [
-      wallet.bullet_pubkey,
-      ...wallet.previous.map((p) => p.bullet_pubkey),
-    ];
-    // Nothing cached, or the account switched wallets since it was written:
-    // this is a real lock, show the unlock screen.
-    if (!cached || !known.includes(cached.keys.pubKeyHex)) {
-      if (cached) clearUnlock();
-      setRestoring(false);
-      return;
-    }
-    touchUnlock();
-    setAddress(cached.address);
-    setKeys(cached.keys);
-    // Notes load over the network and each unclaimed one costs a chain read,
-    // so this is seconds, not milliseconds. restoring stays true until it
-    // settles, either way: a failure here still needs the unlock screen.
-    loadNotes(cached.keys, cached.address)
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
-      .finally(() => setRestoring(false));
+    (async () => {
+      const cached = loadUnlock();
+      const known = [
+        wallet.bullet_pubkey,
+        ...wallet.previous.map((p) => p.bullet_pubkey),
+      ];
+      // Nothing cached, the account switched wallets since it was written, or
+      // Freighter no longer lets this site in (a claim would fail at signing):
+      // this is a real lock, show the unlock screen.
+      if (
+        !cached ||
+        !known.includes(cached.keys.pubKeyHex) ||
+        (await freighterAccessState()) !== "ready"
+      ) {
+        if (cached) clearUnlock();
+        setRestoring(false);
+        return;
+      }
+      touchUnlock();
+      setAddress(cached.address);
+      setKeys(cached.keys);
+      // Notes load over the network and each unclaimed one costs a chain read,
+      // so this is seconds, not milliseconds. restoring stays true until it
+      // settles, either way: a failure here still needs the unlock screen.
+      loadNotes(cached.keys, cached.address)
+        .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+        .finally(() => setRestoring(false));
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wallet]);
 
@@ -366,6 +380,8 @@ export function Inbox() {
       setClaims((c) => ({ ...c, [note.id]: status }));
 
     try {
+      // Before the proof, so a lapsed grant surfaces from the click, not 15-30 s in.
+      await freighterEnsureAccess();
       set({ state: "proving" });
       const {
         proof_a,
@@ -558,21 +574,14 @@ export function Inbox() {
   if (!keys || !notes) {
     return (
       <div className="space-y-4">
-        <div className="space-y-4 rounded-2xl border border-fog bg-white p-6">
-          <h2 className="text-xl font-bold tracking-tight">Unlock inbox</h2>
-          <button
-            onClick={unlock}
-            disabled={unlocking}
-            className="flex w-full items-center justify-center gap-2 rounded-full bg-ink px-4 py-3 font-semibold text-paper transition-colors hover:bg-ink/85 disabled:opacity-50"
-          >
-            {unlocking ? (
-              <LoaderIcon className="h-5 w-5 animate-spin" />
-            ) : (
-              <WalletIcon className="h-5 w-5" />
-            )}
-            {unlocking ? "Waiting for Freighter…" : "Unlock with Freighter"}
-          </button>
-        </div>
+        <FreighterGate
+          state={gate.state}
+          heading="Unlock inbox"
+          label={gate.state === "needs-connect" ? "Connect and unlock" : "Unlock with Freighter"}
+          busyLabel="Waiting for Freighter…"
+          onClick={unlock}
+          busy={unlocking}
+        />
         {error && (
           <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
             <ErrorDetails message={error} />
@@ -709,17 +718,22 @@ export function Inbox() {
                         Claim
                       </button>
                     )}
-                    {status?.state === "error" && (
-                      <div className="w-full text-xs text-red-700">
-                        <ErrorDetails
-                          message={humanizeChainError(
-                            status.message,
-                            TOKEN_LABELS[note.payload.tokenId ?? 0] ?? "USDC"
-                          )}
-                          details={status.message}
-                        />
-                      </div>
-                    )}
+                    {status?.state === "error" &&
+                      (isFreighterAccessLost(status.message) ? (
+                        <div className="w-full">
+                          <FreighterLostAccess onRetry={() => claimOne(note)} />
+                        </div>
+                      ) : (
+                        <div className="w-full text-xs text-red-700">
+                          <ErrorDetails
+                            message={humanizeChainError(
+                              status.message,
+                              TOKEN_LABELS[note.payload.tokenId ?? 0] ?? "USDC"
+                            )}
+                            details={status.message}
+                          />
+                        </div>
+                      ))}
                   </li>
                 );
               })}

@@ -57,6 +57,30 @@ export async function freighterRequestAccess(): Promise<{ address: string }> {
   return { address: res.address };
 }
 
+export type FreighterAccess = "ready" | "needs-connect" | "not-installed";
+
+/** Whether this site can use Freighter right now. isConnected answers within
+ * 2 s even with no extension, but isAllowed would wait forever, so it only
+ * runs once the extension has answered. The mobile in-app browser has no
+ * grant to check (WalletConnect pairs on connect), so it is always ready. */
+export async function freighterAccessState(): Promise<FreighterAccess> {
+  if (isFreighterMobileBrowser()) return "ready";
+  try {
+    const { isConnected, isAllowed } = await import("@stellar/freighter-api");
+    if (!(await isConnected()).isConnected) return "not-installed";
+    const res = await withTimeout(isAllowed(), 3_000, "Freighter access");
+    return res.isAllowed ? "ready" : "needs-connect";
+  } catch {
+    return "needs-connect";
+  }
+}
+
+/** Opens the connect popup if the grant is gone. Call before anything slow so
+ * the popup comes from the user's click, and again right before signing. */
+export async function freighterEnsureAccess(): Promise<void> {
+  if ((await freighterAccessState()) !== "ready") await freighterRequestAccess();
+}
+
 /** Returns the address ONLY if this site is already whitelisted in Freighter.
  * Does not trigger the connect popup. Returns null on any error. */
 export async function freighterGetAddressIfAllowed(): Promise<string | null> {
@@ -75,6 +99,7 @@ export async function freighterSignTransaction(
   xdr: string,
   networkPassphrase: string
 ): Promise<string> {
+  await freighterEnsureAccess();
   if (isFreighterMobileBrowser()) {
     const { wcSignTransaction } = await import("@/lib/walletconnect");
     return wcSignTransaction(xdr, networkPassphrase);
@@ -93,6 +118,7 @@ export async function freighterSignMessage(
   message: string,
   address: string
 ): Promise<string | Buffer> {
+  await freighterEnsureAccess();
   if (isFreighterMobileBrowser()) {
     const { wcSignMessage } = await import("@/lib/walletconnect");
     return wcSignMessage(message, address);

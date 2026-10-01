@@ -18,6 +18,13 @@ import {
 } from "@/components/icons";
 import { CandidateRow, RecipientRow } from "@/components/RecipientRow";
 import { ErrorDetails } from "@/components/ErrorDetails";
+import {
+  FreighterGate,
+  FreighterLostAccess,
+  isFreighterAccessLost,
+  useFreighterGate,
+} from "@/components/FreighterGate";
+import { Skeleton } from "@/components/Skeleton";
 import { humanizeChainError } from "@/lib/chain_errors";
 
 /** Shown under the recipient row once /resolve 404s: plain, factual, no
@@ -159,6 +166,7 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
   const [error, setError] = useState("");
   const [inviteWarn, setInviteWarn] = useState(false);
   const [dontWarnAgain, setDontWarnAgain] = useState(false);
+  const gate = useFreighterGate();
 
   const busy = step === "computing" || step === "signing" || step === "submitting";
   const stepIndex = SEND_STEPS.findIndex((s) => s.key === step);
@@ -503,6 +511,18 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
 
   const displayAmt = amountInput.trim() ? `${selectedToken.prefix}${amountInput.trim()}` : "";
 
+  // Nothing here works without Freighter, so ask for it before the form.
+  if (step === "idle" && gate.state !== "ready") {
+    return gate.state === "checking" ? (
+      <div className="space-y-3 rounded-2xl border border-fog bg-white p-6">
+        <Skeleton className="h-6 w-32" />
+        <Skeleton className="h-11 rounded-full" />
+      </div>
+    ) : (
+      <FreighterGate state={gate.state} onClick={gate.connect} busy={gate.connecting} />
+    );
+  }
+
   // ---- Success state ----
   if (step === "done") {
     return (
@@ -834,11 +854,14 @@ export function SendForm({ initialRecipient }: { initialRecipient?: string }) {
       )}
     </div>
 
-      {error && (
-        <div className="break-words rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
-          <ErrorDetails message={humanizeChainError(error, undefined, "send")} details={error} />
-        </div>
-      )}
+      {error &&
+        (isFreighterAccessLost(error) ? (
+          <FreighterLostAccess onRetry={unregistered ? handleSendInvite : handleSend} />
+        ) : (
+          <div className="break-words rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
+            <ErrorDetails message={humanizeChainError(error, undefined, "send")} details={error} />
+          </div>
+        ))}
 
       {inviteWarn && unregistered && (
         <div
