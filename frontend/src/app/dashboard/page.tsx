@@ -7,6 +7,8 @@ import {
 } from "@zeekpay/shared";
 import { createAdminClient, isAdminEmail } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { PAGE_SIZE, readFilters, type TxFilters } from "@/lib/dashboard_filters";
+import DashboardStats from "@/components/DashboardStats";
 
 export const metadata = { title: "Dashboard · bullet" };
 export const dynamic = "force-dynamic";
@@ -44,11 +46,35 @@ interface WalletRow {
 /** Every handle type in registry order, so a platform with nothing yet still
  *  shows as a zero rather than vanishing. A missing row and a zero row mean
  *  very different things when the question is "does this platform work". */
-const HANDLE_TYPES = enabledHandleTypes();
+/** Email is left out: it canonicalizes a bare address exactly as Google does,
+ *  so its row restated Google's and always read zero sends. Links proven by
+ *  email OTP are folded into Google below rather than dropped. */
+const HANDLE_TYPES = enabledHandleTypes().filter((t) => t.id !== "email");
 
 /** Counts per handle type, keyed by type id, starting at zero for all. */
 function emptyByType(): Map<string, number> {
   return new Map(HANDLE_TYPES.map((t) => [t.id, 0]));
+}
+
+async function loadTransactions(f: TxFilters) {
+  const db = createAdminClient();
+  let q = db
+    .from("activity")
+    .select("type, amount, token_id, tx_hash, created_at, user_id, handle", {
+      count: "exact",
+    })
+    .order("created_at", { ascending: false })
+    .range(f.page * PAGE_SIZE, f.page * PAGE_SIZE + PAGE_SIZE - 1);
+
+  if (f.type) q = q.eq("type", f.type);
+  if (f.token) q = q.eq("token_id", Number(f.token));
+  if (f.from) q = q.gte("created_at", `${f.from}T00:00:00.000Z`);
+  // Inclusive of the whole end day, which is what a date picker implies.
+  if (f.to) q = q.lte("created_at", `${f.to}T23:59:59.999Z`);
+  if (f.q) q = q.or(`handle.ilike.%${f.q}%,tx_hash.ilike.%${f.q}%`);
+
+  const { data, count } = await q;
+  return { rows: (data ?? []) as ActivityRow[], total: count ?? 0 };
 }
 
 async function loadMetrics() {
@@ -64,7 +90,6 @@ async function loadMetrics() {
     wallets,
     unclaimed,
     invites,
-    ledger,
     handles,
     activeWindow,
   ] = await Promise.all([
@@ -84,7 +109,6 @@ async function loadMetrics() {
       db.from("wallets").select("stellar_address, previous").limit(10000),
       db.from("notes").select("id", { count: "exact", head: true }).is("claimed_at", null),
       count("pending_invites", "id"),
-      latestLedger(),
       // Provider only, never the handle itself: this page shows cross-user
       // aggregates, and a list of who is on what platform is not an aggregate.
       // ponytail: reads rows and counts here rather than grouping in SQL;
@@ -130,7 +154,11 @@ async function loadMetrics() {
   const linkedHandles = emptyByType();
   for (const row of (handles.data ?? []) as { provider: string }[]) {
     const type = handleTypeForIdentityProvider(row.provider);
-    if (type) linkedHandles.set(type.id, (linkedHandles.get(type.id) ?? 0) + 1);
+    if (!type) continue;
+    // Email and Google are one address and one person, and the table shows one
+    // row for them. Count an email-OTP link under Google rather than losing it.
+    const id = type.id === "email" ? "google" : type.id;
+    linkedHandles.set(id, (linkedHandles.get(id) ?? 0) + 1);
   }
 
   // Sends per recipient handle type. activity.handle is the recipient's
@@ -139,18 +167,21 @@ async function loadMetrics() {
   //
   // Google and email share a canonical form (a bare address), and
   // handleTypeForCanonical returns the first type that claims it, which is
-  // Google. Sends to an email address therefore count under Google and the
-  // email row stays at zero. That is the registry's own resolution order, the
-  // same one /resolve uses, so the number matches the rest of the system
-  // rather than disagreeing with it; the table says so underneath. The three
-  // namespaced D3 types are unambiguous and unaffected.
+  // Google. Sends to an email address therefore count under Google. That is
+  // the registry's own resolution order, the same one /resolve uses, so the
+  // number matches the rest of the system rather than disagreeing with it.
+  // The three namespaced D3 types are unambiguous and unaffected.
   const sendsByType = emptyByType();
   let sendsUnknownType = 0;
   for (const r of rows) {
     if (r.type !== "send" || !r.handle) continue;
     const type = handleTypeForCanonical(r.handle);
-    if (type) sendsByType.set(type.id, (sendsByType.get(type.id) ?? 0) + 1);
-    else sendsUnknownType += 1;
+    if (!type) {
+      sendsUnknownType += 1;
+      continue;
+    }
+    const id = type.id === "email" ? "google" : type.id;
+    sendsByType.set(id, (sendsByType.get(id) ?? 0) + 1);
   }
 
   // Every distinct wallet address the project has ever seen, current or since
@@ -180,7 +211,6 @@ async function loadMetrics() {
   return {
     deposits: leaves.count ?? 0,
     cursorLedger: cursor.data?.cursor_ledger ?? null,
-    latestLedger: ledger,
     transactions: rows.length,
     sends: rows.filter((r) => r.type === "send").length,
     claims: rows.filter((r) => r.type === "claim").length,
@@ -212,7 +242,11 @@ async function latestLedger(): Promise<number | null> {
   }
 }
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -237,56 +271,98 @@ export default async function DashboardPage() {
     );
   }
 
-  const m = await loadMetrics();
-  const lag =
-    m.latestLedger && m.cursorLedger ? m.latestLedger - m.cursorLedger : null;
+  const sp = await searchParams;
+  const tab = sp.tab === "transactions" ? "transactions" : "overview";
+  const ledger = await latestLedger();
 
-  return (
-    <div className="space-y-8">
+  const header = (
+    <>
       <header className="space-y-1">
         <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
         <p className="font-mono text-xs text-graphite">
           {NETWORK} · contract {process.env.NEXT_PUBLIC_CONTRACT_ID?.slice(0, 8)}…
-          {m.latestLedger ? ` · ledger ${m.latestLedger.toLocaleString()}` : ""}
+          {ledger ? ` · ledger ${ledger.toLocaleString()}` : ""}
         </p>
       </header>
+      <Tabs active={tab} />
+    </>
+  );
 
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Stat
-          label="Transactions"
-          value={m.transactions}
-          note={`${m.sends} sends · ${m.claims} claims`}
-        />
-        <Stat label="Deposits on-chain" value={m.deposits} note="confirmed Merkle leaves" />
-        <Stat
-          label="Active accounts"
-          value={m.activeAccounts}
-          note="sent or claimed at least once"
-        />
-        <Stat label="Unclaimed notes" value={m.unclaimedNotes} />
-        <Stat label="Registered users" value={m.users} />
-        <Stat
-          label="Wallets connected"
-          value={m.walletsConnected}
-          note={`unique, incl. unlinked · ${m.walletsAttached} attached now`}
-        />
-        <Stat label="Daily active users" value={m.dau} note="sent or claimed in 24h" />
-        <Stat label="Monthly active users" value={m.mau} note={`sent or claimed in ${MAU_DAYS}d`} />
-        <Stat label="Pending invites" value={m.pendingInvites} />
-        <Stat
-          label="Indexer lag"
-          value={lag === null ? "n/a" : `${lag} ledgers`}
-          note={m.cursorLedger ? `cursor ${m.cursorLedger.toLocaleString()}` : "no cursor"}
-        />
-      </section>
+  if (tab === "transactions") {
+    const filters = readFilters(sp);
+    const { rows, total } = await loadTransactions(filters);
+    return (
+      <div className="space-y-8">
+        {header}
+        <TransactionsTab filters={filters} rows={rows} total={total} />
+      </div>
+    );
+  }
+
+  const m = await loadMetrics();
+  const lag = ledger && m.cursorLedger ? ledger - m.cursorLedger : null;
+
+  return (
+    <div className="space-y-8">
+      {header}
+
+      <DashboardStats
+        stats={[
+          {
+            id: "transactions",
+            label: "Transactions",
+            value: m.transactions,
+            note: `${m.sends} sends · ${m.claims} claims`,
+          },
+          {
+            id: "deposits",
+            label: "Deposits on-chain",
+            value: m.deposits,
+            note: "confirmed Merkle leaves",
+          },
+          {
+            id: "active-accounts",
+            label: "Active accounts",
+            value: m.activeAccounts,
+            note: "sent or claimed at least once",
+          },
+          { id: "unclaimed-notes", label: "Unclaimed notes", value: m.unclaimedNotes },
+          { id: "users", label: "Registered users", value: m.users },
+          {
+            id: "wallets",
+            label: "Wallets connected",
+            value: m.walletsConnected,
+            note: `unique, incl. unlinked · ${m.walletsAttached} attached now`,
+          },
+          {
+            id: "dau",
+            label: "Daily active users",
+            value: m.dau,
+            note: "sent or claimed in 24h",
+          },
+          {
+            id: "mau",
+            label: "Monthly active users",
+            value: m.mau,
+            note: `sent or claimed in ${MAU_DAYS}d`,
+          },
+          { id: "pending-invites", label: "Pending invites", value: m.pendingInvites },
+          {
+            id: "indexer-lag",
+            label: "Indexer lag",
+            value: lag === null ? "n/a" : `${lag} ledgers`,
+            note: m.cursorLedger ? `cursor ${m.cursorLedger.toLocaleString()}` : "no cursor",
+          },
+        ]}
+      />
 
       <section className="space-y-3 rounded-2xl border border-fog bg-white p-5">
         <h2 className="text-sm font-medium">Handles by platform</h2>
         <p className="text-xs text-graphite">
           Accounts linked, and sends paid to each. A platform with a linked
           handle but no sends has a proven login and no completed payment yet.
-          Sends to a bare email address count under Google, which claims that
-          form first in the registry, so the email row counts links only.
+          Google covers bare email addresses too, both the sends paid to them
+          and the accounts that signed in with an email code.
         </p>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[22rem] text-sm">
@@ -335,7 +411,15 @@ export default async function DashboardPage() {
       <DailyChart data={m.daily} />
 
       <section className="space-y-3 rounded-2xl border border-fog bg-white p-5">
-        <h2 className="text-sm font-medium">Recent transactions</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-medium">Recent transactions</h2>
+          <Link
+            href="/dashboard?tab=transactions"
+            className="text-xs text-signal hover:underline"
+          >
+            View all
+          </Link>
+        </div>
         {m.recent.length === 0 ? (
           <p className="text-sm text-graphite">No transactions yet.</p>
         ) : (
@@ -387,23 +471,189 @@ export default async function DashboardPage() {
   );
 }
 
-function Stat({
-  label,
-  value,
-  note,
-}: {
-  label: string;
-  value: number | string;
-  note?: string;
-}) {
+function Tabs({ active }: { active: "overview" | "transactions" }) {
+  const tabs = [
+    { id: "overview", label: "Overview", href: "/dashboard" },
+    { id: "transactions", label: "Transactions", href: "/dashboard?tab=transactions" },
+  ];
   return (
-    <div className="rounded-2xl border border-fog bg-white p-4">
-      <div className="text-2xl font-bold tracking-tight">
-        {typeof value === "number" ? value.toLocaleString() : value}
-      </div>
-      <div className="mt-1 text-xs text-graphite">{label}</div>
-      {note && <div className="font-mono text-[10px] text-graphite">{note}</div>}
-    </div>
+    <nav className="flex gap-2">
+      {tabs.map((t) => (
+        <Link
+          key={t.id}
+          href={t.href}
+          aria-current={active === t.id ? "page" : undefined}
+          className={`rounded-full px-4 py-1.5 text-sm font-medium ${
+            active === t.id
+              ? "bg-ink text-paper"
+              : "border border-fog bg-white text-graphite hover:text-ink"
+          }`}
+        >
+          {t.label}
+        </Link>
+      ))}
+    </nav>
+  );
+}
+
+/** Full activity log with filters. A plain GET form: the query string is the
+ *  filter state, so a filtered view is a link someone can keep, and the page
+ *  needs no client JS to do any of it. */
+function TransactionsTab({
+  filters,
+  rows,
+  total,
+}: {
+  filters: TxFilters;
+  rows: ActivityRow[];
+  total: number;
+}) {
+  const start = filters.page * PAGE_SIZE;
+  const pageLink = (page: number) => {
+    const qs = new URLSearchParams({ tab: "transactions" });
+    if (filters.type) qs.set("type", filters.type);
+    if (filters.token) qs.set("token", filters.token);
+    if (filters.from) qs.set("from", filters.from);
+    if (filters.to) qs.set("to", filters.to);
+    if (filters.q) qs.set("q", filters.q);
+    if (page > 0) qs.set("page", String(page));
+    return `/dashboard?${qs}`;
+  };
+  const field =
+    "rounded-xl border border-fog bg-white px-3 py-2 text-sm focus:border-ink focus:outline-none";
+
+  return (
+    <section className="space-y-4 rounded-2xl border border-fog bg-white p-5">
+      <form method="get" action="/dashboard" className="flex flex-wrap items-end gap-3">
+        <input type="hidden" name="tab" value="transactions" />
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-graphite">Type</span>
+          <select name="type" defaultValue={filters.type} className={field}>
+            <option value="">All</option>
+            <option value="send">Sends</option>
+            <option value="claim">Claims</option>
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-graphite">Asset</span>
+          <select name="token" defaultValue={filters.token} className={field}>
+            <option value="">All</option>
+            {Object.entries(TOKENS).map(([id, name]) => (
+              <option key={id} value={id}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-graphite">From</span>
+          <input type="date" name="from" defaultValue={filters.from} className={field} />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-graphite">To</span>
+          <input type="date" name="to" defaultValue={filters.to} className={field} />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-graphite">Handle or tx hash</span>
+          <input
+            type="search"
+            name="q"
+            defaultValue={filters.q}
+            placeholder="@name or hash"
+            className={`${field} font-mono`}
+          />
+        </label>
+        <button
+          type="submit"
+          className="rounded-full bg-ink px-5 py-2 text-sm font-medium text-paper"
+        >
+          Apply
+        </button>
+        <Link
+          href="/dashboard?tab=transactions"
+          className="rounded-full border border-fog px-5 py-2 text-sm font-medium text-graphite hover:text-ink"
+        >
+          Reset
+        </Link>
+      </form>
+
+      <p className="text-xs text-graphite">
+        {total.toLocaleString()} transaction{total === 1 ? "" : "s"} match
+        {total === 1 ? "es" : ""}
+        {rows.length > 0 && total > PAGE_SIZE
+          ? ` · showing ${(start + 1).toLocaleString()}–${(start + rows.length).toLocaleString()}`
+          : ""}
+      </p>
+
+      {rows.length === 0 ? (
+        <p className="text-sm text-graphite">No transactions match these filters.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-left font-mono text-xs">
+            <thead className="text-graphite">
+              <tr>
+                <th className="py-2 pr-4 font-normal">Time (UTC)</th>
+                <th className="py-2 pr-4 font-normal">Type</th>
+                <th className="py-2 pr-4 font-normal">Amount</th>
+                <th className="py-2 pr-4 font-normal">Recipient</th>
+                <th className="py-2 font-normal">Tx</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={`${r.created_at}-${r.tx_hash ?? r.user_id}`} className="border-t border-fog">
+                  <td className="py-2 pr-4">{r.created_at.slice(0, 19).replace("T", " ")}</td>
+                  <td className="py-2 pr-4">{r.type}</td>
+                  <td className="py-2 pr-4">
+                    {(r.amount / STROOPS).toLocaleString(undefined, {
+                      maximumFractionDigits: 7,
+                    })}{" "}
+                    {TOKENS[r.token_id ?? 0] ?? r.token_id}
+                  </td>
+                  <td className="py-2 pr-4">{r.handle ?? "n/a"}</td>
+                  <td className="py-2">
+                    {r.tx_hash ? (
+                      <a
+                        href={explorerTx(r.tx_hash)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-signal hover:underline"
+                      >
+                        {r.tx_hash.slice(0, 10)}…
+                      </a>
+                    ) : (
+                      "n/a"
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {total > PAGE_SIZE && (
+        <div className="flex items-center justify-between text-xs">
+          {filters.page > 0 ? (
+            <Link href={pageLink(filters.page - 1)} className="text-signal hover:underline">
+              Previous
+            </Link>
+          ) : (
+            <span className="text-graphite">Previous</span>
+          )}
+          <span className="font-mono text-graphite">
+            page {filters.page + 1} of {Math.ceil(total / PAGE_SIZE)}
+          </span>
+          {start + rows.length < total ? (
+            <Link href={pageLink(filters.page + 1)} className="text-signal hover:underline">
+              Next
+            </Link>
+          ) : (
+            <span className="text-graphite">Next</span>
+          )}
+        </div>
+      )}
+    </section>
   );
 }
 
