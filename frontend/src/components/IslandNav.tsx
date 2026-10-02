@@ -12,6 +12,7 @@ import {
   LogOutIcon,
   RefreshIcon,
   SendIcon,
+  SettingsIcon,
 } from "@/components/icons";
 
 export default function IslandNav() {
@@ -21,6 +22,12 @@ export default function IslandNav() {
   const [unread, setUnread] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  // dashboard.<domain> is view-only: no send, no inbox, nothing that moves
+  // money. Resolved after mount so the server and first client render agree.
+  // Settings is keyed on the dashboard page rather than this host, since it
+  // configures that page and the page is also reachable at /dashboard on the
+  // main host.
+  const [dashboardHost, setDashboardHost] = useState(false);
   const lastY = useRef(0);
   const menuRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
@@ -36,6 +43,10 @@ export default function IslandNav() {
     onScroll();
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  useEffect(() => {
+    setDashboardHost(window.location.hostname.startsWith("dashboard."));
   }, []);
 
   useEffect(() => {
@@ -144,33 +155,37 @@ export default function IslandNav() {
         </Link>
         {signedIn && (
           <>
-            <Link
-              href="/send"
-              aria-label="Send"
-              title="Send"
-              onClick={(e) => {
-                if (pathname === "/send") {
-                  e.preventDefault();
-                  window.dispatchEvent(new CustomEvent("bullet:reset-send"));
-                }
-              }}
-              className={navIconClass(pathname === "/send")}
-            >
-              <SendIcon className="h-4 w-4 translate-y-[1px] -translate-x-[1px]" />
-            </Link>
-            <Link
-              href="/inbox"
-              aria-label={unread > 0 ? `Inbox, ${unread} unread` : "Inbox"}
-              title="Inbox"
-              className={`relative ${navIconClass(pathname === "/inbox")}`}
-            >
-              <InboxIcon className="h-4 w-4" />
-              {unread > 0 && (
-                <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-ink text-paper ring-2 ring-paper px-1 font-mono text-[10px]">
-                  {unread > 99 ? "99+" : unread}
-                </span>
-              )}
-            </Link>
+            {!dashboardHost && (
+              <>
+                <Link
+                  href="/send"
+                  aria-label="Send"
+                  title="Send"
+                  onClick={(e) => {
+                    if (pathname === "/send") {
+                      e.preventDefault();
+                      window.dispatchEvent(new CustomEvent("bullet:reset-send"));
+                    }
+                  }}
+                  className={navIconClass(pathname === "/send")}
+                >
+                  <SendIcon className="h-4 w-4 translate-y-[1px] -translate-x-[1px]" />
+                </Link>
+                <Link
+                  href="/inbox"
+                  aria-label={unread > 0 ? `Inbox, ${unread} unread` : "Inbox"}
+                  title="Inbox"
+                  className={`relative ${navIconClass(pathname === "/inbox")}`}
+                >
+                  <InboxIcon className="h-4 w-4" />
+                  {unread > 0 && (
+                    <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-ink text-paper ring-2 ring-paper px-1 font-mono text-[10px]">
+                      {unread > 99 ? "99+" : unread}
+                    </span>
+                  )}
+                </Link>
+              </>
+            )}
             <div ref={menuRef} className="relative">
               <button
                 onClick={() => setMenuOpen((o) => !o)}
@@ -191,14 +206,30 @@ export default function IslandNav() {
                     : "pointer-events-none scale-95 opacity-0 -translate-y-1"
                 }`}
               >
-                <Link
-                  href="/account"
-                  role="menuitem"
-                  onClick={() => setMenuOpen(false)}
-                  className="block px-4 py-2.5 text-sm font-medium hover:bg-paper"
-                >
-                  Account
-                </Link>
+                {dashboardHost || pathname === "/dashboard" ? (
+                  <button
+                    onClick={() => {
+                      setMenuOpen(false);
+                      window.dispatchEvent(
+                        new CustomEvent("bullet:dashboard-settings")
+                      );
+                    }}
+                    role="menuitem"
+                    className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm font-medium hover:bg-paper"
+                  >
+                    <SettingsIcon className="h-4 w-4" />
+                    Settings
+                  </button>
+                ) : (
+                  <Link
+                    href="/account"
+                    role="menuitem"
+                    onClick={() => setMenuOpen(false)}
+                    className="block px-4 py-2.5 text-sm font-medium hover:bg-paper"
+                  >
+                    Account
+                  </Link>
+                )}
                 <button
                   onClick={refresh}
                   disabled={refreshing}

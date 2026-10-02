@@ -7,9 +7,23 @@ export async function middleware(request: NextRequest) {
   // dashboard.<domain> serves the admin dashboard at its root. Every other
   // path (auth callback, static assets) stays as-is so sign-in works there.
   const host = (request.headers.get("host") ?? "").split(":")[0];
+  const { pathname } = request.nextUrl;
   let rewriteUrl: URL | null = null;
-  if (host.startsWith("dashboard.") && request.nextUrl.pathname === "/") {
-    rewriteUrl = new URL("/dashboard", request.nextUrl);
+  if (host.startsWith("dashboard.")) {
+    // View-only host. Hiding the send and inbox buttons in the nav is not
+    // enough on its own: typing the path has to fail too, or the rail is still
+    // one URL away. Everything but the dashboard and what signing in needs
+    // goes back to the root, which rewrites to the dashboard below.
+    const allowed =
+      pathname === "/" ||
+      pathname === "/dashboard" ||
+      pathname === "/register" ||
+      pathname === "/privacy" ||
+      pathname.startsWith("/auth/");
+    if (!allowed) {
+      return NextResponse.redirect(new URL("/", request.nextUrl));
+    }
+    if (pathname === "/") rewriteUrl = new URL("/dashboard", request.nextUrl);
   }
   const newResponse = () =>
     rewriteUrl
