@@ -7,7 +7,12 @@ import {
 } from "@zeekpay/shared";
 import { createAdminClient, isAdminEmail } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { PAGE_SIZE, readFilters, type TxFilters } from "@/lib/dashboard_filters";
+import {
+  PAGE_SIZE,
+  isStellarAddress,
+  readFilters,
+  type TxFilters,
+} from "@/lib/dashboard_filters";
 import DashboardStats from "@/components/DashboardStats";
 
 export const metadata = { title: "Dashboard · bullet" };
@@ -56,8 +61,32 @@ function emptyByType(): Map<string, number> {
   return new Map(HANDLE_TYPES.map((t) => [t.id, 0]));
 }
 
+/** Accounts that have ever held this wallet address, current or since
+ *  switched away from. Returns [] when nobody has, which the caller turns into
+ *  an empty result rather than an unfiltered one. */
+async function accountsForWallet(address: string): Promise<string[]> {
+  const db = createAdminClient();
+  const { data } = await db
+    .from("wallets")
+    .select("user_id")
+    // Address is base32-only by isStellarAddress, so it cannot break out of
+    // the filter string. `previous` carries the wallets an account switched
+    // away from (backend/sql/wallet_previous.sql), matched by containment
+    // against the gin index that note delivery already uses.
+    .or(`stellar_address.eq.${address},previous.cs.[{"stellar_address":"${address}"}]`)
+    .limit(100);
+  return (data ?? []).map((w) => (w as { user_id: string }).user_id);
+}
+
 async function loadTransactions(f: TxFilters) {
   const db = createAdminClient();
+  // A wallet address names an account, so it filters by user_id and catches
+  // that account's claims too. Every other term is matched against the
+  // recipient handle and the tx hash, and `handle` is null on claims, so a
+  // handle search is a search of sends by construction.
+  const walletAccounts = isStellarAddress(f.q) ? await accountsForWallet(f.q) : null;
+  if (walletAccounts?.length === 0) return { rows: [] as ActivityRow[], total: 0 };
+
   let q = db
     .from("activity")
     .select("type, amount, token_id, tx_hash, created_at, user_id, handle", {
@@ -71,7 +100,8 @@ async function loadTransactions(f: TxFilters) {
   if (f.from) q = q.gte("created_at", `${f.from}T00:00:00.000Z`);
   // Inclusive of the whole end day, which is what a date picker implies.
   if (f.to) q = q.lte("created_at", `${f.to}T23:59:59.999Z`);
-  if (f.q) q = q.or(`handle.ilike.%${f.q}%,tx_hash.ilike.%${f.q}%`);
+  if (walletAccounts) q = q.in("user_id", walletAccounts);
+  else if (f.q) q = q.or(`handle.ilike.%${f.q}%,tx_hash.ilike.%${f.q}%`);
 
   const { data, count } = await q;
   return { rows: (data ?? []) as ActivityRow[], total: count ?? 0 };
@@ -554,12 +584,12 @@ function TransactionsTab({
           <input type="date" name="to" defaultValue={filters.to} className={field} />
         </label>
         <label className="flex flex-col gap-1">
-          <span className="text-xs text-graphite">Handle or tx hash</span>
+          <span className="text-xs text-graphite">Handle, wallet or tx hash</span>
           <input
             type="search"
             name="q"
             defaultValue={filters.q}
-            placeholder="@name or hash"
+            placeholder="@name, G… or hash"
             className={`${field} font-mono`}
           />
         </label>

@@ -11,6 +11,14 @@ export interface TxFilters {
 
 export const PAGE_SIZE = 100;
 
+/** A Stellar public key (G…) or contract id (C…): 56 chars of base32. Decides
+ *  whether a search term is looked up as a wallet rather than matched against
+ *  the handle and tx hash columns. Also what makes interpolating the term into
+ *  a filter string safe, since nothing outside [A-Z2-7] can pass. */
+export function isStellarAddress(q: string): boolean {
+  return /^[GC][A-Z2-7]{55}$/.test(q);
+}
+
 export function readFilters(
   sp: Record<string, string | string[] | undefined>
 ): TxFilters {
