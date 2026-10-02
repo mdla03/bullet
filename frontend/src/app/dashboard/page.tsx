@@ -14,6 +14,7 @@ import {
   type TxFilters,
 } from "@/lib/dashboard_filters";
 import DashboardStats from "@/components/DashboardStats";
+import Segmented from "@/components/Segmented";
 
 export const metadata = { title: "Dashboard · bullet" };
 export const dynamic = "force-dynamic";
@@ -303,9 +304,13 @@ export default async function DashboardPage({
 
   const sp = await searchParams;
   const tab = sp.tab === "transactions" ? "transactions" : "overview";
-  const ledger = await latestLedger();
+  // The ledger read is a Soroban RPC round trip, 0.4s on a good day and 1.5s
+  // on a cold one. It has to race the database work, never precede it: it was
+  // inside loadMetrics' Promise.all before the tabs split it out, and awaiting
+  // it here first put that latency in front of every query on both tabs.
+  const ledgerPromise = latestLedger();
 
-  const header = (
+  const header = (ledger: number | null) => (
     <>
       <header className="space-y-1">
         <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
@@ -320,21 +325,24 @@ export default async function DashboardPage({
 
   if (tab === "transactions") {
     const filters = readFilters(sp);
-    const { rows, total } = await loadTransactions(filters);
+    const [ledger, { rows, total }] = await Promise.all([
+      ledgerPromise,
+      loadTransactions(filters),
+    ]);
     return (
       <div className="space-y-8">
-        {header}
+        {header(ledger)}
         <TransactionsTab filters={filters} rows={rows} total={total} />
       </div>
     );
   }
 
-  const m = await loadMetrics();
+  const [ledger, m] = await Promise.all([ledgerPromise, loadMetrics()]);
   const lag = ledger && m.cursorLedger ? ledger - m.cursorLedger : null;
 
   return (
     <div className="space-y-8">
-      {header}
+      {header(ledger)}
 
       <DashboardStats
         stats={[
@@ -556,25 +564,25 @@ function TransactionsTab({
     <section className="space-y-4 rounded-2xl border border-fog bg-white p-5">
       <form method="get" action="/dashboard" className="flex flex-wrap items-end gap-3">
         <input type="hidden" name="tab" value="transactions" />
-        <label className="flex flex-col gap-1">
-          <span className="text-xs text-graphite">Type</span>
-          <select name="type" defaultValue={filters.type} className={field}>
-            <option value="">All</option>
-            <option value="send">Sends</option>
-            <option value="claim">Claims</option>
-          </select>
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-xs text-graphite">Asset</span>
-          <select name="token" defaultValue={filters.token} className={field}>
-            <option value="">All</option>
-            {Object.entries(TOKENS).map(([id, name]) => (
-              <option key={id} value={id}>
-                {name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <Segmented
+          name="type"
+          label="Type"
+          value={filters.type}
+          options={[
+            { value: "", label: "All" },
+            { value: "send", label: "Sends" },
+            { value: "claim", label: "Claims" },
+          ]}
+        />
+        <Segmented
+          name="token"
+          label="Asset"
+          value={filters.token}
+          options={[
+            { value: "", label: "All" },
+            ...Object.entries(TOKENS).map(([id, name]) => ({ value: id, label: name })),
+          ]}
+        />
         <label className="flex flex-col gap-1">
           <span className="text-xs text-graphite">From</span>
           <input type="date" name="from" defaultValue={filters.from} className={field} />

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { SettingsIcon } from "@/components/icons";
 
 export interface StatSpec {
   id: string;
@@ -20,8 +21,10 @@ function readHidden(): string[] {
   }
 }
 
-/** The stat grid, plus the settings panel that hides cards from it. Opened by
- *  the Settings item in the nav dropdown, which dispatches the event below.
+/** The stat grid, plus the settings panel that hides cards from it, opened by
+ *  the gear above the grid. The panel only ever configures this grid, so the
+ *  control sits with it rather than in the nav, and owning the open state here
+ *  means no cross-component event to keep in sync.
  *  Preference is per-browser (localStorage): it changes what this viewer sees,
  *  never what the dashboard reports. */
 export default function DashboardStats({ stats }: { stats: StatSpec[] }) {
@@ -33,9 +36,6 @@ export default function DashboardStats({ stats }: { stats: StatSpec[] }) {
 
   useEffect(() => {
     setHidden(readHidden());
-    const onOpen = () => setOpen(true);
-    window.addEventListener("bullet:dashboard-settings", onOpen);
-    return () => window.removeEventListener("bullet:dashboard-settings", onOpen);
   }, []);
 
   useEffect(() => {
@@ -65,7 +65,20 @@ export default function DashboardStats({ stats }: { stats: StatSpec[] }) {
 
   return (
     <>
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          aria-label="Dashboard settings"
+          aria-haspopup="dialog"
+          title="Settings"
+          className="rounded-full border border-fog bg-white p-2 text-graphite transition-colors hover:border-graphite hover:text-ink"
+        >
+          <SettingsIcon className="h-4 w-4" />
+        </button>
+      </div>
+
+      <section className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
         {shown.map((s) => (
           <div key={s.id} className="rounded-2xl border border-fog bg-white p-4">
             <div className="text-2xl font-bold tracking-tight">

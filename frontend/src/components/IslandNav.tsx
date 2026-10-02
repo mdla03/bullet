@@ -12,7 +12,6 @@ import {
   LogOutIcon,
   RefreshIcon,
   SendIcon,
-  SettingsIcon,
 } from "@/components/icons";
 
 export default function IslandNav() {
@@ -24,9 +23,6 @@ export default function IslandNav() {
   const [refreshing, setRefreshing] = useState(false);
   // dashboard.<domain> is view-only: no send, no inbox, nothing that moves
   // money. Resolved after mount so the server and first client render agree.
-  // Settings is keyed on the dashboard page rather than this host, since it
-  // configures that page and the page is also reachable at /dashboard on the
-  // main host.
   const [dashboardHost, setDashboardHost] = useState(false);
   const lastY = useRef(0);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -206,30 +202,14 @@ export default function IslandNav() {
                     : "pointer-events-none scale-95 opacity-0 -translate-y-1"
                 }`}
               >
-                {dashboardHost || pathname === "/dashboard" ? (
-                  <button
-                    onClick={() => {
-                      setMenuOpen(false);
-                      window.dispatchEvent(
-                        new CustomEvent("bullet:dashboard-settings")
-                      );
-                    }}
-                    role="menuitem"
-                    className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm font-medium hover:bg-paper"
-                  >
-                    <SettingsIcon className="h-4 w-4" />
-                    Settings
-                  </button>
-                ) : (
-                  <Link
-                    href="/account"
-                    role="menuitem"
-                    onClick={() => setMenuOpen(false)}
-                    className="block px-4 py-2.5 text-sm font-medium hover:bg-paper"
-                  >
-                    Account
-                  </Link>
-                )}
+                <Link
+                  href="/account"
+                  role="menuitem"
+                  onClick={() => setMenuOpen(false)}
+                  className="block px-4 py-2.5 text-sm font-medium hover:bg-paper"
+                >
+                  Account
+                </Link>
                 <button
                   onClick={refresh}
                   disabled={refreshing}
