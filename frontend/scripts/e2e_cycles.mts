@@ -18,13 +18,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import * as StellarSdk from "@stellar/stellar-sdk";
 
-const RESOLVER_URL = process.env.NEXT_PUBLIC_RESOLVER_URL!;
 const ASSET_ORIGIN = process.env.E2E_ASSET_ORIGIN ?? "https://sendbullet.xyz";
-const NETWORK_PASSPHRASE =
-  process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ?? StellarSdk.Networks.TESTNET;
-const RPC_URL =
-  process.env.NEXT_PUBLIC_SOROBAN_RPC_URL ?? "https://soroban-testnet.stellar.org";
-const CONTRACT_ID = process.env.NEXT_PUBLIC_CONTRACT_ID!;
 const OUT = new URL("./e2e_results.json", import.meta.url);
 
 // prove_browser.ts fetches the circuit artifacts at site-relative paths, which
@@ -37,6 +31,16 @@ globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
   }
   return realFetch(input as never, init);
 }) as typeof fetch;
+
+const {
+  CONTRACT_ID,
+  isKnownRoot,
+  keypairFromEnv,
+  localSigner,
+  resolveHandle,
+  sleep,
+  waitForLeaf,
+} = await import("./_e2e_lib.mjs");
 
 const { deriveStealthDigest } = await import("../src/lib/stealth");
 const { computeCommitment } = await import("../src/lib/commitment");
@@ -83,99 +87,12 @@ const CYCLES: CycleSpec[] = [
   { handle: "github:jimsondavid", amount: 23_606_797n, tokenId: 1, recipient: 2 },
 ];
 
-function keypairFromEnv(name: string): StellarSdk.Keypair {
-  const secret = process.env[name];
-  if (!secret) throw new Error(`${name} is required`);
-  return StellarSdk.Keypair.fromSecret(secret);
-}
-
 const SENDER = keypairFromEnv("E2E_SENDER_SECRET");
 const RECIPIENTS = [
   keypairFromEnv("E2E_RECIP_1_SECRET"),
   keypairFromEnv("E2E_RECIP_2_SECRET"),
   keypairFromEnv("E2E_RECIP_3_SECRET"),
 ];
-
-/** Stands in for Freighter: signs the prepared XDR with a local keypair. */
-function localSigner(kp: StellarSdk.Keypair) {
-  return async (xdr: string): Promise<string> => {
-    const tx = StellarSdk.TransactionBuilder.fromXDR(xdr, NETWORK_PASSPHRASE);
-    tx.sign(kp);
-    return tx.toXDR();
-  };
-}
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-interface Resolved {
-  stellarAddress: string;
-  zeekPayPubKey: string;
-  type?: string;
-}
-
-async function resolveHandle(handle: string): Promise<Resolved> {
-  const res = await realFetch(
-    `${RESOLVER_URL}/resolve?q=${encodeURIComponent(handle)}`
-  );
-  const body = (await res.json()) as Resolved & { found?: boolean };
-  if (!res.ok || !body.found) {
-    throw new Error(`resolve ${handle} failed: HTTP ${res.status}`);
-  }
-  if (!body.zeekPayPubKey) {
-    throw new Error(`resolve ${handle} returned no published key`);
-  }
-  return body;
-}
-
-/** Block until the deployed indexer has inserted the deposit's leaf and the
- *  tree can produce a path for it. Until that happens there is nothing to
- *  prove membership against. */
-async function waitForLeaf(commitment: string, timeoutMs = 10 * 60_000): Promise<number> {
-  const started = Date.now();
-  for (;;) {
-    const res = await realFetch(
-      `${RESOLVER_URL}/path?commitment=${encodeURIComponent(commitment)}`
-    );
-    if (res.ok) return Math.round((Date.now() - started) / 1000);
-    if (res.status !== 404) {
-      throw new Error(`/path returned HTTP ${res.status}`);
-    }
-    if (Date.now() - started > timeoutMs) {
-      throw new Error(`leaf for ${commitment} never indexed`);
-    }
-    await sleep(10_000);
-  }
-}
-
-/** Whether the contract already knows a root, by simulation (no fee, no
- *  signature). The indexer inserts a leaf and posts the resulting root as two
- *  separate steps, so `/path` hands out a root that is briefly not yet
- *  on-chain. Claiming in that window fails with UnknownRoot (error #5), and
- *  retrying the same proof does not help: by then the indexer may have moved
- *  on to a newer root and the one the proof commits to never gets posted. The
- *  only reliable order is to prove, check, and re-prove against whatever the
- *  tree says once the previous root has landed. */
-async function isKnownRoot(rootHex: string): Promise<boolean> {
-  const rpc = new StellarSdk.rpc.Server(RPC_URL);
-  const contract = new StellarSdk.Contract(CONTRACT_ID);
-  const op = contract.call(
-    "is_known_root",
-    StellarSdk.xdr.ScVal.scvBytes(Buffer.from(rootHex, "hex"))
-  );
-  const account = await rpc.getAccount(SENDER.publicKey());
-  const tx = new StellarSdk.TransactionBuilder(account, {
-    fee: "100",
-    networkPassphrase: NETWORK_PASSPHRASE,
-  })
-    .addOperation(op)
-    .setTimeout(30)
-    .build();
-  const sim = await rpc.simulateTransaction(tx);
-  if (!StellarSdk.rpc.Api.isSimulationSuccess(sim) || !sim.result) {
-    throw new Error(`is_known_root simulation failed: ${JSON.stringify(sim)}`);
-  }
-  return StellarSdk.scValToNative(sim.result.retval) === true;
-}
 
 type Proof = Awaited<ReturnType<typeof proveBrowser>>;
 
@@ -187,7 +104,7 @@ async function proveAgainstKnownRoot(
 ): Promise<Proof> {
   for (let i = 0; i < attempts; i++) {
     const proof = await proveBrowser(...args);
-    if (await isKnownRoot(proof.root)) return proof;
+    if (await isKnownRoot(proof.root, SENDER.publicKey())) return proof;
     console.log(
       `    root ${proof.root.slice(0, 12)}… not posted yet, re-proving in 20s (${i + 1}/${attempts})`
     );
