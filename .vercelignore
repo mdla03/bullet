@@ -1,0 +1,4 @@
+# The CLI uploads from the repo root even though the project's Root Directory
+# is frontend/, so anything here ships on every deploy. The build never reads
+# these.
+*.pdf
