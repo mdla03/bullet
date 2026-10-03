@@ -526,23 +526,26 @@ works under the new key.
 
 **Reproducibility gotcha.** The rotation drew a fresh (non-MPC) setup, so the
 deployed `PoolVk` corresponds to ONE specific `circuits/build/joinsplit.zkey`,
-which is gitignored. The matching copy ships at
-`frontend/public/circuits/joinsplit.zkey` (committed, served to the browser) and
-is byte-identical to the build. Rebuilding with `FORCE_SETUP=1
-circuits/scripts/build-joinsplit.sh` produces a DIFFERENT key and every existing
-proof stops verifying; after any such rebuild you must
-`node circuits/scripts/convert-to-soroban.mjs joinsplit` (needs `FORCE_FIXTURE=1`),
-`node scripts/set_vk.mjs pool`, and redeploy the frontend so the served zkey
-matches. The committed `joinsplit_soroban.json` / `joinsplit_fixture.rs` pin the
-deployed key's shape.
+which is gitignored. The matching browser copy
+(`frontend/public/circuits/joinsplit.zkey`, byte-identical to the build) lives on
+the `feat/shielded-pool-ui` branch, NOT on master (see the rollback note below).
+Rebuilding with `FORCE_SETUP=1 circuits/scripts/build-joinsplit.sh` produces a
+DIFFERENT key and every existing proof stops verifying; after any such rebuild
+you must `node circuits/scripts/convert-to-soroban.mjs joinsplit` (needs
+`FORCE_FIXTURE=1`), `node scripts/set_vk.mjs pool`, and redeploy the frontend so
+the served zkey matches. The committed `joinsplit_soroban.json` /
+`joinsplit_fixture.rs` pin the deployed key's shape and stay on master.
 
-**Pool UI shipped.** `/pool` (`frontend/src/components/PoolWallet.tsx`) exposes
-fund, send-privately-to-a-handle, and withdraw. Self-held notes live in
-`localStorage` (`pool_wallet.ts`); notes sent to a recipient ride the existing
-encrypted inbox with a `kind: "pool"` discriminator the claim inbox skips. The
-library (`pool_note.ts`, `pool_tx.ts`, `pool_path.ts`, `pool_ops.ts`) was
-verified end to end on testnet with a local-keypair signer; the React screen
-itself is not Freighter-click-tested.
+**Pool UI rolled off master, preserved on a branch.** The hidden-amount product
+(the `/pool` screen, `PoolWallet.tsx`, the `pool_*` libs, and the browser
+`joinsplit.{wasm,zkey}`) was reverted from master so it cannot affect the
+beta-tested deposit/claim flow, and lives on `feat/shielded-pool-ui`. The
+security fix in THIS section (the nullifier change and the `set_pool_vk`
+rotation) deliberately stayed on master: the `transact` entrypoint it hardens is
+in the deployed contract regardless of whether any UI calls it, and the rotated
+VK is already on-chain. So master documents the hardened contract; the UI is a
+branch away. The capability was verified end to end on testnet with a
+local-keypair signer; the React screen was not Freighter-click-tested.
 
 ## Before mainnet, none of which is done
 
