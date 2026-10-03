@@ -12,15 +12,25 @@ import { serviceClient } from "./supabase.js";
  *  must place each at leafIndex, never at its array position: rows can have
  *  gaps. */
 export async function loadLeaves(): Promise<{ leafIndex: number; commitment: string }[]> {
-  const { data, error } = await serviceClient
-    .from("merkle_leaves")
-    .select("leaf_index, commitment")
-    .order("leaf_index", { ascending: true });
-  if (error) throw new Error(`loadLeaves: ${error.message}`);
-  return (data ?? []).map((r) => ({
-    leafIndex: r.leaf_index as number,
-    commitment: r.commitment as string,
-  }));
+  // PostgREST caps a select at 1000 rows by default, so a single query silently
+  // drops every leaf past 1000 and the boot hydrate rebuilds an incomplete tree
+  // (holes that only a from-scratch reindex repairs, until the next restart).
+  // Page through explicitly so hydrate always sees the whole table.
+  const PAGE = 1000;
+  const out: { leafIndex: number; commitment: string }[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await serviceClient
+      .from("merkle_leaves")
+      .select("leaf_index, commitment")
+      .order("leaf_index", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw new Error(`loadLeaves: ${error.message}`);
+    const rows = data ?? [];
+    for (const r of rows)
+      out.push({ leafIndex: r.leaf_index as number, commitment: r.commitment as string });
+    if (rows.length < PAGE) break;
+  }
+  return out;
 }
 
 /** Persist one leaf at its index. Idempotent (index is the primary key). */
