@@ -194,9 +194,9 @@ export default async function DashboardPage({
           },
           {
             id: "deposits",
-            label: "Deposits on-chain",
+            label: "Notes on-chain",
             value: m.deposits,
-            note: "confirmed Merkle leaves",
+            note: "Merkle leaves: deposits and pool outputs",
           },
           {
             id: "active-accounts",
@@ -233,6 +233,17 @@ export default async function DashboardPage({
           },
         ]}
       />
+
+      <p className="text-xs text-graphite">
+        Two different things are counted here. Transactions, volume and the
+        active-account figures come from what the app recorded as users acted in
+        it. Notes on-chain comes from the contract&apos;s own events. The second
+        can exceed the first, and usually does: a claim taken through a claim
+        link records nothing, and anything transacted against the contract
+        directly is on-chain without ever passing through the app. Read the
+        chain as the authority on what happened, and these counts as the
+        authority on what happened <em>in the app</em>.
+      </p>
 
       <section className="space-y-3 rounded-2xl border border-fog bg-white p-5">
         <h2 className="text-sm font-medium">Handles by platform</h2>
