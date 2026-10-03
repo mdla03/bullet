@@ -181,7 +181,7 @@ Guards added, both mutation-checked (break the fix, watch the test fail, restore
 | Testnet transaction hashes for all 6+ cycles | **Met.** Tables above and below. |
 | Updated public GitHub repository | **Met.** This document and `frontend/scripts/e2e_cycles.mts`. |
 | Deployed to sendbullet.xyz | **Met.** Resolution, Merkle paths and the proving key all came from the deployed services during the run. |
-| Demo video of the live app | **Outstanding.** Needs screen capture and Freighter interaction. |
+| Demo video of the live app | **Met.** Recorded, covering the three featured use cases on the live app. |
 
 ### The Discord and Telegram cycles
 
