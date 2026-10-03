@@ -132,18 +132,18 @@ template JoinSplit(DEPTH, AMOUNT_BITS, N_IN, N_OUT) {
         // unprovable.
         (1 - isDummy[i]) * (inPath[i].root - root) === 0;
 
-        // LOAD-BEARING: leafIndex must be the position the path actually
-        // proves. The nullifier is derived from it, so if the two could differ
-        // a prover would pick a second index for the same note, derive a second
-        // distinct nullifier, and spend that note twice.
+        // leafIndex is retained as a constrained input (it must equal the
+        // position the path proves) even though the nullifier no longer uses
+        // it. Kept so the leafindex_mismatch vector keeps a live site and the
+        // witness interface stays stable across the nullifier change below.
         leafIndex[i] === inPath[i].index;
 
-        // Nullifier binds the note's secret to its position. Poseidon([secret])
-        // alone, as in claim.circom, collides across notes that share a secret,
-        // which makes all but one of them unspendable.
-        inNullifier[i] = Poseidon(2);
+        // Nullifier = Poseidon([secret]), byte-for-byte what claim.circom
+        // derives. It must NOT depend on anything (such as leafIndex) a
+        // different entry point derives differently, or one note yields two
+        // nullifiers and pays out once per entry point. It did exactly that.
+        inNullifier[i] = Poseidon(1);
         inNullifier[i].inputs[0] <== secret[i];
-        inNullifier[i].inputs[1] <== leafIndex[i];
         inNullifier[i].out === nullifierPub[i];
     }
 

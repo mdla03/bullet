@@ -1,3 +1,6 @@
 .screenshots/
 .vercel
 .env*
+
+# D4 validation run output: carries claim secrets, see scripts/e2e_cycles.mts
+scripts/e2e_results.json

@@ -642,6 +642,78 @@ fn pool_replayed_nullifier_rejected() {
     assert_eq!(err, Error::NullifierUsed);
 }
 
+/// A note spent through `claim` must not be spendable again through `transact`.
+///
+/// This is the contract half of the cross-entry-point double-spend fix. The
+/// other half is in joinsplit.circom, now deriving the nullifier as
+/// Poseidon([secret]) exactly as claim.circom does, so one note produces one
+/// nullifier regardless of entry point. This test pins the assumption that fix
+/// relies on: both entry points share DataKey::Nullifier, so once `claim`
+/// records a nullifier, a `transact` presenting the same value is rejected and
+/// pays nothing. If anyone ever namespaces pool nullifiers separately "to be
+/// safe", this fails and the drain reopens.
+///
+/// The pool is deliberately left holding enough to cover the second payout, so
+/// the rejection is the nullifier guard and not an empty pool. (Mutation-check:
+/// point `transact`'s nullifier storage at a distinct DataKey and this test
+/// pays out twice.)
+#[test]
+fn claim_then_transact_same_nullifier_rejected() {
+    let s = setup();
+    let depositor = Address::generate(&s.env);
+    let recipient = Address::generate(&s.env);
+    let pool_recipient = Address::generate(&s.env);
+    s.usdc_admin.mint(&depositor, &1_000_000_000);
+
+    // Over-fund: 20 USDC in, so after a 10 USDC claim the pool still holds 10,
+    // enough to (wrongly) pay a second 10 out. The rejection must come from the
+    // nullifier guard, not from an empty pool.
+    s.client.deposit(&depositor, &TEN_USDC, &b32(&s.env, 0xA1), &0);
+    s.client.deposit(&depositor, &TEN_USDC, &b32(&s.env, 0xA2), &0);
+
+    let root = b32(&s.env, 0x11);
+    s.client.post_root(&root);
+    // The note's single nullifier. After the circuit fix both entry points
+    // derive this same value for the note; here we use the bytes directly, with
+    // the same fr32 encoding the transact vec below uses so the two represent
+    // the one nullifier rather than two byte patterns that never collide.
+    let nullifier = fr32(&s.env, 0x22);
+
+    let pa = BytesN::from_array(&s.env, &[0u8; 96]);
+    let pb = BytesN::from_array(&s.env, &[0u8; 192]);
+    let pc = BytesN::from_array(&s.env, &[0u8; 96]);
+    s.client.claim(
+        &pa, &pb, &pc, &root, &nullifier, &b32(&s.env, 0x33), &recipient, &TEN_USDC, &0,
+        &b64(&s.env, 0x00),
+    );
+    assert_eq!(s.token.balance(&recipient), 100_000_000); // first payout landed
+    assert_eq!(s.token.balance(&s.id), 100_000_000); // pool still holds 10 USDC
+    assert!(s.client.is_nullifier_used(&nullifier), "claim did not record nullifier");
+
+    // Same note via the pool: nullifier reused, withdrawing its value. The
+    // second slot is a distinct nullifier so only the collision is under test.
+    let err = s
+        .client
+        .try_transact(
+            &zero_proof(&s.env),
+            &root,
+            &vec32(&s.env, &[0x22, 0x23]),
+            &vec32(&s.env, &[0xC1, 0xC2]),
+            &0,
+            &TEN_USDC,
+            &0,
+            &pool_recipient,
+            &pool_recipient,
+        )
+        .err()
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(err, Error::NullifierUsed);
+    assert_eq!(s.token.balance(&pool_recipient), 0, "note paid out twice");
+    assert_eq!(s.token.balance(&s.id), 100_000_000, "pool was drained");
+}
+
 #[test]
 fn pool_wrong_shape_rejected() {
     let s = setup();
