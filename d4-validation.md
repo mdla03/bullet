@@ -176,27 +176,34 @@ Guards added, both mutation-checked (break the fix, watch the test fail, restore
 
 | Criterion | Status |
 | --- | --- |
-| At least 6 arbitrary-amount deposit-to-claim cycles on testnet | **Met.** 6 cycles, 12 transactions, all verified on-chain. |
-| Covering all three new handle types | **Not met.** All six are GitHub. Discord and Telegram are blocked, see below. |
-| Testnet transaction hashes for all 6+ cycles | **Met.** Table above. |
+| At least 6 arbitrary-amount deposit-to-claim cycles on testnet | **Met.** 8 cycles, 16 transactions, all verified on-chain (6 GitHub via the harness, plus one Discord and one Telegram driven through the live app). |
+| Covering all three new handle types | **Met.** GitHub (6 cycles above), Discord (`mark.0310`), and Telegram (`@mla032`). See the Discord and Telegram cycles below. |
+| Testnet transaction hashes for all 6+ cycles | **Met.** Tables above and below. |
 | Updated public GitHub repository | **Met.** This document and `frontend/scripts/e2e_cycles.mts`. |
 | Deployed to sendbullet.xyz | **Met.** Resolution, Merkle paths and the proving key all came from the deployed services during the run. |
 | Demo video of the live app | **Outstanding.** Needs screen capture and Freighter interaction. |
 
-### Why Discord and Telegram could not be exercised
+### The Discord and Telegram cycles
 
-`GET /resolve` returns 404 for `discord:mark.0310`, `discord:sendbulletxyz` and
-`telegram:mla032`, while all eight GitHub handles and the X and Google handles
-resolve normally. The handle rows exist, as the 2026-09-28 verification report
-records, so the 404 is `/resolve` declining to return instructions for an
-account with no linked wallet (`backend/src/resolver.ts`, the `!user.wallet`
-branch). A payment cannot be addressed to a handle that resolves to no
-published key.
+Run 2026-10-03, after the two identities signed in to sendbullet.xyz and linked
+a wallet (Discord OAuth and the Telegram login widget), which is what publishes
+a key for `/resolve` to return. These two cycles went through the live app in
+the browser rather than the harness: the sender paid the handle from the send
+form and the recipient claimed from the inbox, both signed with Freighter. So
+they also exercise the real UX, not just the shared libraries.
 
-Unblocking it is an account action, not a code change: sign in to sendbullet.xyz
-as those Discord and Telegram identities and link a wallet to each. The harness
-needs no modification afterwards. Add the two handles to its `CYCLES` list and
-re-run.
+| Handle | Type | Amount (XLM) | Deposit | Claim |
+| --- | --- | --- | --- | --- |
+| `mark.0310` | Discord | 4.6692016 | [`9380867a`](https://stellar.expert/explorer/testnet/tx/9380867a40bd51b893a4b5216af7d5575302d815fff13a096a2e6fcbfd4f62b1) | [`4b52b869`](https://stellar.expert/explorer/testnet/tx/4b52b869c80adeea83f9b898e6686c026346363a8279018c09a1c0adc318c585) |
+| `@mla032` | Telegram | 2.5029078 | [`9267b1c7`](https://stellar.expert/explorer/testnet/tx/9267b1c7444de52c22eb5cc4807768decb4b942bd4a2f48b09723b2febdb62bb) | [`8f7d275f`](https://stellar.expert/explorer/testnet/tx/8f7d275ffa98ab3bba66b4e341f931cc39d2a1f1db74c2031e602e833d935544) |
+
+All four transactions report `successful: true`. With these, every new handle
+type (GitHub, Discord, Telegram) has at least one arbitrary-amount
+deposit-to-claim cycle on testnet.
+
+Earlier these two were blocked: `/resolve` returned 404 because the handles had
+no linked wallet (`backend/src/resolver.ts`, the `!user.wallet` branch). Linking
+a wallet to each, the step above, is what unblocked them. No code change.
 
 ## Token choice
 
