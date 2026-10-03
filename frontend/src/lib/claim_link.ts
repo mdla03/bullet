@@ -14,6 +14,14 @@ export interface ClaimPayload {
   /** X25519 ephemeral pubkey (hex) used for stealth ECDH derivation of
    * recipientDigest. Present in inbox notes; omitted from URL links. */
   ephemeralPubkey?: string;
+  /** Discriminator. Absent/"claim" = an ordinary claim note (the inbox claims
+   * it). "pool" = a shielded-pool note delivered to the recipient, which their
+   * pool wallet imports as a spendable balance and the claim inbox ignores. A
+   * pool note reuses secret/recipientDigest/amount/tokenId and adds leafIndex;
+   * it is never put in a URL. */
+  kind?: "claim" | "pool";
+  /** Pool notes only: the tree position, once the indexer has placed it. */
+  leafIndex?: number;
 }
 
 /** Only these three fields travel in the URL. Everything else is a known

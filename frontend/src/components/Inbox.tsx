@@ -312,7 +312,10 @@ export function Inbox() {
   // already spent (e.g. claimed via its backup link) is stamped claimed so it
   // never shows a Claim button that would fail with NullifierUsed (#6).
   async function loadNotes(k: BulletKeys, source: string) {
-    const list = await fetchNotes(k);
+    // Pool notes ride the same inbox channel but are spendable balances, not
+    // claims. The pool wallet imports them; the claim inbox must skip them, or
+    // it would try to claim a note with no claim proof.
+    const list = (await fetchNotes(k)).filter((n) => n.payload.kind !== "pool");
     // Tx hashes for claims made in earlier sessions, fetched alongside the
     // chain reads below rather than before them. Best-effort: without it a
     // claimed note still renders, just without its explorer link.
