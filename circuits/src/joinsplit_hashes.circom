@@ -40,9 +40,11 @@ template JoinSplitHashes(DEPTH, N_IN, N_OUT) {
         c[i].inputs[3] <== tokenId;
         inCommitment[i] <== c[i].out;
 
-        n[i] = Poseidon(2);
+        // Matches joinsplit.circom: nullifier = Poseidon([secret]) only, so a
+        // note's nullifier is the same whether it is spent through claim or
+        // transact. leafIndex stays an input for interface parity, now unused.
+        n[i] = Poseidon(1);
         n[i].inputs[0] <== secret[i];
-        n[i].inputs[1] <== leafIndex[i];
         nullifier[i] <== n[i].out;
     }
 

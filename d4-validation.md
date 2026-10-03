@@ -110,6 +110,68 @@ coverage, but nothing in `frontend/` or `backend/` calls it yet, so it is not
 reachable from sendbullet.xyz and was not exercised here. Closing the gap the
 SOW describes is a frontend integration of `transact`, not a contract change.
 
+## A double-spend found while preparing the pool UI, and fixed
+
+Before wiring `transact` into the UI, building out the note model surfaced a
+soundness bug: a single note could be spent once through `claim` and a second
+time through `transact`, draining the pool.
+
+**Cause.** Both circuits derive the note commitment identically, but derived the
+nullifier differently:
+
+```
+claim.circom      nullifier = Poseidon([secret])
+joinsplit.circom  nullifier = Poseidon([secret, leafIndex])   (before the fix)
+```
+
+The contract keys both into one `DataKey::Nullifier` space, but as different
+values. Spending through `claim` recorded `Poseidon([secret])`; a later
+`transact` on the same note checked `Poseidon([secret, leafIndex])`, found it
+unused, and paid out again. Every note in the tree was doublable, so the ceiling
+was the whole pool.
+
+**Demonstrated on testnet**, using cycle 2's note, which `claim` had already
+paid out once:
+
+| Payout | Transaction | Paid |
+| --- | --- | --- |
+| 1st, via `claim` | [`eef7f777`](https://stellar.expert/explorer/testnet/tx/eef7f777d04bb78084cdedc66e9305d7f0cfc3ffb361773a727f6711efddcc81) | 2.7182818 XLM to GCU7UAT3 |
+| 2nd, via `transact` | [`945253cf`](https://stellar.expert/explorer/testnet/tx/945253cfc6fdb11baeaed4204983d0d3e7fbeedec4405ea189ca8fef3b7ba580) | 2.7182818 XLM to GAXJJDXB |
+
+One note, two payouts, both debiting the contract. Driven by
+`frontend/scripts/double_spend_poc.mts`.
+
+**Fix.** Make the pool nullifier identical to claim's: `Poseidon([secret])`, in
+`joinsplit.circom`. Now one note has one nullifier whichever entry point spends
+it, so the second attempt collides on the storage key and is rejected. This is
+smaller than the alternative (domain-separating the commitment), keeps a
+deposit note spendable through the pool exactly once total, and removes the
+`leafIndex`-in-nullifier machinery that the double-spend relied on. The claim
+circuit, `claim.zkey`, the pinned 5-input `groth16_fixture.rs`, and the entire
+live claim path are untouched.
+
+Scope of the change: `joinsplit.circom` and `joinsplit_hashes.circom`, a
+rebuilt `joinsplit.zkey` (new throwaway setup, same non-MPC setup as the rest of
+the sprint), and one `set_pool_vk` on the deployed contract
+([`e67598c7`](https://stellar.expert/explorer/testnet/tx/e67598c7c6439747f7ebf340de6e53b4e53ae6195cdeeb05d174411a4a642740)).
+
+**Verified fixed on testnet.** The same proof-of-concept, re-run against the
+rotated verifying key, now fails: the proof verifies, then the contract rejects
+the spend with `Error(Contract, #6)` `NullifierUsed`, because the nullifier the
+claim recorded is the one the pool now checks. The legitimate pool flow still
+works under the new key (fund, hidden transfer, withdraw all succeeded in a
+fresh run).
+
+Guards added, both mutation-checked (break the fix, watch the test fail, restore):
+
+- `contracts/zeekpay/src/test.rs::claim_then_transact_same_nullifier_rejected`:
+  over-funds the pool so the rejection is the nullifier guard and not an empty
+  pool, claims a note, then asserts a `transact` reusing that nullifier is
+  rejected and pays nothing.
+- A check in `gen-joinsplit-vectors.mjs` that recomputes the nullifier with
+  different leaf indices and requires it unchanged, so a revert that re-adds
+  `leafIndex` to the derivation throws before any vector is written.
+
 ## Acceptance criteria
 
 | Criterion | Status |
