@@ -26,11 +26,8 @@ const RPC_URL =
 const CONTRACT_ID = process.env.NEXT_PUBLIC_CONTRACT_ID ?? "";
 const NETWORK_PASSPHRASE =
   process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ?? StellarSdk.Networks.TESTNET;
-// Site-relative in the browser (snarkjs fetches them). Overridable so a Node
-// harness can point snarkjs at local files, which it opens directly rather than
-// over fetch. Unset in production => the defaults below.
-const WASM_URL = process.env.NEXT_PUBLIC_JOINSPLIT_WASM || "/circuits/joinsplit.wasm";
-const ZKEY_URL = process.env.NEXT_PUBLIC_JOINSPLIT_ZKEY || "/circuits/joinsplit.zkey";
+const WASM_URL = "/circuits/joinsplit.wasm";
+const ZKEY_URL = "/circuits/joinsplit.zkey";
 
 /** A Merkle path as the resolver's /path returns it (root/elements decimal). */
 export interface PoolPath {

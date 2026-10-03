@@ -12,7 +12,6 @@ import {
   LogOutIcon,
   RefreshIcon,
   SendIcon,
-  ShieldCheckIcon,
 } from "@/components/icons";
 
 export default function IslandNav() {
@@ -180,14 +179,6 @@ export default function IslandNav() {
                       {unread > 99 ? "99+" : unread}
                     </span>
                   )}
-                </Link>
-                <Link
-                  href="/pool"
-                  aria-label="Pool"
-                  title="Pool"
-                  className={navIconClass(pathname === "/pool")}
-                >
-                  <ShieldCheckIcon className="h-4 w-4" />
                 </Link>
               </>
             )}

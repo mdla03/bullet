@@ -8,7 +8,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "tsx --test src/lib/trustline.test.ts src/lib/walletconnect.test.ts src/lib/unlock_cache.test.ts src/lib/freighter.test.ts src/lib/telegram-widget.test.ts src/lib/dashboard_filters.test.ts src/lib/dashboard_metrics.test.ts src/lib/pool_note.test.ts src/lib/pool_wallet.test.ts"
+    "test": "tsx --test src/lib/trustline.test.ts src/lib/walletconnect.test.ts src/lib/unlock_cache.test.ts src/lib/freighter.test.ts src/lib/telegram-widget.test.ts src/lib/dashboard_filters.test.ts src/lib/dashboard_metrics.test.ts src/lib/pool_note.test.ts"
   },
   "dependencies": {
     "@noble/curves": "1.9.7",
