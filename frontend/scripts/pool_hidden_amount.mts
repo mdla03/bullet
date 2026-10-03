@@ -93,13 +93,11 @@ const randomFr = (): string => {
 const commit = (n: Note): string =>
   poseidon([n.secret, n.recipientDigest, n.value.toString(), String(TOKEN_ID)]);
 
-const nullifierOf = (n: Note): string => {
-  if (n.leafIndex === undefined) throw new Error("note has no leaf index yet");
-  // Poseidon([secret, leafIndex]), not Poseidon([secret]) as in claim.circom:
-  // binding the position is what stops one secret reused across notes from
-  // collapsing them to a single spendable nullifier.
-  return poseidon([n.secret, String(n.leafIndex)]);
-};
+const nullifierOf = (n: Note): string =>
+  // Poseidon([secret]), matching claim.circom and joinsplit.circom: a note's
+  // nullifier is the same whichever entry point spends it, so a note cannot be
+  // spent once per entry point. leafIndex is no longer part of it.
+  poseidon([n.secret]);
 
 /** A padding input. The circuit skips the membership check when isDummy is 1,
  *  but still constrains leafIndex to equal the index the path's bits describe,

@@ -81,6 +81,36 @@ const root = sig("main.root");
 
 console.log(`root: ${root}`);
 
+// Guard: the nullifier must be Poseidon([secret]) and nothing else, so a note
+// yields the SAME nullifier whether it is spent through claim or transact. If
+// it depended on leafIndex (as it once did, which let one note be spent through
+// both entry points), recomputing with different leaf indices would change it.
+// Recompute the two input nullifiers with distinct indices and require them
+// unchanged. Mutation-check: re-add leafIndex to joinsplit_hashes and this
+// throws here before any vector is written.
+{
+  const probeIn = path.join(BUILD, "_js_nullifier_probe_input.json");
+  const probeWtns = path.join(BUILD, "_js_nullifier_probe.wtns");
+  const probeJson = path.join(BUILD, "_js_nullifier_probe_witness.json");
+  fs.writeFileSync(
+    probeIn,
+    JSON.stringify({ ...NOTES, leafIndex: ["5", "7"] })
+  );
+  sh(`"${SNJ}" wtns calculate "${path.join(BUILD, "joinsplit_hashes_js/joinsplit_hashes.wasm")}" "${probeIn}" "${probeWtns}"`);
+  sh(`"${SNJ}" wtns export json "${probeWtns}" "${probeJson}"`);
+  const probe = JSON.parse(fs.readFileSync(probeJson, "utf8"));
+  for (let i = 0; i < 2; i++) {
+    const got = probe[symIdx[`main.nullifier[${i}]`]];
+    if (got !== nullifier[i]) {
+      throw new Error(
+        `nullifier[${i}] depends on leafIndex (${nullifier[i]} vs ${got} at indices 5/7). ` +
+          `It must be Poseidon([secret]) only, or a note is double-spendable across claim and transact.`
+      );
+    }
+  }
+  console.log("ok    nullifier is independent of leafIndex (claim/transact parity)");
+}
+
 // Leaf 0 sits left of leaf 1; every level above pairs with an empty subtree.
 const pathFor = (i) => ({
   pathElements: [i === 0 ? inCommitment[1] : inCommitment[0], ...zeroHash.slice(1)],
