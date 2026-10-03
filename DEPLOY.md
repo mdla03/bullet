@@ -239,6 +239,10 @@ registered there. And native XLM needs no trustline, so a freshly funded
 depositor can transact immediately. On mainnet slot 0 is USDC and this
 substitution must not carry over.
 
+**Superseded on 2026-09-17.** It did carry over, into the app rather than into
+mainnet, and it broke both send paths. See "2026-09-17: token registry fix"
+below. Slot 0 is now the real testnet USDC SAC.
+
 **Transactions, in the order they were sent**
 
 | Step | Hash | Result |
@@ -329,7 +333,8 @@ so check the address before assuming a local identity is the right one.
 - **Vercel is not updated.** `NEXT_PUBLIC_CONTRACT_ID` on the Vercel project
   still points at the old contract, so the deployed frontend talks to an
   abandoned address until someone sets it and redeploys. Deliberately left
-  alone here.
+  alone here. *Resolved since: Vercel production carries the new contract id
+  and all three SAC ids. Verified 2026-09-17 against the deployed bundle.*
 - **The old contract `CB5HPN...` is abandoned, not paused.** Phase 2's freeze
   never ran against it, because this deploy started from a fresh identity with
   no admin rights on it. Anyone holding an old claim link still points there
@@ -337,7 +342,8 @@ so check the address before assuming a local identity is the right one.
   real consequence, not a formality.
 - **Only token slot 0 is registered.** No `add_token` call was made, so slots
   1 and 2 are empty and any `transact` with a non-zero `token_id` returns
-  `UnknownToken`.
+  `UnknownToken`. *Resolved 2026-09-17, after it reached the app. See the
+  section below.*
 - **No deposit-to-claim cycle through the app yet.** Phase 6's smoke test and
   a claim-path proof against the current `claim.zkey` are still outstanding.
   This session exercised the pool path only, so `set_vk`'s 7-input claim key
@@ -366,6 +372,177 @@ works from the repo root. If the error comes back, look for a `SOROBAN_RPC_URL`
 key that has crept back into `.env`. The
 `wasm32v1-none` rustup target was also missing and had to be installed before
 `stellar contract build` would link.
+
+## 2026-09-17: token registry fix, and a full database reset
+
+The testnet-only token substitution above reached the app. Both send paths
+were broken by it, in different ways, against the same contract
+`CCHHGCD33G5STIXEQGYK3IW3FOVJ7YTY4QKDWPMVHBRGIXDIV5OQQYSW`.
+
+**Symptoms**
+
+- An XLM send failed with `Error(Contract, #11)`, `UnknownToken`. The frontend
+  sends `token_id: 1` for XLM (`SendForm.tsx` `TOKENS`), and slot 1 was never
+  registered.
+- A USDC send succeeded but moved XLM. Slot 0 held the native XLM SAC, so
+  `deposit` pulled XLM from the sender and `claim` paid XLM to the recipient,
+  while every label in the UI said USDC. The contract was correct; the
+  registry disagreed with the rest of the system.
+
+Both are one cause. `initialize` wrote the native XLM SAC into slot 0 and
+`add_token` was never called, so the on-chain registry never matched the
+`0 = USDC, 1 = XLM, 2 = USDT` mapping that `SendForm.tsx`, `Inbox.tsx`,
+`ClaimView.tsx`, `SendHistory.tsx` and `dashboard/page.tsx` all hard-code.
+
+**Diagnosis worth repeating.** Read the contract's instance storage directly
+rather than inferring config from `.env`. `stellar contract read` returns only
+the instance hash, so fetch the entry over RPC and walk
+`contractData().val().instance().storage()`. Every wrong guess in this session
+came from trusting a local `.env` that no deployed component reads.
+
+**Fix.** Three `add_token` calls, signed by the contract admin
+`GCTGLSNOSCHDYXEJ73FQMFW6W4EZQMC2MZWEZR66K24KF6MMW3QAGAMK`. `add_token`
+overwrites, so slot 0 did not need clearing first.
+
+| Call | Hash | Result |
+| --- | --- | --- |
+| `add_token 0` USDC | [`1dc5c597...`](https://stellar.expert/explorer/testnet/tx/1dc5c5979875af85ff5374cf5b318e329b59b6247583aae12f4f9da0358a27d1) | success |
+| `add_token 1` XLM | [`e86ed078...`](https://stellar.expert/explorer/testnet/tx/e86ed078ae7db86364a3408b1dd57c3bec4d3bef42b34b342b2defb5dc36b90c) | success |
+| `add_token 2` USDT | [`abf91e40...`](https://stellar.expert/explorer/testnet/tx/abf91e4012972f8966ae694ded44ed0801a3328f6098a3da70354f2a01b71a93) | success |
+
+Registry after, read back from instance storage:
+
+```
+Token(0) => CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA  USDC:GBBD47IF...
+Token(1) => CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC  native XLM
+Token(2) => CBL6KD2LFMLAUKFFWNNXWOXFN73GAXLEA4WMJRLQ5L76DMYTM3KWQVJN  USDT:GAHPYWLK...
+```
+
+**Slot 0 now needs a trustline.** Every sender must hold a testnet trustline
+for `USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5` and a
+balance, or `deposit` fails inside the SAC transfer. That is the friction the
+original substitution was avoiding. XLM sends still need nothing. Accepted on
+purpose: the alternative is a UI that says USDC and moves XLM.
+
+**Remapping slot 0 stranded every note already in it.** Those notes were
+deposited as XLM against slot 0; their claims now try to transfer USDC the
+pool does not hold. Unavoidable on any fix path, since the commitment binds
+`tokenId` and the pool holds what was actually deposited.
+
+**Database reset** (Supabase, all rows, deliberate):
+
+```
+notes            42 -> 0
+activity         62 -> 0
+merkle_leaves     5 -> 0
+pending_invites   8 -> 0
+merkle_state cursor parked at ledger 4727829
+```
+
+Two notes on that. First, `REINDEX_ON_BOOT=1` is the wrong tool for a
+permanent delete: `indexer.ts` calls `store.clearAll()` and then rescans from
+`START_LEDGER`, which re-inserts the same deposit events. Clearing the leaves
+and parking the cursor ahead of the stranded deposits is what actually drops
+them. Second, `pending_invites` held `custody_stellar_address` and
+`custody_secret`, the only record of the custody keypairs for unclaimed
+invites. Deleting those rows makes any balance in those accounts
+unrecoverable. Testnet, and those invites were tied to the stranded notes, but
+it is a real consequence and it was not flagged before the delete ran.
+
+`merkle_leaves` was 5 while the contract's `Index` read 7. The two missing are
+the `transact` join-split outputs: `indexer.ts` only handles the `deposit`
+topic, so pool outputs never enter the tree. They were never claimable. The
+contract's `Index` is not reset by any of this and does not need to be, since
+the indexer assigns its own leaf indices from 0 and never reads it.
+
+**Config that turned out to be correct already**, both verified rather than
+assumed:
+
+- **Vercel production.** All `NEXT_PUBLIC_*` vars are marked Sensitive, so
+  `vercel env pull` returns placeholders. Read the real values out of the
+  deployed bundle instead, since `NEXT_PUBLIC_*` is inlined at build time:
+  fetch the route HTML, extract the `/_next/static/chunks/*.js` paths, and
+  grep for `C[A-Z2-7]{55}`. Contract id and all three SAC ids were correct.
+- **Railway backend.** `/health` returns only `{"ok": true}` unless
+  `HEALTH_DEBUG=1`, so infer instead. The indexer cursor advances to chain
+  latest every poll even with zero inserts, which proves both
+  `ZEEKPAY_CONTRACT_ID` and `ZEEKPAY_ADMIN_KEY` are set (`indexer.ts` disables
+  the loop otherwise). To prove the key is the *right* one, decode a recent
+  `post_root`: [`5772880a...`](https://stellar.expert/explorer/testnet/tx/5772880ae16fe82fef07aca4f0583d57a0f118d69766053b85c7ac361fbe75db)
+  is `post_root` on `CCHHGCD3...`, signed by `GCTGLSNO...`. Root posting was
+  never broken.
+
+**Local config was the only stale copy**, and it is gitignored, so this is
+again a record of one machine:
+
+- `.env`: `ZEEKPAY_CONTRACT_ID` and `NEXT_PUBLIC_CONTRACT_ID` moved off the
+  abandoned `CB5HPN...`; added `USDT_SAC_ID`, `NEXT_PUBLIC_USDC_SAC_ID` and
+  `NEXT_PUBLIC_USDT_SAC_ID`, which `invite_claim.ts` reads and which were
+  absent; `ZEEKPAY_ADMIN_KEY` set to the `GCTGLSNO` secret.
+- `frontend/.env.local`: `NEXT_PUBLIC_CONTRACT_ID`.
+
+**What remains**
+
+- **Still no deposit-to-claim cycle through the app.** Phase 6's smoke test is
+  outstanding from the 2026-09-14 deploy and this session did not close it.
+  Everything above is verified by reading state, not by exercising the path.
+- The backend needs a restart to pick up the emptied tree, since the in-memory
+  tree only hydrates at boot. Do not set `REINDEX_ON_BOOT=1` on that restart.
+
+## 2026-10-03: cross-entry-point double-spend fix, pool VK rotated
+
+A note could be spent once through `claim` and again through `transact`,
+draining the pool. Both circuits derive the note commitment identically, but
+the pool derived the nullifier as `Poseidon([secret, leafIndex])` while claim
+used `Poseidon([secret])`. The contract keys both into one `DataKey::Nullifier`
+space as different values, so a claim recorded one nullifier and a later
+`transact` on the same note checked a different one, found it unused, and paid
+out again. Every note was doublable; the ceiling was the whole pool.
+
+Demonstrated on testnet before fixing: cycle-2's note, already claimed by
+[`eef7f777`](https://stellar.expert/explorer/testnet/tx/eef7f777d04bb78084cdedc66e9305d7f0cfc3ffb361773a727f6711efddcc81),
+paid out a second time through `transact` by
+[`945253cf`](https://stellar.expert/explorer/testnet/tx/945253cfc6fdb11baeaed4204983d0d3e7fbeedec4405ea189ca8fef3b7ba580).
+`frontend/scripts/double_spend_poc.mts` reproduces it.
+
+**Fix.** `joinsplit.circom` now derives the nullifier as `Poseidon([secret])`,
+identical to claim. One note has one nullifier whichever entry point spends it,
+so the second attempt collides on the storage key and is rejected. The
+`leafIndex` input and its `leafIndex === path index` constraint stay (so the
+`leafindex_mismatch` vector keeps a live site), but the nullifier no longer uses
+it. `claim.circom`, `claim.zkey`, the pinned `groth16_fixture.rs` and the live
+claim path are untouched.
+
+**Pool VK rotated. This supersedes `f2246eed` above as the live pool key.**
+
+| Call | Hash | Result |
+| --- | --- | --- |
+| `set_pool_vk` (rebuilt join-split) | [`e67598c7...`](https://stellar.expert/explorer/testnet/tx/e67598c7c6439747f7ebf340de6e53b4e53ae6195cdeeb05d174411a4a642740) | success |
+
+Re-running the PoC against the new key now fails with `Error(Contract, #6)`
+`NullifierUsed`: the proof verifies, then the contract rejects the reused
+nullifier. The legitimate pool flow (fund, hidden transfer, withdraw) still
+works under the new key.
+
+**Reproducibility gotcha.** The rotation drew a fresh (non-MPC) setup, so the
+deployed `PoolVk` corresponds to ONE specific `circuits/build/joinsplit.zkey`,
+which is gitignored. The matching copy ships at
+`frontend/public/circuits/joinsplit.zkey` (committed, served to the browser) and
+is byte-identical to the build. Rebuilding with `FORCE_SETUP=1
+circuits/scripts/build-joinsplit.sh` produces a DIFFERENT key and every existing
+proof stops verifying; after any such rebuild you must
+`node circuits/scripts/convert-to-soroban.mjs joinsplit` (needs `FORCE_FIXTURE=1`),
+`node scripts/set_vk.mjs pool`, and redeploy the frontend so the served zkey
+matches. The committed `joinsplit_soroban.json` / `joinsplit_fixture.rs` pin the
+deployed key's shape.
+
+**Pool UI shipped.** `/pool` (`frontend/src/components/PoolWallet.tsx`) exposes
+fund, send-privately-to-a-handle, and withdraw. Self-held notes live in
+`localStorage` (`pool_wallet.ts`); notes sent to a recipient ride the existing
+encrypted inbox with a `kind: "pool"` discriminator the claim inbox skips. The
+library (`pool_note.ts`, `pool_tx.ts`, `pool_path.ts`, `pool_ops.ts`) was
+verified end to end on testnet with a local-keypair signer; the React screen
+itself is not Freighter-click-tested.
 
 ## Before mainnet, none of which is done
 
