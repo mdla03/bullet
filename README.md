@@ -81,6 +81,36 @@ Not deployed. Testnet only. Own (non-MPC) trusted setup. Not audited.
 
 See `architecture_diagram.svg` for the full system diagram and `bullet_zk_architecture.pdf` for detailed technical documentation.
 
+### How each piece ships
+
+A push to master runs `.github/workflows/ci.yml`, and both hosted services
+hang off that one workflow run.
+
+| Piece | Trigger | Gate |
+| --- | --- | --- |
+| Frontend (Vercel) | `deploy-frontend` job in CI | `needs` all three test jobs |
+| Backend (Railway) | Railway's GitHub integration | Railway "Wait for CI" |
+| Contract (Soroban) | manual, `DEPLOY.md` | deliberately not automated |
+
+Railway's **Wait for CI** is a toggle in the service's settings, not a file in
+this repo, so a fresh Railway service does not have it. Without it Railway
+starts building the moment the push lands and ignores the test result
+entirely. It waits on the whole workflow run rather than on single jobs, which
+means a failed frontend deploy also holds back the backend. That is the
+intended trade: the two are one release.
+
+Contract deploys stay manual. The pool holds funds and a bad verifying key is
+not a rollback, it is stranded notes.
+
+Setting up CI deploys on a new clone or a new Vercel project needs one secret:
+
+```sh
+gh secret set VERCEL_TOKEN   # from vercel.com/account/tokens, scoped to the team
+```
+
+The org and project ids are in the workflow already. They are not secrets, and
+`.vercel/` is gitignored so the CLI cannot read them from a CI checkout.
+
 ### How the ZK proof works
 
 Bullet's zero-knowledge proof is load-bearing. Without it, the contract has no way to authorize a claim without revealing which deposit is being claimed.
