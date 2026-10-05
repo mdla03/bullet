@@ -105,10 +105,47 @@ sits alone.
 
 Hiding the amount needs the join-split entry point, `transact`, where an
 in-pool transfer sets `public_deposit` and `public_withdraw` to zero and moves
-no visible value at all. That entry point exists in the contract and has test
-coverage, but nothing in `frontend/` or `backend/` calls it yet, so it is not
-reachable from sendbullet.xyz and was not exercised here. Closing the gap the
-SOW describes is a frontend integration of `transact`, not a contract change.
+no visible value at all. That path was then exercised against the same deployed
+contract. It works. See the next section.
+
+## Hiding the amount: the shielded-pool path
+
+`transact` is live on the deployed contract (`PoolVk` is set in its instance
+storage) and the deployed indexer already ingests the `note` events it emits, so
+no deploy and no contract change were needed to run this. Driven by
+`frontend/scripts/pool_hidden_amount.mts`, three transactions, one payment:
+
+| Step | Transaction | What an observer sees |
+| --- | --- | --- |
+| 1. Fund the pool | [`d47eea37`](https://stellar.expert/explorer/testnet/tx/d47eea37aa0e7cdfe8a38c200903a9e58a0e4421992f06e18d15d25c753bd30b) | `12.3456789 XLM` debited from the funder, credited to the contract |
+| 2. **In-pool transfer of 7.7777777 XLM** | [`862420b9`](https://stellar.expert/explorer/testnet/tx/862420b9fb37b0200e2c53fcba995c7e95b3f6bb5f1d7a2faed882c560778237) | **Nothing.** Zero balance effects. No amount, no asset, no sender, no recipient. |
+| 3. Withdraw | [`e360e3c6`](https://stellar.expert/explorer/testnet/tx/e360e3c6022f9582000004b3771994371d1f4e47a8faa440cf095f18ca86fcd1) | `7.7777777 XLM` debited from the contract, credited to a wallet |
+
+Step 2 is the whole point. Read back from Horizon, that transaction's effects
+list is **empty**: a single `invoke_host_function` whose arguments are field
+elements, which spends one note and creates two (7.7777777 to the recipient,
+4.5679012 back as change) while moving no asset at all. The amounts live inside
+Poseidon commitments, and the circuit's balance constraint
+`sum(inputs) + deposit == sum(outputs) + withdraw` is what stops the pool paying
+out more than went in, without any value appearing on-chain.
+
+Because the transferred amount never has to equal the funded amount, the two
+visible legs no longer pair: `12.3456789` entered and `7.7777777` left, with the
+remainder still shielded in the pool as a note. That is the correlation the
+deposit/claim path cannot break.
+
+What this does not hide, and no shielded pool does: value entering the pool and
+value leaving it are both visible, because a token contract has to move real
+balances at the edges. An observer learns that someone funded the pool and that
+someone withdrew from it. They do not learn who paid whom, or how much changed
+hands inside. This is the same boundary Zcash has.
+
+The gap that remains is product, not cryptography. Nothing on `master` calls
+`transact`, so this is reachable from a script against the deployed contract but
+not yet from sendbullet.xyz. A UI for it does exist, parked on the
+`feat/shielded-pool-ui` branch: a note wallet, fund and withdraw, and a send
+path that routes through the pool. Shipping it is a merge and a review, not new
+cryptography.
 
 ## A double-spend found while preparing the pool UI, and fixed
 
