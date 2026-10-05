@@ -92,12 +92,36 @@ hang off that one workflow run.
 | Backend (Railway) | Railway's GitHub integration | Railway "Wait for CI" |
 | Contract (Soroban) | manual, `DEPLOY.md` | deliberately not automated |
 
-Railway's **Wait for CI** is a toggle in the service's settings, not a file in
-this repo, so a fresh Railway service does not have it. Without it Railway
-starts building the moment the push lands and ignores the test result
-entirely. It waits on the whole workflow run rather than on single jobs, which
-means a failed frontend deploy also holds back the backend. That is the
-intended trade: the two are one release.
+Railway's **Wait for CI** lives on the repo trigger, not in this repo, so a
+fresh Railway service does not have it. Without it Railway starts building the
+moment the push lands and ignores the test result entirely. It is on for
+`master` as of 2026-10-05.
+
+In the dashboard it is under Settings → **Source**, next to the repo and
+branch, not under Deploy. It is also settable through the API, where it is
+called `checkSuites` rather than Wait for CI, which is worth knowing because
+searching the schema for the dashboard's name finds nothing:
+
+```sh
+# read the current state
+railway api 'query($id: String!){ service(id: $id){ repoTriggers{ edges{
+  node{ id branch repository checkSuites } } } } }' --variables '{"id":"<service id>"}'
+
+# turn it on
+railway api 'mutation($id: String!, $input: DeploymentTriggerUpdateInput!){
+  deploymentTriggerUpdate(id: $id, input: $input){ branch checkSuites } }' \
+  --variables '{"id":"<trigger id>","input":{"checkSuites":true}}'
+```
+
+Note the id in the mutation is the **trigger** id from the first query, not the
+service id.
+
+Railway waits on the whole workflow run rather than on single jobs, so a failed
+frontend deploy also holds back the backend. That is the intended trade, the
+two are one release, but it means a Vercel outage or an expired token stalls
+the backend. `continue-on-error: true` on `deploy-frontend` decouples them.
+Railway also stops waiting after two hours, and treats a cancelled run as
+blocking only when no other run on that commit succeeded.
 
 Contract deploys stay manual. The pool holds funds and a bad verifying key is
 not a rollback, it is stranded notes.
@@ -105,8 +129,17 @@ not a rollback, it is stranded notes.
 Setting up CI deploys on a new clone or a new Vercel project needs one secret:
 
 ```sh
-gh secret set VERCEL_TOKEN   # from vercel.com/account/tokens, scoped to the team
+pbpaste | gh secret set VERCEL_TOKEN -R mdla03/bullet
 ```
+
+Create the token at vercel.com/account/tokens, scoped to the team. Pipe the
+value in rather than typing it: `gh secret set <value>` reads its argument as
+the secret's *name*, so passing the token there both leaves it in your shell
+history and stores a uselessly named, empty secret. With no TTY there is no
+masked prompt either, and `gh secret set NAME` on its own reads empty stdin and
+silently stores an empty string. An empty secret is not distinguishable from a
+correct one in the secret list: the workflow log prints `VERCEL_TOKEN: ***`
+when it is populated and blank when it is empty, which is the only way to tell.
 
 The org and project ids are in the workflow already. They are not secrets, and
 `.vercel/` is gitignored so the CLI cannot read them from a CI checkout.
