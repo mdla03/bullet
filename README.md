@@ -126,6 +126,38 @@ blocking only when no other run on that commit succeeded.
 Contract deploys stay manual. The pool holds funds and a bad verifying key is
 not a rollback, it is stranded notes.
 
+### Branch protection
+
+`master` is protected, and the settings are checked in at
+`.github/branch-protection.json` so they can be restored rather than
+remembered. Changes must go through a pull request, the three test jobs must
+pass, and force pushes and branch deletion are blocked. No approving review is
+required: the point is to keep CI in the path, not to add a human gate, so
+`gh pr merge --auto` still merges a collaborator's PR unattended once it is
+green.
+
+`deploy frontend` is deliberately **not** a required check. It only runs on
+push to master, so it never reports on a pull request, and requiring it would
+leave every PR waiting forever.
+
+`strict` is off, so a PR does not have to be rebased onto a moving master. Two
+PRs that are green separately can therefore land broken together. At this size
+the master run catches it and Railway's Wait for CI stops the bad backend
+deploy. A merge queue is the real fix if that ever actually bites.
+
+`enforce_admins` is on, which means there is no bypass for anyone, including
+the repo owner. The local `pre-commit` hook is not a substitute: hooks are not
+installed by cloning, so a fresh clone has no client-side guard at all and the
+server-side rule is the only thing holding. To land an emergency fix, lift
+protection and put it back:
+
+```sh
+gh api -X DELETE repos/mdla03/bullet/branches/master/protection
+# ... push the fix ...
+gh api -X PUT repos/mdla03/bullet/branches/master/protection \
+  --input .github/branch-protection.json
+```
+
 Setting up CI deploys on a new clone or a new Vercel project needs one secret:
 
 ```sh
