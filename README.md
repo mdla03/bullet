@@ -59,7 +59,7 @@ Requirements: Node 20+, pnpm 9. Rust + Soroban toolchain for contracts.
 ### Testnet
 
 - **Contract Address:** [`CCHHGCD33G5STIXEQGYK3IW3FOVJ7YTY4QKDWPMVHBRGIXDIV5OQQYSW`](https://stellar.expert/explorer/testnet/contract/CCHHGCD33G5STIXEQGYK3IW3FOVJ7YTY4QKDWPMVHBRGIXDIV5OQQYSW)
-  — deployed 2026-09-14, wasm `5c2313b1…`. Carries the shielded pool and both
+  Deployed 2026-09-14, wasm `5c2313b1…`. Carries the shielded pool and both
   verifying keys. Supersedes `CB5HPNJO…` and `CC2RTZTQ…`, which are abandoned
   contracts: any claim link older than that deploy points at stranded funds.
 - **Registered tokens**, read from the contract's instance storage on
@@ -164,6 +164,59 @@ With the healthcheck set, a backend deploy that boots and then fails now fails
 the deploy and leaves the old instance serving, rather than taking traffic. The
 consequence worth remembering: a stuck deploy is a reason to check `/health`,
 not only the build log.
+
+### Testing a change before it is production
+
+Each surface gives you a different amount of safety, and the differences
+matter most on the money path.
+
+| Surface | What a PR gets you | Gap |
+| --- | --- | --- |
+| Frontend | a real Vercel preview deployment per PR | cannot exercise deposit or claim, see below |
+| Backend | an ephemeral Railway environment per PR | its URL is not knowable at Vercel build time |
+| Contract | nothing automatic | testnet is the sandbox, deploy a fresh contract per `DEPLOY.md` |
+
+Railway PR environments are on (`prDeploys: true` on the project). Each pull
+request gets its own backend with its own URL, torn down when the PR closes.
+`botPrEnvironments` is deliberately left `false`, so a dependency-bump PR from
+a bot does not spin up a backend.
+
+```sh
+railway api 'mutation($id: String!, $input: ProjectUpdateInput!){
+  projectUpdate(id: $id, input: $input){ prDeploys botPrEnvironments } }' \
+  --variables '{"id":"<project id>","input":{"prDeploys":true}}'
+```
+
+**Two Vercel env facts that cost an hour to establish, so they are written
+down rather than rediscovered.**
+
+`NEXT_PUBLIC_CONTRACT_ID` is scoped to Production only. A preview build has no
+contract id, so the deposit and claim paths cannot be tested on a preview at
+all. That is the single biggest hole in preview testing, because it is exactly
+the code that moves funds. Fixing it means scoping a contract id to Preview,
+and it should be a *different* testnet contract: pointing Preview at the same
+contract as Production means preview testing writes into the pool the demo
+links resolve against.
+
+Vercel environment variables marked **Sensitive are write-only**. They cannot
+be read back through `vercel env pull`, the API, or the dashboard. Reading one
+out of a preview bundle does not work either, even though `NEXT_PUBLIC_*` is
+inlined at build time, because preview deployments sit behind Vercel's
+deployment protection and return an auth page to an anonymous fetch. So
+`NEXT_PUBLIC_RESOLVER_URL` is known to be *set* for Preview and its value is
+not recoverable. If you need to know where Preview points, overwrite it with a
+value you choose rather than trying to discover the current one:
+
+```sh
+vercel env rm NEXT_PUBLIC_RESOLVER_URL preview
+vercel env add NEXT_PUBLIC_RESOLVER_URL preview
+```
+
+`NEXT_PUBLIC_SUPABASE_URL` and the anon key are scoped to Preview *and*
+Production. Unless they hold different values, which Sensitive prevents
+confirming, testing on a preview writes into production data. A separate
+Supabase project for Preview is the fix, and it is the largest of these three
+to carry out.
 
 ### Branch protection
 
