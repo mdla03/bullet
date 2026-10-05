@@ -159,12 +159,28 @@ Each feature has Plan→Code→Test→Review artifacts under `pipeline/<feature>
   These are throwaway benchmark contracts, not the app's contract. For the
   app's contract id read `DEPLOY.md`, or `ZEEKPAY_CONTRACT_ID` in `.env`, which
   is what the backend and frontend actually load.
-- Toxic waste: `*.ptau` (incl. final.ptau 6.8M, pot14_final.ptau 27M), `*.zkey`,
+- Toxic waste: `*.ptau` (incl. final.ptau 6.8M, pot14_final.ptau 27M),
   `*.wtns`, `**/test_snapshots/` are gitignored. Tracked artifacts: tiny JSON
   (claim_vk.json, claim_proof.json, claim_public.json, claim_input.json,
   groth16_soroban.json). Never commit files >1MB without asking.
-- GitHub: private repo `https://github.com/mdla03/bullet` (origin/master).
-  Push with `git push`.
+  **Correction, 2026-10-05: `*.zkey` is not blanket-ignored and is not toxic
+  waste.** `.gitignore` ignores `circuits/build/*.zkey` and then re-includes
+  `circuits/build/claim.zkey` explicitly, because the backend's `/prove` and
+  the browser both need the proving key at runtime. Two copies are tracked at
+  12M each (`circuits/build/`, `frontend/public/circuits/`), so the >1MB rule
+  above already has a standing exception. A Groth16 proving key is public by
+  construction: what must never be committed is the setup entropy, which is the
+  `*.ptau` contributions, not the key derived from them.
+- GitHub: **public** repo `https://github.com/mdla03/bullet` (origin/master).
+  Push with `git push`. This line said "private" until 2026-10-05; the repo is
+  public and staying that way. Anything committed is world-readable, so treat
+  the gitignore as a security boundary rather than tidiness: `.env`, `*.ptau`
+  and `*.wtns` are what keep secrets out, along with the stellar identity
+  keystore, which lives in `~/.config/stellar/` outside the repo.
+- `master` is protected: the `backend + frontend`, `contracts` and `circuits`
+  checks must pass before a merge, and force pushes and deletion are blocked.
+  `deploy frontend` is deliberately not a required check, because it only runs
+  on push to master and would never report on a pull request.
 
 ## 6. Source of truth
 For anything not covered here, read `SPEC.md` (binding P0 scope + design) and the
