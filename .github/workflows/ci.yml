@@ -107,3 +107,46 @@ jobs:
         env:
           CIRCOM: /usr/local/bin/circom
         run: pnpm test
+
+  # Production frontend deploys used to be a `vercel deploy --prod` run from a
+  # laptop, so master and sendbullet.xyz could sit at different commits with
+  # nothing reporting the drift. The Vercel project has no git integration
+  # (every deployment in its history was made by the CLI), so this job is what
+  # makes merging to master actually ship the frontend.
+  #
+  # Gated on all three test jobs, not just node-tests. The frontend ships the
+  # verifying key fixture and the snarkjs witness code, so a circuit or
+  # contract failure is a frontend failure even though no frontend test sees
+  # it. Deploying the money path past a red suite is the thing this is for.
+  deploy-frontend:
+    name: deploy frontend
+    needs: [node-tests, contracts, circuits]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    # Vercel refuses concurrent production deploys to the same project, and the
+    # workflow-level group cancels in-flight runs per ref rather than
+    # serialising them. A deploy that is half done should finish.
+    concurrency:
+      group: deploy-frontend-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      # No pnpm install, no local build: the source is uploaded and Vercel
+      # builds it with the project's own settings (root directory `frontend`,
+      # Next.js preset). Building here instead would mean keeping this file in
+      # sync with those settings for no gain. Uploading from the repo root is
+      # required either way, because the frontend imports @zeekpay/shared
+      # through the pnpm workspace.
+      #
+      # Not secrets, just ids, and .vercel/ is gitignored so the CLI cannot
+      # read them from the checkout. Only VERCEL_TOKEN needs to be configured.
+      # The token goes through the environment, which the CLI reads on its own,
+      # rather than through --token: a flag is visible in the runner's process
+      # list and lands in any shell trace.
+      - name: deploy to production
+        env:
+          VERCEL_ORG_ID: team_91QAQGFqSifU30eMLmyFlZe1
+          VERCEL_PROJECT_ID: prj_LSKA4YAecIpxyl1BZzjlH4oarScv
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: npx --yes vercel@62 deploy --prod --yes

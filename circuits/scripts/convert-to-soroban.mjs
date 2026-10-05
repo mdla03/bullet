@@ -66,19 +66,26 @@ const rsOut = path.join(
     ? `contracts/zeekpay/src/${circuit}_fixture.rs`
     : "contracts/zeekpay/src/groth16_fixture.rs",
 );
-// groth16_fixture.rs is pinned at the 5-public-input shape ON PURPOSE. The
-// deployed contract's derive_public_inputs pushes 5 Fr while claim.circom now
-// has 7, and verifier::verify rejects the mismatch before any pairing math, so
-// the staleness is safe rather than silently broken. Regenerating this file on
-// its own does not fix anything, it just moves the mismatch: see the D1 -> D2
-// handoff in pipeline/circom-circuit/changes.md, which lists the four changes
-// that have to land together.
+// groth16_fixture.rs is pinned at the 7-public-input shape ON PURPOSE: PUBS has
+// 7 entries, IC has 8.
+//
+// The 5-vs-7 mismatch this comment used to describe is resolved. As of
+// 2026-10-05 derive_public_inputs pushes 7 Fr, the fixture carries 7, and the
+// deployed contract's stored claim key has 8 IC entries, so all three agree.
+// The refusal below is still the right default. verifier::verify checks
+// `vk.ic.len() != pubs.len() + 1` before any pairing math, which means a
+// fixture regenerated on its own fails closed rather than verifying something
+// wrong, but it fails closed for every claim: that is an outage, not a
+// safeguard. The four changes that have to land together are listed in the
+// D1 -> D2 handoff in pipeline/circom-circuit/changes.md.
 if (!outPath && !rsPath && !circuit && fs.existsSync(rsOut) && process.env.FORCE_FIXTURE !== "1") {
   console.error(`refusing to overwrite ${rsOut}`);
   console.error("");
-  console.error("It is pinned at 5 public inputs deliberately. Regenerating it");
-  console.error("alone moves the mismatch rather than fixing it. See the D1 -> D2");
-  console.error("handoff in pipeline/circom-circuit/changes.md.");
+  console.error("It is pinned at 7 public inputs deliberately. The contract, the");
+  console.error("circuit and the deployed verifying key all agree on 7 today, and");
+  console.error("regenerating this file alone breaks that agreement: every claim");
+  console.error("then fails closed until set_vk lands. See the D1 -> D2 handoff in");
+  console.error("pipeline/circom-circuit/changes.md.");
   console.error("");
   console.error("If you are doing the coordinated contract + circuit change:");
   console.error("  FORCE_FIXTURE=1 node circuits/scripts/convert-to-soroban.mjs");
