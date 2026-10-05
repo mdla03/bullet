@@ -239,6 +239,26 @@ registered there. And native XLM needs no trustline, so a freshly funded
 depositor can transact immediately. On mainnet slot 0 is USDC and this
 substitution must not carry over.
 
+> **Superseded on this contract, 2026-10-05.** `add_token` has since been run
+> against the same contract, and its instance storage now reads
+> `Token(0) = USDC CBIELTK6…`, `Token(1) = XLM CDLZFC3S…`,
+> `Token(2) = USDT CBL6KD2L…`. Slot 0 is no longer native XLM. The paragraph
+> above stays as the record of what `initialize` did on 2026-09-14, but do not
+> read it as the live token registry. Note that `add_token` overwrites slot 0
+> silently, so the only trustworthy source for the registry is the contract
+> itself:
+>
+> ```sh
+> node --input-type=module -e '
+> import {rpc, xdr, scValToNative} from "@stellar/stellar-sdk";
+> const s = new rpc.Server("https://soroban-testnet.stellar.org");
+> const e = await s.getContractData(process.env.ZEEKPAY_CONTRACT_ID,
+>   xdr.ScVal.scvLedgerKeyContractInstance());
+> for (const kv of e.val.contractData().val().instance().storage())
+>   console.log(scValToNative(kv.key()), "=>", scValToNative(kv.val()));
+> '
+> ```
+
 **Transactions, in the order they were sent**
 
 | Step | Hash | Result |

@@ -74,7 +74,10 @@ three zeroes in the slots being swapped.
   worktrees share this `.git` (`bullet` on master, `bullet-d1` on a feature
   branch), so check `git worktree list` before assuming the branch is wrong.
   Deliberate exception: `ALLOW_MASTER_COMMIT=1 git commit`.
-- **`groth16_fixture.rs` is pinned at 5 public inputs on purpose.**
+- **`groth16_fixture.rs` is pinned at 7 public inputs on purpose.**
+  (`PUBS` has 7 entries, `IC` has 8. Verified against the deployed contract's
+  stored claim key, which has 8 IC entries. The pool join-split key is
+  separate: 9 IC entries, 8 public inputs.)
   `convert-to-soroban.mjs` refuses to regenerate it without `FORCE_FIXTURE=1`.
   It must only change as part of the coordinated contract + circuit + set_vk +
   frontend change described in `pipeline/circom-circuit/changes.md`.

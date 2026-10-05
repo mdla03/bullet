@@ -58,28 +58,28 @@ Requirements: Node 20+, pnpm 9. Rust + Soroban toolchain for contracts.
 
 ### Testnet
 
-- **Contract Address:** [`CB5HPNJOZ3ULPNPRL5FJBHSDCHYWFAWXO6TY3JL6URZSYXMRTFQ3LUIB`](https://stellar.expert/explorer/testnet/contract/CB5HPNJOZ3ULPNPRL5FJBHSDCHYWFAWXO6TY3JL6URZSYXMRTFQ3LUIB)
-- **USDC SAC:** [`CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA`](https://stellar.expert/explorer/testnet/contract/CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA)
-- **XLM SAC:** [`CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC`](https://stellar.expert/explorer/testnet/contract/CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC)
-- **USDT SAC:** [`CBL6KD2LFMLAUKFFWNNXWOXFN73GAXLEA4WMJRLQ5L76DMYTM3KWQVJN`](https://stellar.expert/explorer/testnet/contract/CBL6KD2LFMLAUKFFWNNXWOXFN73GAXLEA4WMJRLQ5L76DMYTM3KWQVJN)
+- **Contract Address:** [`CCHHGCD33G5STIXEQGYK3IW3FOVJ7YTY4QKDWPMVHBRGIXDIV5OQQYSW`](https://stellar.expert/explorer/testnet/contract/CCHHGCD33G5STIXEQGYK3IW3FOVJ7YTY4QKDWPMVHBRGIXDIV5OQQYSW)
+  — deployed 2026-09-14, wasm `5c2313b1…`. Carries the shielded pool and both
+  verifying keys. Supersedes `CB5HPNJO…` and `CC2RTZTQ…`, which are abandoned
+  contracts: any claim link older than that deploy points at stranded funds.
+- **Registered tokens**, read from the contract's instance storage on
+  2026-10-05, not from a deploy log:
+
+  | `token_id` | Asset | SAC |
+  | --- | --- | --- |
+  | 0 | USDC | [`CBIELTK6…`](https://stellar.expert/explorer/testnet/contract/CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA) |
+  | 1 | XLM (native) | [`CDLZFC3S…`](https://stellar.expert/explorer/testnet/contract/CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC) |
+  | 2 | USDT | [`CBL6KD2L…`](https://stellar.expert/explorer/testnet/contract/CBL6KD2LFMLAUKFFWNNXWOXFN73GAXLEA4WMJRLQ5L76DMYTM3KWQVJN) |
+
+  These match `*_SAC_ID` in `.env`, so the asset the app offers is the asset
+  the contract accepts. `DEPLOY.md`'s 2026-09-14 entry describes slot 0 as
+  native XLM; that was true at deploy and is not true now.
+- **Verifying keys:** claim key 8 IC entries (7 public inputs), pool join-split
+  key 9 IC entries (8 public inputs). Both installed and read back on-chain.
 - **Frontend:** Vercel
 - **Backend:** Railway
 
 ![Stellar Expert Testnet](./screenshots/testnet.png)
-
-### Mainnet
-
-Not deployed. Testnet only. Own (non-MPC) trusted setup. Not audited.
-
-## Demo
-
-- Live App: https://sendbullet.xyz
-- Demo Video: https://drive.google.com/file/d/12_d1DzgBn8U-fFspGnOv7UIbnBoLdGGI/view?usp=sharing
-- Pitch Deck: https://canva.link/r7v03xtursupg3u
-
-## Architecture
-
-See `architecture_diagram.svg` for the full system diagram and `bullet_zk_architecture.pdf` for detailed technical documentation.
 
 ### How each piece ships
 
@@ -110,6 +110,20 @@ gh secret set VERCEL_TOKEN   # from vercel.com/account/tokens, scoped to the tea
 
 The org and project ids are in the workflow already. They are not secrets, and
 `.vercel/` is gitignored so the CLI cannot read them from a CI checkout.
+
+### Mainnet
+
+Not deployed. Testnet only. Own (non-MPC) trusted setup. Not audited.
+
+## Demo
+
+- Live App: https://sendbullet.xyz
+- Demo Video: https://drive.google.com/file/d/12_d1DzgBn8U-fFspGnOv7UIbnBoLdGGI/view?usp=sharing
+- Pitch Deck: https://canva.link/r7v03xtursupg3u
+
+## Architecture
+
+See `architecture_diagram.svg` for the full system diagram and `bullet_zk_architecture.pdf` for detailed technical documentation.
 
 ### How the ZK proof works
 

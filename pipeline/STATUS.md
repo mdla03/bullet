@@ -1,6 +1,26 @@
 # ZeekPay — Project Status (session handoff)
 
-Last updated: 2026-07-01. Demo deadline: 2026-07-07.
+> **Historical. Frozen at 2026-07-01, reconciled 2026-10-05.**
+>
+> This was a session handoff written for a deadline that has passed, and it is
+> kept for the rationale in section 1 and the feature log in section 2. It is
+> not a description of what is deployed. Three separate documents each carried
+> their own copy of the contract address and they had drifted to three
+> different contracts, so the addresses here now point at their source instead
+> of repeating it.
+>
+> | For | Read |
+> | --- | --- |
+> | What is deployed right now | `DEPLOY.md`, newest dated section |
+> | Public-facing addresses | `README.md` under Deployment |
+> | Binding scope and design | `SPEC.md` |
+> | Latest end-to-end validation | `d4-validation.md` |
+>
+> Known to be out of date below, beyond the addresses: the product is now
+> called Bullet, section 1's claim public inputs grew past 4, section 3 is
+> wrong, and section 2 stops at the e2e-demo feature. The shielded pool,
+> multi-token support and everything in D3/D4 came later.
+
 ZeekPay = ZK-private payment rail on Stellar; pay an X handle / email without
 exposing the sender↔recipient link on-chain. Fixed-denomination notes (1/10/50/
 100 USDC), Tornado-style amount-unlinkability, NOT encrypted balances.
@@ -78,7 +98,12 @@ exposing the sender↔recipient link on-chain. Fixed-denomination notes (1/10/50
 - `53b486c` **fix: ROOT path** — `prove.ts` + `commitment.ts` used 4 `..` traversals
   (landed above repo root); corrected to 3.
 - (pending commit) **e2e-demo** — Contract deployed + VK set on testnet.
-  Contract: `CC2RTZTQKONWFUFHZA3GT3VJGAQ2YCSEHFLIWMEZXQH65WQ5AWU5FW5R`.
+  Contract: `CC2RTZTQKONWFUFHZA3GT3VJGAQ2YCSEHFLIWMEZXQH65WQ5AWU5FW5R`
+  — **superseded, do not use.** That was the contract as of 2026-07-01. It has
+  been replaced twice since, most recently by the fresh deploy on 2026-09-14,
+  and the contract that is live now carries the shielded pool and both
+  verifying keys. `DEPLOY.md` has the current id; this line is kept as the
+  record of what e2e-demo actually shipped against.
   XLM SAC: `CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC`.
   POST /prove + POST /post-root verified working end-to-end.
   Browser demo requires Freighter + funded testnet account.
@@ -131,6 +156,9 @@ Each feature has Plan→Code→Test→Review artifacts under `pipeline/<feature>
 - Deployed bench contracts (testnet, reference only):
   verifier `CCNJPUHMJEIJC4IKONJHBZ2RQ4GZQ5HR7BQMLWWQW6HD4SW3IYKAVOBT`;
   Poseidon-merkle bench `CDQIYJYAVR3OWQC32V4NZOHERIIVMJEPKH32RKWUGHV6M2NQI3WYTQWV`.
+  These are throwaway benchmark contracts, not the app's contract. For the
+  app's contract id read `DEPLOY.md`, or `ZEEKPAY_CONTRACT_ID` in `.env`, which
+  is what the backend and frontend actually load.
 - Toxic waste: `*.ptau` (incl. final.ptau 6.8M, pot14_final.ptau 27M), `*.zkey`,
   `*.wtns`, `**/test_snapshots/` are gitignored. Tracked artifacts: tiny JSON
   (claim_vk.json, claim_proof.json, claim_public.json, claim_input.json,

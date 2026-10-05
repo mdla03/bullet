@@ -87,7 +87,7 @@ pub enum DataKey {
     RootRing(u32), // ring buffer slot -> root, for eviction
     RootHead,      // next ring slot
     // Shielded pool. Separate verifying key from Vk, because the join-split
-    // circuit has 8 public inputs against claim's 6, so one key cannot serve
+    // circuit has 8 public inputs against claim's 7, so one key cannot serve
     // both. Appended last so existing stored entries keep their encoding.
     PoolVk,
 }
