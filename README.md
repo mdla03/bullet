@@ -126,6 +126,45 @@ blocking only when no other run on that commit succeeded.
 Contract deploys stay manual. The pool holds funds and a bad verifying key is
 not a rollback, it is stranded notes.
 
+### Railway service settings
+
+Two settings live on the Railway service rather than in this repo, so a
+rebuilt or recreated service loses both silently. Neither has a file to
+restore from, which is the reason they are written down here.
+
+| Setting | Value | What breaks without it |
+| --- | --- | --- |
+| `checkSuites` (Wait for CI) | `true` on the `master` trigger | Railway builds on push and ignores the test result |
+| `healthcheckPath` | `/health` | traffic shifts to the new deployment before it is known to work |
+
+`/health` is deliberately dependency-free: it returns `{"ok":true}` without
+touching Supabase or the RPC, so a database blip cannot fail a deploy. The
+diagnostic fields behind it are gated on `HEALTH_DEBUG=1`. Point the
+healthcheck at anything heavier and an outage in a dependency becomes a failed
+deploy.
+
+Both are readable and settable through the API. The service and environment
+ids come from `railway status`:
+
+```sh
+# read both
+railway api 'query($id: String!, $eid: String!){
+  serviceInstance(serviceId: $id, environmentId: $eid){
+    healthcheckPath healthcheckTimeout } }' \
+  --variables '{"id":"<service id>","eid":"<environment id>"}'
+
+# set the healthcheck
+railway api 'mutation($eid: String!, $sid: String!, $input: ServiceInstanceUpdateInput!){
+  serviceInstanceUpdate(environmentId: $eid, serviceId: $sid, input: $input) }' \
+  --variables '{"eid":"<environment id>","sid":"<service id>",
+                "input":{"healthcheckPath":"/health"}}'
+```
+
+With the healthcheck set, a backend deploy that boots and then fails now fails
+the deploy and leaves the old instance serving, rather than taking traffic. The
+consequence worth remembering: a stuck deploy is a reason to check `/health`,
+not only the build log.
+
 ### Branch protection
 
 `master` is protected, and the settings are checked in at
