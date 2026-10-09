@@ -17,6 +17,7 @@
     "@stellar/stellar-sdk": "^16.0.1",
     "@supabase/ssr": "^0.12.0",
     "@supabase/supabase-js": "^2.110.0",
+    "@vercel/analytics": "^2.0.1",
     "@walletconnect/sign-client": "^2.25.0",
     "@zeekpay/shared": "workspace:*",
     "ed2curve": "^0.3.0",
