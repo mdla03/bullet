@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Analytics } from "@vercel/analytics/next";
 import type { SVGProps } from "react";
 import { Geist_Mono, Inter } from "next/font/google";
 import Link from "next/link";
@@ -61,6 +62,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </nav>
           </div>
         </footer>
+        <Analytics />
       </body>
     </html>
   );
